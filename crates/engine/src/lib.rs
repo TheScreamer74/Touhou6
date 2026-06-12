@@ -1,12 +1,15 @@
 //! Minimal wgpu sprite renderer: textured quads in a 640x480 logical space,
 //! headless render-to-image for verification plus a winit window mode.
 
+use std::collections::HashSet;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use bytemuck::{Pod, Zeroable};
 use winit::application::ApplicationHandler;
-use winit::event::WindowEvent;
+use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
+use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
 
 pub const SCREEN_W: u32 = 640;
@@ -312,14 +315,26 @@ impl Engine {
         data
     }
 
-    /// Open a window and draw the given static scene each frame.
-    pub fn run_window(self, title: &str, cmds: Vec<DrawCmd>, textures: Vec<Texture>) {
+    /// Open a window and run the game loop. `update` is called at a fixed
+    /// 60 Hz regardless of display refresh rate (the original game tied
+    /// logic speed to frame timing — this is the stable-FPS fix). Returns
+    /// the frame's draw commands; `Frame::quit` exits.
+    pub fn run_game(
+        self,
+        title: &str,
+        textures: Vec<Texture>,
+        update: impl FnMut(&Input) -> Frame + 'static,
+    ) {
         let event_loop = EventLoop::new().expect("event loop");
         let mut app = App {
             engine: self,
             title: title.to_string(),
-            cmds,
+            cmds: Vec::new(),
             textures,
+            update: Box::new(update),
+            input: Input::default(),
+            last_tick: Instant::now(),
+            accumulator: Duration::ZERO,
             window: None,
             surface: None,
             pipeline: None,
@@ -328,11 +343,67 @@ impl Engine {
     }
 }
 
+/// Game-relevant keys, mapped from physical keyboard input.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Key {
+    Up,
+    Down,
+    Left,
+    Right,
+    Shoot, // Z
+    Bomb,  // X
+    Focus, // Shift
+    Pause, // Esc
+    Enter,
+}
+
+fn map_key(code: KeyCode) -> Option<Key> {
+    Some(match code {
+        KeyCode::ArrowUp => Key::Up,
+        KeyCode::ArrowDown => Key::Down,
+        KeyCode::ArrowLeft => Key::Left,
+        KeyCode::ArrowRight => Key::Right,
+        KeyCode::KeyZ => Key::Shoot,
+        KeyCode::KeyX => Key::Bomb,
+        KeyCode::ShiftLeft | KeyCode::ShiftRight => Key::Focus,
+        KeyCode::Escape => Key::Pause,
+        KeyCode::Enter => Key::Enter,
+        _ => return None,
+    })
+}
+
+#[derive(Default)]
+pub struct Input {
+    held: HashSet<Key>,
+    pressed: HashSet<Key>,
+}
+
+impl Input {
+    pub fn held(&self, key: Key) -> bool {
+        self.held.contains(&key)
+    }
+    /// True only on the tick after the key went down.
+    pub fn pressed(&self, key: Key) -> bool {
+        self.pressed.contains(&key)
+    }
+}
+
+pub struct Frame {
+    pub cmds: Vec<DrawCmd>,
+    pub quit: bool,
+}
+
+const TICK: Duration = Duration::from_nanos(1_000_000_000 / 60);
+
 struct App {
     engine: Engine,
     title: String,
     cmds: Vec<DrawCmd>,
     textures: Vec<Texture>,
+    update: Box<dyn FnMut(&Input) -> Frame>,
+    input: Input,
+    last_tick: Instant,
+    accumulator: Duration,
     window: Option<Arc<Window>>,
     surface: Option<wgpu::Surface<'static>>,
     pipeline: Option<wgpu::RenderPipeline>,
@@ -369,12 +440,49 @@ impl ApplicationHandler for App {
         self.pipeline = Some(self.engine.make_pipeline(format));
         self.surface = Some(surface);
         self.window = Some(window);
+        self.last_tick = Instant::now();
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::KeyboardInput {
+                event: KeyEvent { physical_key: PhysicalKey::Code(code), state, repeat: false, .. },
+                ..
+            } => {
+                if let Some(key) = map_key(code) {
+                    match state {
+                        ElementState::Pressed => {
+                            self.input.held.insert(key);
+                            self.input.pressed.insert(key);
+                        }
+                        ElementState::Released => {
+                            self.input.held.remove(&key);
+                        }
+                    }
+                }
+            }
             WindowEvent::RedrawRequested => {
+                // Fixed-timestep logic: run 60 Hz ticks to catch up with
+                // wall time, render the latest state once.
+                let now = Instant::now();
+                self.accumulator += now - self.last_tick;
+                self.last_tick = now;
+                // Cap catch-up so a stall doesn't fast-forward the game.
+                if self.accumulator > TICK * 4 {
+                    self.accumulator = TICK * 4;
+                }
+                while self.accumulator >= TICK {
+                    self.accumulator -= TICK;
+                    let frame = (self.update)(&self.input);
+                    self.input.pressed.clear();
+                    if frame.quit {
+                        event_loop.exit();
+                        return;
+                    }
+                    self.cmds = frame.cmds;
+                }
+
                 let (Some(surface), Some(pipeline)) = (&self.surface, &self.pipeline) else {
                     return;
                 };

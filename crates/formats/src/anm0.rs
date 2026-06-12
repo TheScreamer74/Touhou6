@@ -5,7 +5,7 @@
 //! texture names, 20-byte sprite records and bytecode scripts. Entries
 //! chain through `next_offset`. Offsets are relative to the entry start.
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Sprite {
     pub index: u32,
     pub x: f32,
@@ -14,7 +14,7 @@ pub struct Sprite {
     pub height: f32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Instr {
     pub time: u16,
     pub opcode: u8,
