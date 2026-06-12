@@ -274,6 +274,7 @@ pub enum WorldEvent {
     BulletCancel,
     BossSet(bool),
     EnemyDeath([f32; 2]),
+    DropItem([f32; 2], i32),
 }
 
 /// Per-frame context the VM needs from the game.
@@ -288,6 +289,7 @@ pub struct World {
     pub pending_spawns: Vec<SpawnReq>,
     pub kill_trash: bool,
     pub boss_present: bool,
+    pub power: i32,
 }
 
 impl World {
@@ -1056,7 +1058,22 @@ impl Enemy {
             116 => self.timer_cb_sub = instr.arg_i32(0),
             117 => self.interactable = instr.arg_i32(0) != 0,
             118 => {} // EFFECTPARTICLE — effect system pending
-            119 => {} // DROPITEMS — item system pending
+            119 => {
+                // DROPITEMS (exact port: big power first unless maxed)
+                let n = instr.arg_i32(0);
+                for i in 0..n {
+                    let pos = [
+                        self.pos[0] + world.rng.f32_in_range(144.0) - 72.0,
+                        self.pos[1] + world.rng.f32_in_range(144.0) - 72.0,
+                    ];
+                    let kind = if world.power < 128 {
+                        if i == 0 { 2 } else { 0 } // big power / small power
+                    } else {
+                        1 // point
+                    };
+                    world.events.push(WorldEvent::DropItem(pos, kind));
+                }
+            }
             120 => {} // ANMFLAGROTATION
             121 | 122 => {} // EXINSCALL / EXINSREPEAT — stage-specific extras
             123 => {
@@ -1064,7 +1081,12 @@ impl Enemy {
                 let v = self.get_i32(instr.arg_i32(0), world);
                 self.ctx.time += v;
             }
-            124 => {} // DROPITEMID
+            124 => {
+                // DROPITEMID
+                world
+                    .events
+                    .push(WorldEvent::DropItem([self.pos[0], self.pos[1]], instr.arg_i32(0)));
+            }
             125 => {} // STDUNPAUSE
             126 => {} // BOSSSETLIFECOUNT (gui)
             127 => {} // DEBUGWATCH

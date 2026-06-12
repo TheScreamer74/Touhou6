@@ -88,9 +88,9 @@ struct Game {
     assets: StageAssets,
 }
 
-const SFX_NAMES: [&str; 10] = [
+const SFX_NAMES: [&str; 12] = [
     "plst00", "enep00", "enep01", "pldead00", "tan00", "tan01", "tan02", "damage00", "power1",
-    "cat00",
+    "cat00", "item00", "powerup",
 ];
 
 impl Game {
@@ -101,6 +101,22 @@ impl Game {
     }
 
     fn update(&mut self, input: &Input) -> Frame {
+        if std::env::var_os("TH06_TICKRATE").is_some() {
+            use std::sync::atomic::{AtomicU32, Ordering};
+            use std::sync::Mutex;
+            use std::time::Instant;
+            static COUNT: AtomicU32 = AtomicU32::new(0);
+            static LAST: Mutex<Option<Instant>> = Mutex::new(None);
+            let n = COUNT.fetch_add(1, Ordering::Relaxed) + 1;
+            let now = Instant::now();
+            let mut last = LAST.lock().unwrap();
+            let prev = last.get_or_insert(now);
+            if now.duration_since(*prev).as_secs_f32() >= 1.0 {
+                eprintln!("ticks/sec: {n}");
+                COUNT.store(0, Ordering::Relaxed);
+                *last = Some(now);
+            }
+        }
         match &mut self.scene {
             Scene::Title => {
                 let (cmds, action) = self.title.update(input);

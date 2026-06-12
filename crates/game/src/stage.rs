@@ -63,6 +63,18 @@ struct Shot {
     needle: bool,
 }
 
+/// Falling collectible (ItemManager port, simplified physics).
+struct Item {
+    pos: [f32; 2],
+    vy: f32,
+    kind: i32, // 0 power small, 1 point, 2 power big, 3 bomb, 4 full, 5 life
+}
+
+/// Item drop pattern for ITEM_RANDOM_ITEM enemies (g_RandomItems).
+const RANDOM_ITEMS: [i32; 32] = [
+    0, 0, 1, 0, 1, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 1, 1, 0, 2,
+];
+
 enum PlayerState {
     Alive,
     Dead(u32),
@@ -119,6 +131,10 @@ pub struct Stage {
     fire_cd: u32,
     state: PlayerState,
     shots: Vec<Shot>,
+    items: Vec<Item>,
+    score: i64,
+    rand_item_table: usize,
+    rand_item_spawn: usize,
     spell_active: bool,
     boss_bgm_started: bool,
     pub events: Vec<Event>,
@@ -142,6 +158,7 @@ impl Stage {
                 pending_spawns: Vec::new(),
                 kill_trash: false,
                 boss_present: false,
+                power: 0,
             },
             enemies: Vec::new(),
             anims: Vec::new(),
@@ -158,6 +175,10 @@ impl Stage {
             fire_cd: 0,
             state: PlayerState::Alive,
             shots: Vec::new(),
+            items: Vec::new(),
+            score: 0,
+            rand_item_table: 0,
+            rand_item_spawn: 0,
             spell_active: false,
             boss_bgm_started: false,
             events: vec![Event::Bgm("th06_02.wav")],
@@ -209,6 +230,7 @@ impl Stage {
         self.update_enemies();
         self.update_shots();
         self.update_bullets();
+        self.update_items();
         self.collide();
         self.drain_world_events();
 
@@ -295,7 +317,7 @@ impl Stage {
                             let (life, item, score) = if with_args {
                                 (t.life, t.item, t.score)
                             } else {
-                                (-1, -2, -1)
+                                (-1, -1, -1) // ITEM_RANDOM_ITEM
                             };
                             let mirror = matches!(t.opcode, 2 | 3 | 6 | 7);
                             self.spawn(SpawnReq { sub: t.arg0, pos, life, item, score, mirror });
@@ -311,7 +333,7 @@ impl Stage {
                             }
                         }
                     }
-                    11 => {} // set power
+                    11 => self.world.power = t.arg0, // set power
                     12 => {
                         // Wait for the boss slot to clear.
                         if self.enemies.iter().any(|e| e.is_boss && e.occupied) {
@@ -429,8 +451,14 @@ impl Stage {
         self.fire_cd = self.fire_cd.saturating_sub(1);
         if input.held(Key::Shoot) && self.fire_cd == 0 {
             self.fire_cd = 4;
+            // Stream count grows with power, approximating Reimu A tiers.
+            let power = self.world.power;
             if focus {
-                for dx in [-5.0, 5.0] {
+                let mut lanes = vec![-5.0, 5.0];
+                if power >= 32 {
+                    lanes.extend([-11.0, 11.0]);
+                }
+                for dx in lanes {
                     self.shots.push(Shot {
                         pos: [self.pos[0] + dx, self.pos[1] - 20.0],
                         vel: [0.0, -14.0],
@@ -438,7 +466,14 @@ impl Stage {
                     });
                 }
             } else {
-                for (dx, vx) in [(-8.0, -0.6), (8.0, 0.6)] {
+                let mut lanes = vec![(-8.0, -0.6), (8.0, 0.6)];
+                if power >= 8 {
+                    lanes.extend([(-16.0, -1.8), (16.0, 1.8)]);
+                }
+                if power >= 48 {
+                    lanes.extend([(-24.0, -3.0), (24.0, 3.0)]);
+                }
+                for (dx, vx) in lanes {
                     self.shots.push(Shot {
                         pos: [self.pos[0] + dx, self.pos[1] - 16.0],
                         vel: [vx, -12.0],
@@ -597,12 +632,17 @@ impl Stage {
         self.shots.retain(|s| s.pos[1] > -90.0);
 
         // Enemy deaths.
+        let mut drops: Vec<([f32; 2], i16)> = Vec::new();
         for i in 0..self.enemies.len() {
             let e = &mut self.enemies[i];
             if e.occupied && e.interactable && e.life <= 0 {
+                drops.push(([e.pos[0], e.pos[1]], e.item_drop));
                 e.on_death(&self.ecl, &mut self.world);
                 self.events.push(Event::Sfx("enep00"));
             }
+        }
+        for (pos, drop) in drops {
+            self.spawn_drop(pos, drop);
         }
         self.flush_spawns();
 
@@ -661,6 +701,65 @@ impl Stage {
         }
     }
 
+    fn spawn_drop(&mut self, pos: [f32; 2], drop: i16) {
+        let kind = match drop {
+            -2 => return,            // ITEM_NO_ITEM
+            -1 => {
+                // ITEM_RANDOM_ITEM: every third enemy drops, following the
+                // fixed pattern table.
+                self.rand_item_spawn += 1;
+                if (self.rand_item_spawn - 1) % 3 != 0 {
+                    return;
+                }
+                let k = RANDOM_ITEMS[self.rand_item_table];
+                self.rand_item_table = (self.rand_item_table + 1) % RANDOM_ITEMS.len();
+                k
+            }
+            k => k as i32,
+        };
+        self.items.push(Item { pos, vy: -2.2, kind });
+    }
+
+    fn update_items(&mut self) {
+        let player = self.pos;
+        let alive = matches!(self.state, PlayerState::Alive);
+        let magnet = alive && self.world.power >= 128 && player[1] < 128.0;
+        let mut collected: Vec<i32> = Vec::new();
+        for it in &mut self.items {
+            if magnet {
+                let dx = player[0] - it.pos[0];
+                let dy = player[1] - it.pos[1];
+                let len = (dx * dx + dy * dy).sqrt().max(0.001);
+                it.pos[0] += dx / len * 8.0;
+                it.pos[1] += dy / len * 8.0;
+            } else {
+                it.vy = (it.vy + 0.04).min(2.5);
+                it.pos[1] += it.vy;
+            }
+            if alive {
+                let dx = player[0] - it.pos[0];
+                let dy = player[1] - it.pos[1];
+                if dx * dx + dy * dy < 18.0 * 18.0 {
+                    collected.push(it.kind);
+                    it.kind = -100; // mark
+                }
+            }
+        }
+        self.items.retain(|it| it.kind != -100 && it.pos[1] < FIELD_H + 16.0);
+        for kind in collected {
+            match kind {
+                0 => self.world.power = (self.world.power + 1).min(128),
+                2 => self.world.power = (self.world.power + 8).min(128),
+                4 => self.world.power = 128,
+                1 => self.score += 10000,
+                3 => self.bombs = (self.bombs + 1).min(8),
+                5 => self.lives = (self.lives + 1).min(8),
+                _ => {}
+            }
+            self.events.push(Event::Sfx("item00"));
+        }
+    }
+
     fn cancel_lasers(&mut self) {
         for l in &mut self.world.lasers {
             if l.in_use && l.state < 2 {
@@ -709,6 +808,11 @@ impl Stage {
                 }
                 WorldEvent::EnemyDeath(_pos) => {
                     self.events.push(Event::Sfx("enep00"));
+                }
+                WorldEvent::DropItem(pos, kind) => {
+                    if kind >= 0 {
+                        self.items.push(Item { pos, vy: -2.2, kind });
+                    }
                 }
             }
         }
@@ -762,6 +866,24 @@ impl Stage {
                 [FIELD_X + 8.0, FIELD_Y + 4.0, (FIELD_W - 16.0) * frac, 4.0],
                 [0.9, 0.15, 0.15, 0.9],
             ));
+        }
+
+        // Items (etama3 sprites 0..6, index = item kind).
+        let [btw, bth] = self.bullet_tex_size;
+        for it in &self.items {
+            let Some(sp) = self.bullet_sprites.get(&(it.kind as u32)) else { continue };
+            cmds.push(DrawCmd {
+                tex: TEX_BULLET,
+                dst: [
+                    FIELD_X + it.pos[0] - sp.width / 2.0,
+                    FIELD_Y + it.pos[1] - sp.height / 2.0,
+                    sp.width,
+                    sp.height,
+                ],
+                src: [sp.x / btw, sp.y / bth, (sp.x + sp.width) / btw, (sp.y + sp.height) / bth],
+                tint: [1.0, 1.0, 1.0, 1.0],
+                rot: 0.0,
+            });
         }
 
         // Player shots.
