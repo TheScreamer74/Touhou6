@@ -27,7 +27,31 @@ fn basename(path: &str) -> &str {
     path.rsplit('/').next().unwrap()
 }
 
+/// Write panics (message, location, backtrace) to logs/crash-<timestamp>.log
+/// in addition to stderr, so window-mode crashes leave a trace.
+fn install_crash_logger() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let report = format!(
+            "th06 crash report\ntime: {timestamp} (unix)\nversion: {}\n\n{info}\n\nbacktrace:\n{backtrace}\n",
+            env!("CARGO_PKG_VERSION"),
+        );
+        let _ = std::fs::create_dir_all("logs");
+        let path = format!("logs/crash-{timestamp}.log");
+        if std::fs::write(&path, &report).is_ok() {
+            eprintln!("crash report written to {path}");
+        }
+        default_hook(info);
+    }));
+}
+
 fn main() {
+    install_crash_logger();
     let mut args = std::env::args().skip(1);
     let mut screenshot: Option<String> = None;
     let mut frames = 120u32;

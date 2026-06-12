@@ -252,13 +252,18 @@ impl Engine {
 
     fn vertex_buffer(&self, cmds: &[DrawCmd]) -> wgpu::Buffer {
         let verts = Self::build_vertices(cmds);
+        // Zero-size buffers cannot be sliced; keep a minimum allocation so
+        // an empty scene still renders (as a plain clear).
+        let size = (verts.len() * std::mem::size_of::<Vertex>()).max(std::mem::size_of::<Vertex>());
         let buf = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
-            size: (verts.len() * std::mem::size_of::<Vertex>()) as u64,
+            size: size as u64,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        self.queue.write_buffer(&buf, 0, bytemuck::cast_slice(&verts));
+        if !verts.is_empty() {
+            self.queue.write_buffer(&buf, 0, bytemuck::cast_slice(&verts));
+        }
         buf
     }
 
@@ -471,6 +476,11 @@ impl ApplicationHandler for App {
                 // Cap catch-up so a stall doesn't fast-forward the game.
                 if self.accumulator > TICK * 4 {
                     self.accumulator = TICK * 4;
+                }
+                // The first redraw can arrive before any tick is due;
+                // run one anyway so there is a scene to draw.
+                if self.cmds.is_empty() && self.accumulator < TICK {
+                    self.accumulator = TICK;
                 }
                 while self.accumulator >= TICK {
                     self.accumulator -= TICK;
