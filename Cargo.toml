@@ -1,0 +1,7 @@
+[workspace]
+resolver = "2"
+members = ["crates/formats", "crates/engine", "crates/game"]
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
