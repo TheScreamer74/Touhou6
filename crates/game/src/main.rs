@@ -220,6 +220,14 @@ fn main() {
     // tintable text.
     let (rgba, w, h) = compose_rgba(&inn["ascii_a.png"], Some(inn["ascii_a.png"].as_slice()));
     textures.push(engine.create_texture(&rgba, w, h));
+    // Slots 9-10: dialogue portraits (Reimu, Rumia).
+    for face in ["face00a", "face01a"] {
+        let (rgba, w, h) = compose_rgba(
+            &cm[&format!("{face}.png")],
+            Some(cm[&format!("{face}_a.png")].as_slice()),
+        );
+        textures.push(engine.create_texture(&rgba, w, h));
+    }
 
     let title = Title::new(entry, 0, 1);
 

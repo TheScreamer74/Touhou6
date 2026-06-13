@@ -26,6 +26,8 @@ pub const TEX_RUMIA: usize = 5;
 pub const TEX_FRONT: usize = 6;
 pub const TEX_WHITE: usize = 7;
 pub const TEX_ASCII: usize = 8;
+pub const TEX_FACE_PLAYER: usize = 9; // face00a (Reimu)
+pub const TEX_FACE_BOSS: usize = 10; // face01a (Rumia)
 
 pub enum Event {
     Sfx(&'static str),
@@ -86,6 +88,11 @@ struct Dialogue {
     ecl_resumed: bool,
     lines: [String; 2],
     line_colors: [usize; 2],
+    /// Which portrait (0 player / 1 boss) spoke last, -1 none.
+    portrait_active: i32,
+    /// Whether each portrait has appeared, and its chosen expression sprite.
+    portrait_shown: [bool; 2],
+    portrait_expr: [usize; 2],
 }
 
 impl Default for Dialogue {
@@ -98,6 +105,9 @@ impl Default for Dialogue {
             ecl_resumed: false,
             lines: [String::new(), String::new()],
             line_colors: [0, 0],
+            portrait_active: -1,
+            portrait_shown: [false, false],
+            portrait_expr: [0, 0],
         }
     }
 }
@@ -163,6 +173,10 @@ pub struct Stage {
     rand_item_table: usize,
     rand_item_spawn: usize,
     spell_active: bool,
+    spell_name: String,
+    spell_capturing: bool,
+    spell_result: u32,
+    spell_captured: bool,
     boss_bgm_started: bool,
     msg: Msg,
     dialogue: Dialogue,
@@ -209,6 +223,10 @@ impl Stage {
             rand_item_table: 0,
             rand_item_spawn: 0,
             spell_active: false,
+            spell_name: String::new(),
+            spell_capturing: false,
+            spell_result: 0,
+            spell_captured: false,
             boss_bgm_started: false,
             msg,
             dialogue: Dialogue::default(),
@@ -258,6 +276,7 @@ impl Stage {
             self.run_dialogue(input);
         }
         self.invuln = self.invuln.saturating_sub(1);
+        self.spell_result = self.spell_result.saturating_sub(1);
         self.world.player_pos = self.pos;
 
         self.run_timeline();
@@ -538,6 +557,7 @@ impl Stage {
             self.bombs -= 1;
             self.bombing = 120;
             self.invuln = self.invuln.max(180);
+            self.spell_capturing = false; // bombing forfeits the capture
             self.events.push(Event::Sfx("power1"));
         }
     }
@@ -734,6 +754,7 @@ impl Stage {
         if hit_bullet || hit_body || hit_laser {
             self.lives -= 1;
             self.bombs = 3;
+            self.spell_capturing = false; // dying forfeits the capture
             self.world.bullets.clear();
             self.cancel_lasers();
             self.state = PlayerState::Dead(60);
@@ -786,6 +807,16 @@ impl Stage {
                         d.frames_pause += 1;
                         return; // time frozen during the pause
                     }
+                }
+                1 | 2 => {
+                    // PORTRAITANMSCRIPT / PORTRAITANMSPRITE: pick portrait
+                    // side and expression. anmScriptIdx's parity selects one
+                    // of the two expression sprites in the face sheet.
+                    let idx = i.arg_i16(0).clamp(0, 1) as usize;
+                    let expr = (i.arg_i16(2).max(0) as usize) & 1;
+                    d.portrait_shown[idx] = true;
+                    d.portrait_expr[idx] = expr;
+                    d.portrait_active = idx as i32;
                 }
                 6 => d.ecl_resumed = true, // ECLRESUME
                 7 => {
@@ -896,12 +927,18 @@ impl Stage {
                     };
                     self.events.push(Event::Sfx(name));
                 }
-                WorldEvent::SpellcardStart(_name) => {
+                WorldEvent::SpellcardStart(name) => {
                     self.spell_active = true;
+                    self.spell_name = name;
+                    self.spell_capturing = true;
                     self.world.bullets.clear();
                     self.events.push(Event::Sfx("cat00"));
                 }
                 WorldEvent::SpellcardEnd => {
+                    if self.spell_active {
+                        self.spell_result = 120;
+                        self.spell_captured = self.spell_capturing;
+                    }
                     self.spell_active = false;
                     self.world.bullets.clear();
                 }
@@ -1092,8 +1129,74 @@ impl Stage {
             );
         }
 
+        // Spellcard name banner (right-aligned near the top of the field).
+        if self.spell_active && !self.spell_name.is_empty() {
+            let w = self.spell_name.len() as f32 * 14.0 * 0.75;
+            draw_text(
+                &mut cmds,
+                [FIELD_X + FIELD_W - w - 8.0, FIELD_Y + 30.0],
+                14.0,
+                [1.0, 0.85, 0.9, 0.95],
+                &self.spell_name,
+            );
+            // "Spell Card" marker to the left.
+            draw_text(
+                &mut cmds,
+                [FIELD_X + 8.0, FIELD_Y + 30.0],
+                12.0,
+                [0.8, 0.8, 1.0, 0.8],
+                "Spell Card",
+            );
+        }
+
+        // Capture / failure result flash.
+        if self.spell_result > 0 {
+            let (text, tint) = if self.spell_captured {
+                ("Spell Card Captured!", [0.6, 1.0, 0.6, 1.0])
+            } else {
+                ("Spell Card Bonus Failed", [1.0, 0.6, 0.6, 1.0])
+            };
+            let w = text.len() as f32 * 14.0 * 0.75;
+            draw_text(
+                &mut cmds,
+                [FIELD_X + FIELD_W / 2.0 - w / 2.0, FIELD_Y + FIELD_H / 2.0],
+                14.0,
+                tint,
+                text,
+            );
+        }
+
         // Dialogue box.
         if self.dialogue.active && (!self.dialogue.lines[0].is_empty() || !self.dialogue.lines[1].is_empty()) {
+            // Portraits: player (Reimu) lower-left, boss (Rumia) lower-right,
+            // the active speaker at full brightness. Each face sheet holds
+            // two 128x256 expression columns.
+            let pw = 96.0;
+            let ph = 192.0;
+            let py = FIELD_Y + FIELD_H - 80.0 - ph;
+            for (idx, tex) in [(0usize, TEX_FACE_PLAYER), (1usize, TEX_FACE_BOSS)] {
+                if !self.dialogue.portrait_shown[idx] {
+                    continue;
+                }
+                let lit = self.dialogue.portrait_active == idx as i32;
+                let c = if lit { 1.0 } else { 0.45 };
+                let expr = self.dialogue.portrait_expr[idx] as f32;
+                let u0 = expr * 128.0 / 256.0;
+                let (px, flip_u0, flip_u1) = if idx == 0 {
+                    (FIELD_X + 4.0, u0, u0 + 128.0 / 256.0)
+                } else {
+                    // Mirror the boss portrait to face left.
+                    (FIELD_X + FIELD_W - pw - 4.0, u0 + 128.0 / 256.0, u0)
+                };
+                cmds.push(DrawCmd {
+                    tex,
+                    dst: [px, py, pw, ph],
+                    src: [flip_u0, 0.0, flip_u1, 1.0],
+                    tint: [c, c, c, 1.0],
+                    rot: 0.0,
+                });
+            }
+
             let box_y = FIELD_Y + FIELD_H - 80.0;
             cmds.push(rect([FIELD_X + 8.0, box_y, FIELD_W - 16.0, 64.0], [0.0, 0.0, 0.0, 0.65]));
             for (li, text) in self.dialogue.lines.iter().enumerate() {
