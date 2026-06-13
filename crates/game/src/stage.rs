@@ -84,7 +84,6 @@ struct Dialogue {
     timer: u16,
     frames_pause: u16,
     ecl_resumed: bool,
-    skippable: bool,
     lines: [String; 2],
     line_colors: [usize; 2],
 }
@@ -97,7 +96,6 @@ impl Default for Dialogue {
             timer: 0,
             frames_pause: 0,
             ecl_resumed: false,
-            skippable: true,
             lines: [String::new(), String::new()],
             line_colors: [0, 0],
         }
@@ -754,12 +752,6 @@ impl Stage {
     /// Port of GuiImpl::RunMsg (text/wait/music subset).
     fn run_dialogue(&mut self, input: &Input) {
         let d = &mut self.dialogue;
-        if d.skippable && input.held(Key::Focus) {
-            // Skip button: jump straight to the next instruction time.
-            if let Some(i) = self.msg.instr_at(d.off) {
-                d.timer = i.time;
-            }
-        }
         loop {
             let Some(i) = self.msg.instr_at(d.off) else {
                 d.active = false;
@@ -788,8 +780,8 @@ impl Stage {
                 4 => {
                     // WAIT n frames; Z after 8 frames advances.
                     let wait = i.arg_i32(0) as u16;
-                    let advance = (input.pressed(Key::Shoot) && d.frames_pause >= 8)
-                        || (d.skippable && input.held(Key::Focus));
+                    let advance = (input.pressed(Key::Shoot) || input.pressed(Key::Enter))
+                        && d.frames_pause >= 8;
                     if d.frames_pause < wait && !advance {
                         d.frames_pause += 1;
                         return; // time frozen during the pause
