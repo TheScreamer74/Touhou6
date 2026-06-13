@@ -9,7 +9,7 @@
 ![Platform](https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon%20%2B%20Intel)-black?logo=apple)
 ![Language](https://img.shields.io/badge/language-Rust-b7410e?logo=rust)
 ![Renderer](https://img.shields.io/badge/renderer-wgpu%20%2F%20Metal-blueviolet)
-![Status](https://img.shields.io/badge/status-stage%201%20playable-crimson)
+![Status](https://img.shields.io/badge/status-stage%201%20complete-crimson)
 
 *"The border land was wrapped in Scarlet Magic.*
 *Girls believe that you solve this mystery..."*
@@ -35,23 +35,28 @@ contains **zero** copyrighted assets — only code.
 |---|---|
 | PBG3 `.DAT` archive extraction | ✅ done |
 | ANM sprite/animation format + VM | ✅ done |
+| ECL / STD / MSG interpreters | ✅ done |
 | Title screen, interactive menu | ✅ done |
 | Audio — BGM + sound effects | ✅ done |
-| Stage 1: Reimu, fairies, Rumia, lives & bombs | ✅ playable (approximated patterns) |
-| ECL interpreter (exact original stage scripts) | 🔜 next — decomp-driven |
-| Stages 2–6 + Extra | ⬜ |
+| **Stage 1 — complete** (exact ECL patterns, midboss + Rumia, dialogue, spellcards, 3D background) | ✅ done |
+| Faithful player (Reimu A shot tiers, hitbox, graze, deathbomb, Fantasy Seal bomb) | ✅ done |
+| Scoring, results screen, high-score save, pause menu | ✅ done |
+| Stages 2–6 + Extra | 🔜 next |
+| Other shot types (Reimu B, Marisa A/B) | ⬜ |
 | Replays, Practice+, rewind | ⬜ |
 | JP / EN language selector | ⬜ |
 
-Gameplay logic is being aligned opcode-by-opcode with the
-[happyhavoc/th06](https://github.com/happyhavoc/th06) matching decompilation,
-so behavior converges on the real thing — including the original RNG.
+Stage 1 runs the **original ECL/STD/MSG scripts** directly, with the player,
+scoring and collision aligned opcode-by-opcode against the
+[happyhavoc/th06](https://github.com/happyhavoc/th06) matching decompilation —
+so behavior matches the real thing, including the original RNG.
 
 ## Already better than 2002
 
 - **Stable 60 Hz** — game logic runs on a fixed timestep, decoupled from
   display refresh. No more speed tied to your GPU. ProMotion-safe.
 - **Native resolution scaling & Metal rendering** via wgpu.
+- **In-game pause menu** (resume / return to title / quit).
 - **Crash reports** written to `logs/` (the original just vanished).
 - Planned: rebindable keys & gamepads, practice any spellcard, replay
   rewind, instant restart.
@@ -84,9 +89,9 @@ read.
 
 ```
 crates/
-├── formats   PBG3 archives · ANM sprites · (soon) ECL · STD · MSG
+├── formats   PBG3 archives · ANM sprites · ECL · STD · MSG
 ├── engine    wgpu sprite renderer · fixed-timestep loop · input · rodio audio
-└── game      ANM VM · title menu · stage logic · scenes
+└── game      ANM VM · ECL VM · title menu · stage logic · background · scenes
 ```
 
 ## Legal
