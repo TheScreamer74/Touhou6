@@ -12,6 +12,7 @@ use th06_formats::anm0::Anm0;
 use th06_formats::pbg3::Pbg3;
 
 use th06_formats::ecl::Ecl;
+use th06_formats::msg::Msg;
 
 use stage::{Event, Stage};
 use title::{Title, TitleAction};
@@ -19,6 +20,7 @@ use title::{Title, TitleAction};
 /// Everything needed to build a fresh stage 1 run.
 struct StageAssets {
     ecl_data: Vec<u8>,
+    msg_data: Vec<u8>,
     stg1enm: Anm0,
     stg1enm2: Anm0,
     etama: Anm0,
@@ -31,7 +33,8 @@ impl StageAssets {
             (&self.stg1enm.entries[0], stage::TEX_FAIRY),
             (&self.stg1enm2.entries[0], stage::TEX_RUMIA),
         ]);
-        Stage::new(ecl, scripts, &self.etama.entries[0])
+        let msg = Msg::parse(self.msg_data.clone()).expect("parse msg");
+        Stage::new(ecl, scripts, &self.etama.entries[0], msg)
     }
 }
 
@@ -212,6 +215,11 @@ fn main() {
         textures.push(engine.create_texture(&rgba, w, h));
     }
     textures.push(engine.create_texture(&[255u8; 2 * 2 * 4], 2, 2));
+    // Slot 8: ascii font. The alpha mask alone is the cleanest glyph
+    // source (white shapes); using it for both color and alpha gives
+    // tintable text.
+    let (rgba, w, h) = compose_rgba(&inn["ascii_a.png"], Some(inn["ascii_a.png"].as_slice()));
+    textures.push(engine.create_texture(&rgba, w, h));
 
     let title = Title::new(entry, 0, 1);
 
@@ -225,8 +233,11 @@ fn main() {
         }
     }
 
+    // English-patch ST archive provides ASCII dialogue text.
+    let st_en = load_archive(&game_dir.join("th06e_ST.DAT"));
     let assets = StageAssets {
         ecl_data: st["ecldata1.ecl"].clone(),
+        msg_data: st_en["msg1.dat"].clone(),
         stg1enm: Anm0::parse(&st["stg1enm.anm"]).expect("parse stg1enm"),
         stg1enm2: Anm0::parse(&st["stg1enm2.anm"]).expect("parse stg1enm2"),
         etama: Anm0::parse(&cm["etama3.anm"]).expect("parse etama3"),

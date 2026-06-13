@@ -55,7 +55,6 @@ struct Ctx {
     ivars: [i32; 8],
     fvars: [f32; 4],
     cmp: i32,
-    repeat_ex: i32, // EXINSREPEAT function index, -1 = none
 }
 
 pub struct BulletProps {
@@ -203,7 +202,7 @@ pub struct Enemy {
 impl Default for Enemy {
     fn default() -> Self {
         Self {
-            ctx: Ctx { repeat_ex: -1, ..Default::default() },
+            ctx: Ctx::default(),
             stack: [Ctx::default(); 8],
             stack_depth: 0,
             pos: [0.0; 3],
@@ -1308,6 +1307,15 @@ impl Enemy {
 
     pub fn fire_interrupt(&mut self, id: i32) {
         self.run_interrupt = id;
+    }
+
+    /// Remaining seconds of the current boss attack, for the HUD timer.
+    pub fn spell_seconds_left(&self) -> Option<i32> {
+        if self.is_boss && self.timer_cb_threshold > 0 {
+            Some(((self.timer_cb_threshold - self.boss_timer) / 60).max(0))
+        } else {
+            None
+        }
     }
 
     fn reset_rank_influence(&mut self) {

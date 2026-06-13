@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use th06_engine::{DrawCmd, Input, Key};
 use th06_formats::anm0::{Entry, Instr as AnmInstr, Sprite};
 use th06_formats::ecl::Ecl;
+use th06_formats::msg::Msg;
 
 use crate::anm_vm::AnmRunner;
 use crate::ecl_vm::{Bullet, Enemy, Rng, SpawnReq, World, WorldEvent};
@@ -24,6 +25,7 @@ pub const TEX_FAIRY: usize = 4;
 pub const TEX_RUMIA: usize = 5;
 pub const TEX_FRONT: usize = 6;
 pub const TEX_WHITE: usize = 7;
+pub const TEX_ASCII: usize = 8;
 
 pub enum Event {
     Sfx(&'static str),
@@ -74,6 +76,33 @@ struct Item {
 const RANDOM_ITEMS: [i32; 32] = [
     0, 0, 1, 0, 1, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 1, 1, 0, 2,
 ];
+
+/// Running MSG dialogue (GuiImpl::RunMsg port, text-only for now).
+struct Dialogue {
+    active: bool,
+    off: u32,
+    timer: u16,
+    frames_pause: u16,
+    ecl_resumed: bool,
+    skippable: bool,
+    lines: [String; 2],
+    line_colors: [usize; 2],
+}
+
+impl Default for Dialogue {
+    fn default() -> Self {
+        Self {
+            active: false,
+            off: 0,
+            timer: 0,
+            frames_pause: 0,
+            ecl_resumed: false,
+            skippable: true,
+            lines: [String::new(), String::new()],
+            line_colors: [0, 0],
+        }
+    }
+}
 
 enum PlayerState {
     Alive,
@@ -137,11 +166,13 @@ pub struct Stage {
     rand_item_spawn: usize,
     spell_active: bool,
     boss_bgm_started: bool,
+    msg: Msg,
+    dialogue: Dialogue,
     pub events: Vec<Event>,
 }
 
 impl Stage {
-    pub fn new(ecl: Ecl, enemy_scripts: HashMap<i32, ScriptRef>, etama: &Entry) -> Self {
+    pub fn new(ecl: Ecl, enemy_scripts: HashMap<i32, ScriptRef>, etama: &Entry, msg: Msg) -> Self {
         let timeline_off = ecl.timeline_offset;
         Self {
             tick: 0,
@@ -181,6 +212,8 @@ impl Stage {
             rand_item_spawn: 0,
             spell_active: false,
             boss_bgm_started: false,
+            msg,
+            dialogue: Dialogue::default(),
             events: vec![Event::Bgm("th06_02.wav")],
         }
     }
@@ -220,8 +253,11 @@ impl Stage {
             self.invuln = 180;
             self.state = PlayerState::Alive;
         }
-        if matches!(self.state, PlayerState::Alive) {
+        if matches!(self.state, PlayerState::Alive) && !self.dialogue.active {
             self.update_player(input);
+        }
+        if self.dialogue.active {
+            self.run_dialogue(input);
         }
         self.invuln = self.invuln.saturating_sub(1);
         self.world.player_pos = self.pos;
@@ -323,7 +359,13 @@ impl Stage {
                             self.spawn(SpawnReq { sub: t.arg0, pos, life, item, score, mirror });
                         }
                     }
-                    8 | 9 => {} // dialogue — skipped until the MSG interpreter exists
+                    8 => self.start_dialogue(t.arg0 as usize),
+                    9 => {
+                        // MsgWait: hold the timeline while dialogue runs.
+                        if self.dialogue.active && !self.dialogue.ecl_resumed {
+                            return; // do not advance time
+                        }
+                    }
                     10 => {
                         let interrupt = t.a1;
                         let _ = t.a0;
@@ -701,6 +743,81 @@ impl Stage {
         }
     }
 
+    fn start_dialogue(&mut self, idx: usize) {
+        let Some(&off) = self.msg.offsets.get(idx) else { return };
+        self.dialogue = Dialogue { active: true, off, ..Default::default() };
+        // Dialogue clears the field of bullets in practice.
+        self.world.bullets.clear();
+        self.cancel_lasers();
+    }
+
+    /// Port of GuiImpl::RunMsg (text/wait/music subset).
+    fn run_dialogue(&mut self, input: &Input) {
+        let d = &mut self.dialogue;
+        if d.skippable && input.held(Key::Focus) {
+            // Skip button: jump straight to the next instruction time.
+            if let Some(i) = self.msg.instr_at(d.off) {
+                d.timer = i.time;
+            }
+        }
+        loop {
+            let Some(i) = self.msg.instr_at(d.off) else {
+                d.active = false;
+                return;
+            };
+            if d.timer < i.time {
+                break;
+            }
+            match i.opcode {
+                0 => {
+                    // MSGDELETE
+                    d.active = false;
+                    return;
+                }
+                3 => {
+                    // TEXTDIALOGUE
+                    let color = i.arg_i16(0).clamp(0, 1) as usize;
+                    let line = i.arg_i16(2).clamp(0, 1) as usize;
+                    if line == 0 {
+                        d.lines[1].clear();
+                    }
+                    d.lines[line] = i.arg_str(4);
+                    d.line_colors[line] = color;
+                    d.frames_pause = 0;
+                }
+                4 => {
+                    // WAIT n frames; Z after 8 frames advances.
+                    let wait = i.arg_i32(0) as u16;
+                    let advance = (input.pressed(Key::Shoot) && d.frames_pause >= 8)
+                        || (d.skippable && input.held(Key::Focus));
+                    if d.frames_pause < wait && !advance {
+                        d.frames_pause += 1;
+                        return; // time frozen during the pause
+                    }
+                }
+                6 => d.ecl_resumed = true, // ECLRESUME
+                7 => {
+                    // MUSIC: stage 1 track 1 is the boss theme.
+                    let track = i.arg_i32(0);
+                    self.boss_bgm_started = true;
+                    self.events.push(Event::Bgm(if track == 1 {
+                        "th06_03.wav"
+                    } else {
+                        "th06_02.wav"
+                    }));
+                }
+                10 => {
+                    // MSGHALT: nothing left to show.
+                    d.active = false;
+                    return;
+                }
+                _ => {} // portraits / anm interrupts: later
+            }
+            d.off += i.size;
+        }
+        d.timer += 1;
+    }
+
     fn spawn_drop(&mut self, pos: [f32; 2], drop: i16) {
         let kind = match drop {
             -2 => return,            // ITEM_NO_ITEM
@@ -967,6 +1084,45 @@ impl Stage {
             });
         }
 
+        // Boss attack timer (top center of the field).
+        if let Some(secs) = self
+            .enemies
+            .iter()
+            .find(|e| e.is_boss && e.occupied)
+            .and_then(|e| e.spell_seconds_left())
+        {
+            draw_text(
+                &mut cmds,
+                [FIELD_X + FIELD_W / 2.0 - 16.0, FIELD_Y + 12.0],
+                16.0,
+                [1.0, 1.0, 1.0, 0.9],
+                &format!("{secs:02}"),
+            );
+        }
+
+        // Dialogue box.
+        if self.dialogue.active && (!self.dialogue.lines[0].is_empty() || !self.dialogue.lines[1].is_empty()) {
+            let box_y = FIELD_Y + FIELD_H - 80.0;
+            cmds.push(rect([FIELD_X + 8.0, box_y, FIELD_W - 16.0, 64.0], [0.0, 0.0, 0.0, 0.65]));
+            for (li, text) in self.dialogue.lines.iter().enumerate() {
+                if text.is_empty() {
+                    continue;
+                }
+                let tint = if self.dialogue.line_colors[li] == 0 {
+                    [1.0, 1.0, 1.0, 1.0] // player
+                } else {
+                    [1.0, 0.55, 0.55, 1.0] // boss
+                };
+                draw_text(
+                    &mut cmds,
+                    [FIELD_X + 20.0, box_y + 10.0 + li as f32 * 24.0],
+                    14.0,
+                    tint,
+                    text,
+                );
+            }
+        }
+
         self.draw_hud(&mut cmds);
         cmds
     }
@@ -987,6 +1143,10 @@ impl Stage {
         for i in 0..self.bombs.max(0) {
             cmds.push(hud_sprite(HUD_STAR_GREEN, [sx + 40.0 + i as f32 * 18.0, 144.0]));
         }
+        // Score and power readouts.
+        draw_text(cmds, [sx, 84.0], 16.0, [1.0, 1.0, 1.0, 1.0], &format!("Score {}", self.score));
+        draw_text(cmds, [sx, 172.0], 16.0, [1.0, 0.8, 0.4, 1.0], &format!("Power {:3}", self.world.power));
+
         let mut logo = hud_sprite(HUD_LOGO, [sx - 4.0, 300.0]);
         logo.tint = [1.0, 1.0, 1.0, 0.85];
         cmds.push(logo);
@@ -1022,6 +1182,36 @@ const LASER_COLORS: [[f32; 4]; 16] = [
     [1.0, 0.6, 0.3, 0.8],
     [1.0, 1.0, 1.0, 0.8],
 ];
+
+/// Draw ASCII text using the 16x16 glyph grid in ascii.png.
+fn draw_text(cmds: &mut Vec<DrawCmd>, pos: [f32; 2], size: f32, tint: [f32; 4], text: &str) {
+    let mut x = pos[0];
+    for ch in text.chars() {
+        let c = ch as u32;
+        if (0x21..=0x7e).contains(&c) {
+            let idx = c - 0x20;
+            // Glyph grid: rows 0-1 hold kanji counters/labels, ASCII printable
+            // starts at row 2 (space at 0x20).
+            let (col, row) = ((idx % 16) as f32, (idx / 16 + 2) as f32);
+            // Inset by half a texel so linear filtering does not bleed the
+            // neighbouring glyph cell at the exact boundary.
+            let e = 0.5 / 256.0;
+            cmds.push(DrawCmd {
+                tex: TEX_ASCII,
+                dst: [x.round(), pos[1].round(), size, size],
+                src: [
+                    col * 16.0 / 256.0 + e,
+                    row * 16.0 / 256.0 + e,
+                    (col + 1.0) * 16.0 / 256.0 - e,
+                    (row + 1.0) * 16.0 / 256.0 - e,
+                ],
+                tint,
+                rot: 0.0,
+            });
+        }
+        x += size * 0.75;
+    }
+}
 
 fn rect(dst: [f32; 4], tint: [f32; 4]) -> DrawCmd {
     DrawCmd { tex: TEX_WHITE, dst, src: [0.25, 0.25, 0.75, 0.75], tint, rot: 0.0 }
