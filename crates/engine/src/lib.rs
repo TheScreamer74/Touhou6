@@ -50,6 +50,61 @@ struct Vertex {
     tint: [f32; 4],
 }
 
+/// 3D background shader: an MVP transform plus per-vertex linear fog.
+const BG_SHADER: &str = r#"
+struct U { mvp: mat4x4<f32>, fog: vec4f };
+@group(1) @binding(0) var<uniform> u: U;
+
+struct VOut {
+    @builtin(position) pos: vec4f,
+    @location(0) uv: vec2f,
+    @location(1) fog: f32,
+};
+
+@vertex
+fn vs(@location(0) pos: vec3f, @location(1) uv: vec2f, @location(2) fog: f32) -> VOut {
+    var out: VOut;
+    out.pos = u.mvp * vec4f(pos, 1.0);
+    out.uv = uv;
+    out.fog = fog;
+    return out;
+}
+
+@group(0) @binding(0) var tex: texture_2d<f32>;
+@group(0) @binding(1) var samp: sampler;
+
+@fragment
+fn fs(in: VOut) -> @location(0) vec4f {
+    let c = textureSample(tex, samp, in.uv);
+    let rgb = mix(u.fog.rgb, c.rgb, clamp(in.fog, 0.0, 1.0));
+    return vec4f(rgb, c.a);
+}
+"#;
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct Vertex3 {
+    pub pos: [f32; 3],
+    pub uv: [f32; 2],
+    pub fog: f32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct BgUniform {
+    mvp: [[f32; 4]; 4],
+    fog: [f32; 4],
+}
+
+/// A 3D background frame: a camera matrix, fog colour, the textured
+/// triangle soup (already in world space), and which texture slot to use.
+pub struct BgScene {
+    pub mvp: [[f32; 4]; 4],
+    pub fog_color: [f32; 4],
+    pub verts: Vec<Vertex3>,
+    pub tex: usize,
+}
+
 /// One textured quad. `dst` is x, y, w, h in 640x480 screen pixels;
 /// `src` is u0, v0, u1, v1 in normalized texture coordinates. `rot`
 /// rotates the quad around its center (radians, clockwise).
@@ -72,6 +127,8 @@ pub struct Engine {
     instance: wgpu::Instance,
     bind_layout: wgpu::BindGroupLayout,
     shader: wgpu::ShaderModule,
+    bg_shader: wgpu::ShaderModule,
+    bg_uniform_layout: wgpu::BindGroupLayout,
 }
 
 impl Engine {
@@ -109,7 +166,158 @@ impl Engine {
             ],
         });
 
-        Self { device, queue, instance, bind_layout, shader }
+        let bg_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("bg"),
+            source: wgpu::ShaderSource::Wgsl(BG_SHADER.into()),
+        });
+        let bg_uniform_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("bg uniform"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+
+        Self { device, queue, instance, bind_layout, shader, bg_shader, bg_uniform_layout }
+    }
+
+    fn make_bg_pipeline(&self, format: wgpu::TextureFormat) -> wgpu::RenderPipeline {
+        let layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("bg"),
+            bind_group_layouts: &[&self.bind_layout, &self.bg_uniform_layout],
+            push_constant_ranges: &[],
+        });
+        self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("bg"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &self.bg_shader,
+                entry_point: Some("vs"),
+                compilation_options: Default::default(),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<Vertex3>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32],
+                }],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &self.bg_shader,
+                entry_point: Some("fs"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        })
+    }
+
+    fn depth_texture(&self) -> wgpu::TextureView {
+        self.device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("depth"),
+                size: wgpu::Extent3d { width: SCREEN_W, height: SCREEN_H, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Depth32Float,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            })
+            .create_view(&Default::default())
+    }
+
+    /// Render the 3D background into `target` (clearing it to the fog
+    /// colour), scissored to the 384x448 play field at (32, 16).
+    fn encode_bg(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        depth: &wgpu::TextureView,
+        pipeline: &wgpu::RenderPipeline,
+        scene: &BgScene,
+        textures: &[&Texture],
+    ) {
+        let vbuf = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("bg verts"),
+            size: (scene.verts.len().max(1) * std::mem::size_of::<Vertex3>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        if !scene.verts.is_empty() {
+            self.queue.write_buffer(&vbuf, 0, bytemuck::cast_slice(&scene.verts));
+        }
+        let uniform = BgUniform { mvp: scene.mvp, fog: scene.fog_color };
+        let ubuf = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("bg uniform"),
+            size: std::mem::size_of::<BgUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        self.queue.write_buffer(&ubuf, 0, bytemuck::bytes_of(&uniform));
+        let ubind = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &self.bg_uniform_layout,
+            entries: &[wgpu::BindGroupEntry { binding: 0, resource: ubuf.as_entire_binding() }],
+        });
+
+        let [r, g, b, _] = scene.fog_color;
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("bg"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color {
+                        r: r as f64,
+                        g: g as f64,
+                        b: b as f64,
+                        a: 1.0,
+                    }),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: depth,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: wgpu::StoreOp::Discard,
+                }),
+                stencil_ops: None,
+            }),
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+        // Confine the background to the play field.
+        pass.set_viewport(32.0, 16.0, 384.0, 448.0, 0.0, 1.0);
+        if !scene.verts.is_empty() {
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &textures[scene.tex].bind_group, &[]);
+            pass.set_bind_group(1, &ubind, &[]);
+            pass.set_vertex_buffer(0, vbuf.slice(..));
+            pass.draw(0..scene.verts.len() as u32, 0..1);
+        }
     }
 
     fn make_pipeline(&self, format: wgpu::TextureFormat) -> wgpu::RenderPipeline {
@@ -234,16 +442,19 @@ impl Engine {
         vbuf: &wgpu::Buffer,
         cmds: &[DrawCmd],
         textures: &[&Texture],
+        load: bool,
     ) {
+        let load_op = if load {
+            wgpu::LoadOp::Load
+        } else {
+            wgpu::LoadOp::Clear(wgpu::Color::BLACK)
+        };
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: None,
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: target,
                 resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                    store: wgpu::StoreOp::Store,
-                },
+                ops: wgpu::Operations { load: load_op, store: wgpu::StoreOp::Store },
             })],
             depth_stencil_attachment: None,
             timestamp_writes: None,
@@ -283,7 +494,12 @@ impl Engine {
     }
 
     /// Render one frame offscreen and return RGBA8 pixels (640x480).
-    pub fn render_to_image(&self, cmds: &[DrawCmd], textures: &[&Texture]) -> Vec<u8> {
+    pub fn render_to_image(
+        &self,
+        cmds: &[DrawCmd],
+        textures: &[&Texture],
+        bg: Option<&BgScene>,
+    ) -> Vec<u8> {
         let format = wgpu::TextureFormat::Rgba8Unorm;
         let target = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("offscreen"),
@@ -300,7 +516,12 @@ impl Engine {
         let vbuf = self.vertex_buffer(cmds);
 
         let mut encoder = self.device.create_command_encoder(&Default::default());
-        self.encode_pass(&mut encoder, &view, &pipeline, &vbuf, cmds, textures);
+        if let Some(scene) = bg {
+            let bg_pipeline = self.make_bg_pipeline(format);
+            let depth = self.depth_texture();
+            self.encode_bg(&mut encoder, &view, &depth, &bg_pipeline, scene, textures);
+        }
+        self.encode_pass(&mut encoder, &view, &pipeline, &vbuf, cmds, textures, bg.is_some());
 
         let bytes_per_row = SCREEN_W * 4; // 2560, already 256-aligned
         let readback = self.device.create_buffer(&wgpu::BufferDescriptor {
@@ -350,6 +571,9 @@ impl Engine {
             engine: self,
             title: title.to_string(),
             cmds: Vec::new(),
+            bg: None,
+            bg_pipeline: None,
+            depth: None,
             textures,
             update: Box::new(update),
             input: Input::default(),
@@ -418,6 +642,7 @@ impl Input {
 
 pub struct Frame {
     pub cmds: Vec<DrawCmd>,
+    pub bg: Option<BgScene>,
     pub quit: bool,
 }
 
@@ -427,6 +652,9 @@ struct App {
     engine: Engine,
     title: String,
     cmds: Vec<DrawCmd>,
+    bg: Option<BgScene>,
+    bg_pipeline: Option<wgpu::RenderPipeline>,
+    depth: Option<wgpu::TextureView>,
     textures: Vec<Texture>,
     update: Box<dyn FnMut(&Input) -> Frame>,
     input: Input,
@@ -466,6 +694,8 @@ impl ApplicationHandler for App {
             },
         );
         self.pipeline = Some(self.engine.make_pipeline(format));
+        self.bg_pipeline = Some(self.engine.make_bg_pipeline(format));
+        self.depth = Some(self.engine.depth_texture());
         self.surface = Some(surface);
         self.window = Some(window);
         self.last_tick = Instant::now();
@@ -514,9 +744,12 @@ impl ApplicationHandler for App {
                         return;
                     }
                     self.cmds = frame.cmds;
+                    self.bg = frame.bg;
                 }
 
-                let (Some(surface), Some(pipeline)) = (&self.surface, &self.pipeline) else {
+                let (Some(surface), Some(pipeline), Some(bg_pipeline), Some(depth)) =
+                    (&self.surface, &self.pipeline, &self.bg_pipeline, &self.depth)
+                else {
                     return;
                 };
                 let frame = surface.get_current_texture().expect("acquire frame");
@@ -524,7 +757,11 @@ impl ApplicationHandler for App {
                 let vbuf = self.engine.vertex_buffer(&self.cmds);
                 let tex_refs: Vec<&Texture> = self.textures.iter().collect();
                 let mut encoder = self.engine.device.create_command_encoder(&Default::default());
-                self.engine.encode_pass(&mut encoder, &view, pipeline, &vbuf, &self.cmds, &tex_refs);
+                if let Some(scene) = &self.bg {
+                    self.engine.encode_bg(&mut encoder, &view, depth, bg_pipeline, scene, &tex_refs);
+                }
+                self.engine
+                    .encode_pass(&mut encoder, &view, pipeline, &vbuf, &self.cmds, &tex_refs, self.bg.is_some());
                 self.engine.queue.submit([encoder.finish()]);
                 frame.present();
                 if let Some(w) = &self.window {

@@ -11,6 +11,8 @@ use th06_formats::ecl::Ecl;
 use th06_formats::msg::Msg;
 
 use crate::anm_vm::AnmRunner;
+use crate::background::Background;
+use th06_engine::BgScene;
 use crate::ecl_vm::{Bullet, Enemy, Rng, SpawnReq, World, WorldEvent};
 
 pub const FIELD_W: f32 = 384.0;
@@ -203,11 +205,12 @@ pub struct Stage {
     boss_bgm_started: bool,
     msg: Msg,
     dialogue: Dialogue,
+    background: Option<Background>,
     pub events: Vec<Event>,
 }
 
 impl Stage {
-    pub fn new(ecl: Ecl, enemy_scripts: HashMap<i32, ScriptRef>, etama: &Entry, msg: Msg) -> Self {
+    pub fn new(ecl: Ecl, enemy_scripts: HashMap<i32, ScriptRef>, etama: &Entry, msg: Msg, background: Option<Background>) -> Self {
         let timeline_off = ecl.timeline_offset;
         Self {
             tick: 0,
@@ -254,6 +257,7 @@ impl Stage {
             boss_bgm_started: false,
             msg,
             dialogue: Dialogue::default(),
+            background,
             events: vec![Event::Bgm("th06_02.wav")],
         }
     }
@@ -262,9 +266,16 @@ impl Stage {
         self.lives = lives;
     }
 
+    pub fn background_scene(&self) -> Option<BgScene> {
+        self.background.as_ref().map(|b| b.scene())
+    }
+
     pub fn update(&mut self, input: &Input) -> Vec<DrawCmd> {
         self.tick += 1;
         self.anim += 1;
+        if let Some(bg) = &mut self.background {
+            bg.tick();
+        }
 
         // Player state machine.
         let mut respawn = false;
@@ -1027,11 +1038,18 @@ impl Stage {
 
     fn draw(&self) -> Vec<DrawCmd> {
         let mut cmds = Vec::with_capacity(96 + self.world.bullets.len());
-        let base = if self.spell_active { 0.02 } else { 0.07 };
-        cmds.push(rect(
-            [FIELD_X, FIELD_Y, FIELD_W, FIELD_H],
-            [base, base * 0.6, base * 0.9, 1.0],
-        ));
+        if self.background.is_some() {
+            // The 3D background fills the field; only dim it during spells.
+            if self.spell_active {
+                cmds.push(rect([FIELD_X, FIELD_Y, FIELD_W, FIELD_H], [0.0, 0.0, 0.05, 0.45]));
+            }
+        } else {
+            let base = if self.spell_active { 0.02 } else { 0.07 };
+            cmds.push(rect(
+                [FIELD_X, FIELD_Y, FIELD_W, FIELD_H],
+                [base, base * 0.6, base * 0.9, 1.0],
+            ));
+        }
 
         // Enemies via their ANM state.
         for (e, anim) in self.enemies.iter().zip(&self.anims) {

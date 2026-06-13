@@ -1,4 +1,5 @@
 mod anm_vm;
+mod background;
 mod ecl_vm;
 mod stage;
 mod title;
@@ -13,6 +14,9 @@ use th06_formats::pbg3::Pbg3;
 
 use th06_formats::ecl::Ecl;
 use th06_formats::msg::Msg;
+use th06_formats::std::Std;
+
+use background::Background;
 
 use stage::{Event, Stage};
 use title::{Title, TitleAction};
@@ -24,6 +28,9 @@ struct StageAssets {
     stg1enm: Anm0,
     stg1enm2: Anm0,
     etama: Anm0,
+    stg1bg: Anm0,
+    std_data: Vec<u8>,
+    bg_tex_slot: usize,
 }
 
 impl StageAssets {
@@ -34,7 +41,9 @@ impl StageAssets {
             (&self.stg1enm2.entries[0], stage::TEX_RUMIA),
         ]);
         let msg = Msg::parse(self.msg_data.clone()).expect("parse msg");
-        Stage::new(ecl, scripts, &self.etama.entries[0], msg)
+        let background = Std::parse(&self.std_data)
+            .map(|std| Background::new(std, &self.stg1bg.entries[0], self.bg_tex_slot));
+        Stage::new(ecl, scripts, &self.etama.entries[0], msg, background)
     }
 }
 
@@ -130,13 +139,14 @@ impl Game {
                             a.play_sfx("plst00");
                         }
                     }
-                    TitleAction::Quit => return Frame { cmds, quit: true },
+                    TitleAction::Quit => return Frame { cmds, bg: None, quit: true },
                     TitleAction::None => {}
                 }
-                Frame { cmds, quit: false }
+                Frame { cmds, bg: None, quit: false }
             }
             Scene::Stage(stage) => {
                 let cmds = stage.update(input);
+                let bg = stage.background_scene();
                 let events: Vec<Event> = stage.events.drain(..).collect();
                 let mut back = false;
                 for ev in events {
@@ -157,8 +167,9 @@ impl Game {
                     self.scene = Scene::Title;
                     self.title.reset();
                     self.play_bgm("th06_01.wav");
+                    return Frame { cmds, bg: None, quit: false };
                 }
-                Frame { cmds, quit: false }
+                Frame { cmds, bg, quit: false }
             }
         }
     }
@@ -228,6 +239,10 @@ fn main() {
         );
         textures.push(engine.create_texture(&rgba, w, h));
     }
+    // Slot 11: stage 1 background texture.
+    let bg_tex_slot = textures.len();
+    let (rgba, w, h) = compose_rgba(&st["stg1bg.png"], Some(st["stg1bg_a.png"].as_slice()));
+    textures.push(engine.create_texture(&rgba, w, h));
 
     let title = Title::new(entry, 0, 1);
 
@@ -249,6 +264,9 @@ fn main() {
         stg1enm: Anm0::parse(&st["stg1enm.anm"]).expect("parse stg1enm"),
         stg1enm2: Anm0::parse(&st["stg1enm2.anm"]).expect("parse stg1enm2"),
         etama: Anm0::parse(&cm["etama3.anm"]).expect("parse etama3"),
+        stg1bg: Anm0::parse(&st["stg1bg.anm"]).expect("parse stg1bg"),
+        std_data: st["stage1.std"].clone(),
+        bg_tex_slot,
     };
 
     let mut game = Game {
@@ -276,7 +294,7 @@ fn main() {
             frame = game.update(&input);
         }
         let textures_ref: Vec<&th06_engine::Texture> = textures.iter().collect();
-        let pixels = engine.render_to_image(&frame.cmds, &textures_ref);
+        let pixels = engine.render_to_image(&frame.cmds, &textures_ref, frame.bg.as_ref());
         image::save_buffer(&out, &pixels, th06_engine::SCREEN_W, th06_engine::SCREEN_H, image::ColorType::Rgba8)
             .expect("save screenshot");
         println!("wrote {out}");

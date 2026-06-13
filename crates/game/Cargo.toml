@@ -7,3 +7,4 @@ edition = "2024"
 th06-formats = { path = "../formats" }
 th06-engine = { path = "../engine" }
 image = "0.25"
+glam = "0.29"
