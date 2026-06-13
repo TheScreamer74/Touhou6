@@ -233,11 +233,17 @@ impl Engine {
         })
     }
 
-    fn depth_texture(&self) -> wgpu::TextureView {
+    /// Depth attachment sized to match the colour target (the surface may
+    /// be larger than the 640x480 logical size on HiDPI displays).
+    fn depth_texture(&self, width: u32, height: u32) -> wgpu::TextureView {
         self.device
             .create_texture(&wgpu::TextureDescriptor {
                 label: Some("depth"),
-                size: wgpu::Extent3d { width: SCREEN_W, height: SCREEN_H, depth_or_array_layers: 1 },
+                size: wgpu::Extent3d {
+                    width: width.max(1),
+                    height: height.max(1),
+                    depth_or_array_layers: 1,
+                },
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
@@ -258,6 +264,7 @@ impl Engine {
         pipeline: &wgpu::RenderPipeline,
         scene: &BgScene,
         textures: &[&Texture],
+        target_size: (u32, u32),
     ) {
         let vbuf = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("bg verts"),
@@ -309,8 +316,11 @@ impl Engine {
             timestamp_writes: None,
             occlusion_query_set: None,
         });
-        // Confine the background to the play field.
-        pass.set_viewport(32.0, 16.0, 384.0, 448.0, 0.0, 1.0);
+        // Confine the background to the play field, scaled to the target
+        // (the surface is larger than 640x480 on HiDPI displays).
+        let sx = target_size.0 as f32 / SCREEN_W as f32;
+        let sy = target_size.1 as f32 / SCREEN_H as f32;
+        pass.set_viewport(32.0 * sx, 16.0 * sy, 384.0 * sx, 448.0 * sy, 0.0, 1.0);
         if !scene.verts.is_empty() {
             pass.set_pipeline(pipeline);
             pass.set_bind_group(0, &textures[scene.tex].bind_group, &[]);
@@ -518,8 +528,8 @@ impl Engine {
         let mut encoder = self.device.create_command_encoder(&Default::default());
         if let Some(scene) = bg {
             let bg_pipeline = self.make_bg_pipeline(format);
-            let depth = self.depth_texture();
-            self.encode_bg(&mut encoder, &view, &depth, &bg_pipeline, scene, textures);
+            let depth = self.depth_texture(SCREEN_W, SCREEN_H);
+            self.encode_bg(&mut encoder, &view, &depth, &bg_pipeline, scene, textures, (SCREEN_W, SCREEN_H));
         }
         self.encode_pass(&mut encoder, &view, &pipeline, &vbuf, cmds, textures, bg.is_some());
 
@@ -574,6 +584,7 @@ impl Engine {
             bg: None,
             bg_pipeline: None,
             depth: None,
+            surface_size: (SCREEN_W, SCREEN_H),
             textures,
             update: Box::new(update),
             input: Input::default(),
@@ -655,6 +666,7 @@ struct App {
     bg: Option<BgScene>,
     bg_pipeline: Option<wgpu::RenderPipeline>,
     depth: Option<wgpu::TextureView>,
+    surface_size: (u32, u32),
     textures: Vec<Texture>,
     update: Box<dyn FnMut(&Input) -> Frame>,
     input: Input,
@@ -695,7 +707,8 @@ impl ApplicationHandler for App {
         );
         self.pipeline = Some(self.engine.make_pipeline(format));
         self.bg_pipeline = Some(self.engine.make_bg_pipeline(format));
-        self.depth = Some(self.engine.depth_texture());
+        self.surface_size = (size.width.max(1), size.height.max(1));
+        self.depth = Some(self.engine.depth_texture(self.surface_size.0, self.surface_size.1));
         self.surface = Some(surface);
         self.window = Some(window);
         self.last_tick = Instant::now();
@@ -758,7 +771,8 @@ impl ApplicationHandler for App {
                 let tex_refs: Vec<&Texture> = self.textures.iter().collect();
                 let mut encoder = self.engine.device.create_command_encoder(&Default::default());
                 if let Some(scene) = &self.bg {
-                    self.engine.encode_bg(&mut encoder, &view, depth, bg_pipeline, scene, &tex_refs);
+                    self.engine
+                        .encode_bg(&mut encoder, &view, depth, bg_pipeline, scene, &tex_refs, self.surface_size);
                 }
                 self.engine
                     .encode_pass(&mut encoder, &view, pipeline, &vbuf, &self.cmds, &tex_refs, self.bg.is_some());
