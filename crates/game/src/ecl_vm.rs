@@ -111,6 +111,8 @@ pub struct Bullet {
     pub ex_int0: i32,
     pub ex_int1: i32,
     pub ex_count: i32,
+    /// Set once the bullet has been grazed, so it scores graze only once.
+    pub grazed: bool,
 }
 
 /// A laser beam (Laser in the original). The lit segment runs from
@@ -1447,6 +1449,7 @@ pub fn spawn_bullet_pattern(world: &mut World, props: &BulletProps, mirror: bool
                 ex_int0,
                 ex_int1,
                 ex_count: 0,
+                grazed: false,
             });
         }
     }

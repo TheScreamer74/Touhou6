@@ -15,8 +15,10 @@ const FIELD_H: f32 = 448.0;
 
 pub struct Background {
     std: Std,
-    /// anm script id -> sprite pixel rect [x, y, w, h] in stg1bg.
-    sprites: HashMap<i32, [f32; 4]>,
+    /// anm script id -> (sprite pixel rect [x, y, w, h] in stg1bg, scale
+    /// [sx, sy] from the script's op2). Tiles are authored at 16x16 but the
+    /// floor scripts scale them 2x, so the quads tile seamlessly.
+    sprites: HashMap<i32, ([f32; 4], [f32; 2])>,
     tex_size: [f32; 2],
     tex_slot: usize,
 
@@ -60,7 +62,17 @@ impl Background {
             if let Some(i) = instrs.iter().find(|i| i.opcode == 1) {
                 let sp = u32::from_le_bytes(i.args[0..4].try_into().unwrap());
                 if let Some(rect) = sprite_tbl.get(&sp) {
-                    sprites.insert(*id as i32, *rect);
+                    let scale = instrs
+                        .iter()
+                        .find(|i| i.opcode == 2)
+                        .map(|i| {
+                            [
+                                f32::from_le_bytes(i.args[0..4].try_into().unwrap()),
+                                f32::from_le_bytes(i.args[4..8].try_into().unwrap()),
+                            ]
+                        })
+                        .unwrap_or([1.0, 1.0]);
+                    sprites.insert(*id as i32, (*rect, scale));
                 }
             }
         }
@@ -172,11 +184,11 @@ impl Background {
         for inst in &self.std.instances {
             let Some(obj) = self.std.objects.get(inst.id as usize) else { continue };
             for q in &obj.quads {
-                let Some(&[sx, sy, sw, sh]) = self.sprites.get(&(q.anm_script as i32)) else {
+                let Some(&([sx, sy, sw, sh], scale)) = self.sprites.get(&(q.anm_script as i32)) else {
                     continue;
                 };
-                let qw = if q.size[0] != 0.0 { q.size[0] } else { sw };
-                let qh = if q.size[1] != 0.0 { q.size[1] } else { sh };
+                let qw = if q.size[0] != 0.0 { q.size[0] } else { sw * scale[0] };
+                let qh = if q.size[1] != 0.0 { q.size[1] } else { sh * scale[1] };
                 // World origin of the quad (camera subtracted; y points up).
                 let wx = obj.pos[0] + q.pos[0] + inst.pos[0] - self.cam.x;
                 let wy = obj.pos[1] + q.pos[1] + inst.pos[1] - self.cam.y;

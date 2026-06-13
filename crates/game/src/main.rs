@@ -25,6 +25,7 @@ use title::{Title, TitleAction};
 struct StageAssets {
     ecl_data: Vec<u8>,
     msg_data: Vec<u8>,
+    player: Anm0,
     stg1enm: Anm0,
     stg1enm2: Anm0,
     etama: Anm0,
@@ -43,7 +44,7 @@ impl StageAssets {
         let msg = Msg::parse(self.msg_data.clone()).expect("parse msg");
         let background = Std::parse(&self.std_data)
             .map(|std| Background::new(std, &self.stg1bg.entries[0], self.bg_tex_slot));
-        Stage::new(ecl, scripts, &self.etama.entries[0], msg, background)
+        Stage::new(ecl, scripts, &self.etama.entries[0], &self.player.entries[0], msg, background)
     }
 }
 
@@ -100,9 +101,9 @@ struct Game {
     assets: StageAssets,
 }
 
-const SFX_NAMES: [&str; 12] = [
+const SFX_NAMES: [&str; 13] = [
     "plst00", "enep00", "enep01", "pldead00", "tan00", "tan01", "tan02", "damage00", "power1",
-    "cat00", "item00", "powerup",
+    "cat00", "item00", "powerup", "graze",
 ];
 
 impl Game {
@@ -161,6 +162,7 @@ impl Game {
                             self.play_bgm(&file);
                         }
                         Event::BackToTitle => back = true,
+                        Event::Quit => return Frame { cmds, bg, quit: true },
                     }
                 }
                 if back {
@@ -265,6 +267,7 @@ fn main() {
     let assets = StageAssets {
         ecl_data: st["ecldata1.ecl"].clone(),
         msg_data: st_en["msg1.dat"].clone(),
+        player: Anm0::parse(&cm["player00.anm"]).expect("parse player00"),
         stg1enm: Anm0::parse(&st["stg1enm.anm"]).expect("parse stg1enm"),
         stg1enm2: Anm0::parse(&st["stg1enm2.anm"]).expect("parse stg1enm2"),
         etama: Anm0::parse(&cm["etama3.anm"]).expect("parse etama3"),

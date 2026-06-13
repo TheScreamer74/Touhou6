@@ -593,7 +593,12 @@ impl Engine {
             window: None,
             surface: None,
             pipeline: None,
+            autoshot: std::env::var("TH06_AUTOSHOT").ok().filter(|s| !s.is_empty()),
+            tick_count: 0,
         };
+        if let Some(dir) = &app.autoshot {
+            std::fs::create_dir_all(dir).expect("create autoshot dir");
+        }
         event_loop.run_app(&mut app).expect("run app");
     }
 }
@@ -675,6 +680,10 @@ struct App {
     window: Option<Arc<Window>>,
     surface: Option<wgpu::Surface<'static>>,
     pipeline: Option<wgpu::RenderPipeline>,
+    /// TH06_AUTOSHOT=<dir>: dump an offscreen PNG every 60 ticks during live
+    /// play so playtests can be reviewed after the fact.
+    autoshot: Option<String>,
+    tick_count: u32,
 }
 
 impl ApplicationHandler for App {
@@ -758,6 +767,15 @@ impl ApplicationHandler for App {
                     }
                     self.cmds = frame.cmds;
                     self.bg = frame.bg;
+                    self.tick_count += 1;
+                    if let Some(dir) = &self.autoshot {
+                        if self.tick_count % 60 == 0 {
+                            let tex_refs: Vec<&Texture> = self.textures.iter().collect();
+                            let pixels = self.engine.render_to_image(&self.cmds, &tex_refs, self.bg.as_ref());
+                            let path = format!("{dir}/shot_{:06}.png", self.tick_count);
+                            let _ = image::save_buffer(&path, &pixels, SCREEN_W, SCREEN_H, image::ColorType::Rgba8);
+                        }
+                    }
                 }
 
                 let (Some(surface), Some(pipeline), Some(bg_pipeline), Some(depth)) =

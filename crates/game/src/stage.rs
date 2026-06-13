@@ -20,6 +20,16 @@ pub const FIELD_H: f32 = 448.0;
 const FIELD_X: f32 = 32.0;
 const FIELD_Y: f32 = 16.0;
 
+/// Frames you can still bomb after a lethal hit (Player.cpp respawnTimer = 6).
+const DEATHBOMB_FRAMES: u32 = 6;
+
+/// g_PowerItemScore: score for collecting a power item at max power, indexed by
+/// the running power-item count (ItemManager.cpp).
+const POWER_ITEM_SCORE: [i64; 31] = [
+    10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 2000,
+    3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000, 11000, 12000, 51200,
+];
+
 // Texture slots, fixed by main.rs.
 pub const TEX_PLAYER: usize = 2;
 pub const TEX_BULLET: usize = 3;
@@ -35,6 +45,7 @@ pub enum Event {
     Sfx(&'static str),
     Bgm(&'static str),
     BackToTitle,
+    Quit,
 }
 
 #[derive(Clone, Copy)]
@@ -47,15 +58,10 @@ const fn spr(tex: usize, x: f32, y: f32, w: f32, h: f32) -> SpriteRef {
     SpriteRef { tex, rect: [x, y, w, h] }
 }
 
-const REIMU_IDLE: [SpriteRef; 4] = [
-    spr(TEX_PLAYER, 1.0, 1.0, 31.0, 47.0),
-    spr(TEX_PLAYER, 33.0, 1.0, 31.0, 47.0),
-    spr(TEX_PLAYER, 65.0, 1.0, 31.0, 47.0),
-    spr(TEX_PLAYER, 97.0, 1.0, 31.0, 47.0),
-];
 const AMULET: SpriteRef = spr(TEX_PLAYER, 129.0, 1.0, 14.0, 14.0);
-const NEEDLE: SpriteRef = spr(TEX_PLAYER, 193.0, 1.0, 14.0, 46.0);
 const BOMB_GLOW: SpriteRef = spr(TEX_PLAYER, 1.0, 97.0, 62.0, 62.0);
+/// player00 sprite 66: the focus hitbox marker.
+const HITBOX_MARKER: SpriteRef = spr(TEX_PLAYER, 160.0, 0.0, 16.0, 16.0);
 
 const HUD_LOGO: SpriteRef = spr(TEX_FRONT, 128.0, 128.0, 128.0, 128.0);
 const HUD_PLAYER_LABEL: SpriteRef = spr(TEX_FRONT, 0.0, 208.0, 32.0, 16.0);
@@ -66,7 +72,128 @@ const HUD_STAR_GREEN: SpriteRef = spr(TEX_FRONT, 48.0, 240.0, 16.0, 16.0);
 struct Shot {
     pos: [f32; 2],
     vel: [f32; 2],
-    needle: bool,
+    damage: i32,
+    /// BULLET_TYPE_1 orb amulet: homes toward the last enemy hit, then
+    /// accelerates. BULLET_TYPE_0 main amulets fly straight.
+    homing: bool,
+    age: u32,
+    /// Current speed magnitude (Player.cpp `unk_134.y`), grown while homing.
+    spd: f32,
+}
+
+/// One entry of a ReimuA power-rank fire table (CharacterPowerBulletData).
+struct ShotDef {
+    /// Fires when `fireTimer % wait == frame` (frames 0..=30).
+    wait: i32,
+    frame: i32,
+    /// Spawn offset from the firing point.
+    motion: [f32; 2],
+    /// Direction in degrees, 0 = right, clockwise (so -90 = straight up).
+    dir_deg: f32,
+    vel: f32,
+    damage: i32,
+    /// 0 = player center, 1 = left orb, 2 = right orb.
+    spawn: u8,
+    /// BULLET_TYPE_1 (orb amulet).
+    homing: bool,
+}
+
+const fn sd(wait: i32, frame: i32, mx: f32, dir_deg: f32, vel: f32, damage: i32, spawn: u8, homing: bool) -> ShotDef {
+    ShotDef { wait, frame, motion: [mx, 0.0], dir_deg, vel, damage, spawn, homing }
+}
+
+/// ReimuA shot tiers (g_CharacterPowerDataReimuA in BulletData.cpp). Indexed
+/// by power rank; `REIMU_A_THRESH` maps power -> rank.
+const REIMU_A_THRESH: [i32; 9] = [8, 16, 32, 48, 64, 80, 96, 127, 999];
+const REIMU_A_RANKS: [&[ShotDef]; 9] = [
+    // Rank 1
+    &[sd(5, 0, 0.0, -90.0, 12.0, 48, 0, false)],
+    // Rank 2
+    &[
+        sd(5, 0, 0.0, -90.0, 12.0, 48, 0, false),
+        sd(30, 0, 0.0, -120.0, 10.0, 14, 1, true),
+        sd(30, 0, 0.0, -60.0, 10.0, 14, 2, true),
+    ],
+    // Rank 3
+    &[
+        sd(5, 0, -4.0, -91.0, 12.0, 30, 0, false),
+        sd(5, 0, 4.0, -89.0, 12.0, 30, 0, false),
+        sd(30, 0, 0.0, -120.0, 10.0, 14, 1, true),
+        sd(30, 0, 0.0, -60.0, 10.0, 14, 2, true),
+    ],
+    // Rank 4
+    &[
+        sd(5, 0, 0.0, -96.0, 12.0, 24, 0, false),
+        sd(5, 0, 0.0, -90.0, 12.0, 30, 0, false),
+        sd(5, 0, 0.0, -84.0, 12.0, 24, 0, false),
+        sd(30, 0, 0.0, -120.0, 10.0, 14, 1, true),
+        sd(30, 0, 0.0, -60.0, 10.0, 14, 2, true),
+    ],
+    // Rank 5
+    &[
+        sd(5, 0, 0.0, -97.0, 12.0, 24, 0, false),
+        sd(5, 0, 0.0, -90.0, 12.0, 30, 0, false),
+        sd(5, 0, 0.0, -83.0, 12.0, 24, 0, false),
+        sd(15, 0, 0.0, -120.0, 10.0, 12, 1, true),
+        sd(15, 0, 0.0, -60.0, 10.0, 12, 2, true),
+    ],
+    // Rank 6
+    &[
+        sd(5, 0, 0.0, -97.0, 12.0, 24, 0, false),
+        sd(5, 0, 0.0, -90.0, 12.0, 29, 0, false),
+        sd(5, 0, 0.0, -83.0, 12.0, 24, 0, false),
+        sd(15, 0, 0.0, -120.0, 10.0, 9, 1, true),
+        sd(15, 0, 0.0, -60.0, 10.0, 9, 2, true),
+        sd(30, 0, 0.0, -150.0, 10.0, 12, 1, true),
+        sd(30, 0, 0.0, -30.0, 10.0, 12, 2, true),
+    ],
+    // Rank 7
+    &[
+        sd(5, 0, 0.0, -97.0, 12.0, 24, 0, false),
+        sd(5, 0, 0.0, -90.0, 12.0, 28, 0, false),
+        sd(5, 0, 0.0, -83.0, 12.0, 24, 0, false),
+        sd(30, 0, 0.0, -110.0, 10.0, 10, 1, true),
+        sd(30, 0, 0.0, -70.0, 10.0, 10, 2, true),
+        sd(30, 10, 0.0, -130.0, 10.0, 9, 1, true),
+        sd(30, 10, 0.0, -50.0, 10.0, 9, 2, true),
+        sd(30, 20, 0.0, -150.0, 10.0, 11, 1, true),
+        sd(30, 20, 0.0, -30.0, 10.0, 11, 2, true),
+    ],
+    // Rank 8
+    &[
+        sd(5, 0, 0.0, -97.0, 12.0, 24, 0, false),
+        sd(5, 0, 0.0, -90.0, 12.0, 28, 0, false),
+        sd(5, 0, 0.0, -83.0, 12.0, 24, 0, false),
+        sd(15, 0, 0.0, -110.0, 10.0, 8, 1, true),
+        sd(15, 0, 0.0, -70.0, 10.0, 8, 2, true),
+        sd(15, 5, 0.0, -130.0, 10.0, 8, 1, true),
+        sd(15, 5, 0.0, -50.0, 10.0, 8, 2, true),
+        sd(15, 10, 0.0, -150.0, 10.0, 8, 1, true),
+        sd(15, 10, 0.0, -30.0, 10.0, 8, 2, true),
+    ],
+    // Rank 9
+    &[
+        sd(5, 0, -8.0, -97.0, 12.0, 23, 0, false),
+        sd(5, 0, -8.0, -90.0, 12.0, 24, 0, false),
+        sd(5, 0, 8.0, -90.0, 12.0, 24, 0, false),
+        sd(5, 0, 8.0, -83.0, 12.0, 23, 0, false),
+        sd(16, 0, 0.0, -110.0, 10.0, 10, 1, true),
+        sd(16, 0, 0.0, -70.0, 10.0, 10, 2, true),
+        sd(16, 4, 0.0, -130.0, 10.0, 8, 1, true),
+        sd(16, 4, 0.0, -50.0, 10.0, 8, 2, true),
+        sd(16, 8, 0.0, -150.0, 10.0, 7, 1, true),
+        sd(16, 8, 0.0, -30.0, 10.0, 7, 2, true),
+        sd(16, 12, 0.0, -170.0, 10.0, 10, 1, true),
+        sd(16, 12, 0.0, -10.0, 10.0, 10, 2, true),
+    ],
+];
+
+fn reimu_a_rank(power: i32) -> usize {
+    let mut i = 0;
+    while power >= REIMU_A_THRESH[i] {
+        i += 1;
+    }
+    i
 }
 
 /// Falling collectible (ItemManager port, simplified physics).
@@ -184,17 +311,39 @@ pub struct Stage {
     bullet_sprites: HashMap<u32, Sprite>,
     bullet_tex_size: [f32; 2],
     // player
+    /// player00.anm: sprites + scripts, for the banking/idle animation.
+    player_sprites: HashMap<u32, Sprite>,
+    player_scripts: HashMap<i32, Vec<AnmInstr>>,
+    player_tex_size: [f32; 2],
+    player_runner: AnmRunner,
+    player_script_id: i32,
+    /// Previous horizontal speed sign, to detect banking transitions.
+    prev_hspeed: f32,
+    /// Focus blend 0..1 for the orb slide-in/out animation.
+    focus_anim: f32,
     pos: [f32; 2],
     lives: i32,
     bombs: i32,
     invuln: u32,
     bombing: u32,
-    fire_cd: u32,
+    /// Player.cpp fireBulletTimer: -1 idle, else counts 0..=30 while shooting.
+    fire_timer: i32,
+    /// Deathbomb grace: frames left to bomb after a lethal hit (0 = not dying).
+    dying: u32,
+    graze: i64,
+    /// Focus held last update, for drawing the orbs in their focused position.
+    last_input_focus: bool,
+    /// Position of the last enemy a player shot hit, for orb-amulet homing.
+    last_enemy_hit: Option<[f32; 2]>,
     state: PlayerState,
     shots: Vec<Shot>,
     items: Vec<Item>,
     particles: Vec<Particle>,
     score: i64,
+    /// Running count for scoring power items collected at max power.
+    power_item_count: usize,
+    paused: bool,
+    pause_cursor: usize,
     rand_item_table: usize,
     rand_item_spawn: usize,
     spell_active: bool,
@@ -210,8 +359,11 @@ pub struct Stage {
 }
 
 impl Stage {
-    pub fn new(ecl: Ecl, enemy_scripts: HashMap<i32, ScriptRef>, etama: &Entry, msg: Msg, background: Option<Background>) -> Self {
+    pub fn new(ecl: Ecl, enemy_scripts: HashMap<i32, ScriptRef>, etama: &Entry, player: &Entry, msg: Msg, background: Option<Background>) -> Self {
         let timeline_off = ecl.timeline_offset;
+        let player_scripts: HashMap<i32, Vec<AnmInstr>> =
+            player.scripts.iter().map(|(id, instrs)| (*id as i32, instrs.clone())).collect();
+        let idle = player_scripts.get(&0).cloned().unwrap_or_default();
         Self {
             tick: 0,
             anim: 0,
@@ -236,17 +388,31 @@ impl Stage {
             enemy_scripts,
             bullet_sprites: etama.sprites.iter().map(|s| (s.index, s.clone())).collect(),
             bullet_tex_size: [etama.width as f32, etama.height as f32],
+            player_sprites: player.sprites.iter().map(|s| (s.index, s.clone())).collect(),
+            player_tex_size: [player.width as f32, player.height as f32],
+            player_runner: AnmRunner::new(idle),
+            player_scripts,
+            player_script_id: 0,
+            prev_hspeed: 0.0,
+            focus_anim: 0.0,
             pos: [FIELD_W / 2.0, FIELD_H - 40.0],
             lives: 2,
             bombs: 3,
             invuln: 0,
             bombing: 0,
-            fire_cd: 0,
+            fire_timer: -1,
+            dying: 0,
+            graze: 0,
+            last_input_focus: false,
+            last_enemy_hit: None,
             state: PlayerState::Alive,
             shots: Vec::new(),
             items: Vec::new(),
             particles: Vec::new(),
             score: 0,
+            power_item_count: 0,
+            paused: false,
+            pause_cursor: 0,
             rand_item_table: 0,
             rand_item_spawn: 0,
             spell_active: false,
@@ -271,6 +437,19 @@ impl Stage {
     }
 
     pub fn update(&mut self, input: &Input) -> Vec<DrawCmd> {
+        // The pause menu freezes the whole game (no tick, no sim).
+        if self.paused {
+            self.run_pause_menu(input);
+            return self.draw();
+        }
+        if input.pressed(Key::Pause)
+            && matches!(self.state, PlayerState::Alive | PlayerState::Dead(_))
+        {
+            self.paused = true;
+            self.pause_cursor = 0;
+            return self.draw();
+        }
+
         self.tick += 1;
         self.anim += 1;
         if let Some(bg) = &mut self.background {
@@ -304,7 +483,8 @@ impl Stage {
             self.invuln = 180;
             self.state = PlayerState::Alive;
         }
-        if matches!(self.state, PlayerState::Alive) && !self.dialogue.active {
+        // The player can still move (but not shoot/bomb) during dialogue.
+        if matches!(self.state, PlayerState::Alive) {
             self.update_player(input);
         }
         if self.dialogue.active {
@@ -313,8 +493,15 @@ impl Stage {
         self.invuln = self.invuln.saturating_sub(1);
         self.spell_result = self.spell_result.saturating_sub(1);
         self.world.player_pos = self.pos;
+        self.player_runner.tick();
 
-        self.run_timeline();
+        // Only the timeline freezes during dialogue (EnemyManager gates it on
+        // !HasCurrentMsgIdx), which keeps the boss's scripted attack from
+        // triggering. Bullets, enemies and collision keep running so the
+        // player must still dodge whatever is already on screen.
+        if !self.dialogue.active {
+            self.run_timeline();
+        }
         self.update_enemies();
         self.update_shots();
         self.update_bullets();
@@ -333,6 +520,31 @@ impl Stage {
         }
 
         self.draw()
+    }
+
+    const PAUSE_OPTIONS: [&'static str; 3] = ["Resume", "Return to Title", "Quit Game"];
+
+    fn run_pause_menu(&mut self, input: &Input) {
+        if input.pressed(Key::Pause) {
+            self.paused = false;
+            return;
+        }
+        let n = Self::PAUSE_OPTIONS.len();
+        if input.pressed(Key::Up) {
+            self.pause_cursor = (self.pause_cursor + n - 1) % n;
+            self.events.push(Event::Sfx("tan00"));
+        }
+        if input.pressed(Key::Down) {
+            self.pause_cursor = (self.pause_cursor + 1) % n;
+            self.events.push(Event::Sfx("tan00"));
+        }
+        if input.pressed(Key::Shoot) || input.pressed(Key::Enter) {
+            match self.pause_cursor {
+                0 => self.paused = false,
+                1 => self.events.push(Event::BackToTitle),
+                _ => self.events.push(Event::Quit),
+            }
+        }
     }
 
     fn timeline_done(&self) -> bool {
@@ -521,6 +733,7 @@ impl Stage {
 
     fn update_player(&mut self, input: &Input) {
         let focus = input.held(Key::Focus);
+        self.last_input_focus = focus;
         let speed = if focus { 2.0 } else { 4.0 };
         let mut d = [0.0f32, 0.0f32];
         if input.held(Key::Left) {
@@ -543,42 +756,47 @@ impl Stage {
         self.pos[0] = (self.pos[0] + d[0] * speed).clamp(12.0, FIELD_W - 12.0);
         self.pos[1] = (self.pos[1] + d[1] * speed).clamp(20.0, FIELD_H - 20.0);
 
-        self.fire_cd = self.fire_cd.saturating_sub(1);
-        if input.held(Key::Shoot) && self.fire_cd == 0 {
-            self.fire_cd = 4;
-            // Stream count grows with power, approximating Reimu A tiers.
-            let power = self.world.power;
-            if focus {
-                let mut lanes = vec![-5.0, 5.0];
-                if power >= 32 {
-                    lanes.extend([-11.0, 11.0]);
-                }
-                for dx in lanes {
-                    self.shots.push(Shot {
-                        pos: [self.pos[0] + dx, self.pos[1] - 20.0],
-                        vel: [0.0, -14.0],
-                        needle: true,
-                    });
-                }
-            } else {
-                let mut lanes = vec![(-8.0, -0.6), (8.0, 0.6)];
-                if power >= 8 {
-                    lanes.extend([(-16.0, -1.8), (16.0, 1.8)]);
-                }
-                if power >= 48 {
-                    lanes.extend([(-24.0, -3.0), (24.0, 3.0)]);
-                }
-                for (dx, vx) in lanes {
-                    self.shots.push(Shot {
-                        pos: [self.pos[0] + dx, self.pos[1] - 16.0],
-                        vel: [vx, -12.0],
-                        needle: false,
-                    });
+        // Banking animation (HandlePlayerInputs): switch player ANM script on
+        // the horizontal-speed sign transitions. Stopping scripts loop back
+        // into the idle frames on their own.
+        let hspeed = d[0] * speed;
+        let prev = self.prev_hspeed;
+        if hspeed < 0.0 && prev >= 0.0 {
+            self.set_player_script(1); // MOVING_LEFT
+        } else if hspeed == 0.0 && prev < 0.0 {
+            self.set_player_script(2); // STOPPING_LEFT
+        }
+        if hspeed > 0.0 && prev <= 0.0 {
+            self.set_player_script(3); // MOVING_RIGHT
+        } else if hspeed == 0.0 && prev > 0.0 {
+            self.set_player_script(4); // STOPPING_RIGHT
+        }
+        self.prev_hspeed = hspeed;
+
+        // Orb slide blend toward focused (1) / unfocused (0) over 8 frames.
+        let target = if focus { 1.0 } else { 0.0 };
+        self.focus_anim += (target - self.focus_anim).clamp(-0.125, 0.125);
+
+        // Shooting and bombing are disabled during dialogue (Player.cpp gates
+        // both on !HasCurrentMsgIdx), but the player can still move and dodge.
+        let can_act = !self.dialogue.active;
+
+        // Player.cpp StartFireBulletTimer / UpdateFireBulletsTimer: holding
+        // Shoot (re)starts the idle fire timer, which then counts 0..=29 and
+        // spawns the matching table entries each frame before resetting.
+        if can_act {
+            if input.held(Key::Shoot) && self.fire_timer < 0 {
+                self.fire_timer = 0;
+            }
+            if self.fire_timer >= 0 {
+                self.spawn_player_bullets(self.fire_timer);
+                self.fire_timer += 1;
+                if self.fire_timer >= 30 {
+                    self.fire_timer = -1;
                 }
             }
-            if self.tick % 8 == 0 {
-                self.events.push(Event::Sfx("plst00"));
-            }
+        } else {
+            self.fire_timer = -1;
         }
 
         if self.bombing > 0 {
@@ -589,21 +807,134 @@ impl Stage {
                     e.life -= 4;
                 }
             }
-        } else if input.pressed(Key::Bomb) && self.bombs > 0 {
+        } else if can_act && input.pressed(Key::Bomb) && self.bombs > 0 {
+            self.dying = 0; // a bomb in the deathbomb window cancels the death
             self.bombs -= 1;
             self.bombing = 120;
             self.invuln = self.invuln.max(180);
             self.spell_capturing = false; // bombing forfeits the capture
             self.events.push(Event::Sfx("power1"));
+        } else if self.dying > 0 {
+            // No bomb this frame: tick the deathbomb window, commit on expiry.
+            self.dying -= 1;
+            if self.dying == 0 {
+                self.commit_death();
+            }
+        }
+    }
+
+    /// Player::Die plus the respawn bookkeeping: lose a life and 16 power.
+    fn commit_death(&mut self) {
+        self.lives -= 1;
+        self.world.power = (self.world.power - 16).max(0);
+        self.bombs = 3;
+        self.spell_capturing = false; // dying forfeits the capture
+        self.world.bullets.clear();
+        self.cancel_lasers();
+        self.spawn_burst(self.pos, 20, 4.0, [1.0, 0.5, 0.5], 12.0);
+        self.state = PlayerState::Dead(60);
+        self.events.push(Event::Sfx("pldead00"));
+    }
+
+    /// Switch the player ANM script (idle/banking) if it changed.
+    fn set_player_script(&mut self, id: i32) {
+        if self.player_script_id == id {
+            return;
+        }
+        if let Some(instrs) = self.player_scripts.get(&id) {
+            self.player_runner = AnmRunner::new(instrs.clone());
+            self.player_script_id = id;
+        }
+    }
+
+    /// HandlePlayerInputs orb offsets, blended over the focus animation:
+    /// unfocused (24, 0) slides to focused (8, -32).
+    fn orb_positions(&self) -> [[f32; 2]; 2] {
+        let a = self.focus_anim;
+        let h = 24.0 - 16.0 * a;
+        let v = -32.0 * a;
+        [[self.pos[0] - h, self.pos[1] + v], [self.pos[0] + h, self.pos[1] + v]]
+    }
+
+    /// SpawnBullets / FireSingleBullet for ReimuA: fire every table entry of
+    /// the current power rank whose timing matches the fire timer.
+    fn spawn_player_bullets(&mut self, timer: i32) {
+        let rank = REIMU_A_RANKS[reimu_a_rank(self.world.power)];
+        let orbs = self.orb_positions();
+        let orbs_shown = self.world.power >= 8;
+        let mut fired_main = false;
+        for def in rank {
+            if timer % def.wait != def.frame {
+                continue;
+            }
+            if def.spawn != 0 && !orbs_shown {
+                continue; // orb amulets only exist at power >= 8
+            }
+            let base = match def.spawn {
+                1 => orbs[0],
+                2 => orbs[1],
+                _ => self.pos,
+            };
+            let a = def.dir_deg.to_radians();
+            self.shots.push(Shot {
+                pos: [base[0] + def.motion[0], base[1] + def.motion[1]],
+                vel: [a.cos() * def.vel, a.sin() * def.vel],
+                damage: def.damage,
+                homing: def.homing,
+                age: 0,
+                spd: def.vel,
+            });
+            fired_main |= !def.homing;
+        }
+        if fired_main {
+            self.events.push(Event::Sfx("plst00"));
+        }
+    }
+
+    /// UpdatePlayerBullets BULLET_TYPE_1: orb amulets steer toward the last
+    /// enemy hit for their first 40 frames, then accelerate up to speed 10.
+    fn home_shot(s: &mut Shot, target: Option<[f32; 2]>) {
+        match target {
+            Some(t) if s.age < 40 => {
+                let mut vx = t[0] - s.pos[0];
+                let mut vy = t[1] - s.pos[1];
+                let mut len = (vx * vx + vy * vy).sqrt() / (s.spd / 4.0);
+                if len < 1.0 {
+                    len = 1.0;
+                }
+                vx = vx / len + s.vel[0];
+                vy = vy / len + s.vel[1];
+                len = (vx * vx + vy * vy).sqrt();
+                s.spd = len.min(10.0).max(1.0);
+                if len > 0.0 {
+                    s.vel = [vx * s.spd / len, vy * s.spd / len];
+                }
+            }
+            _ => {
+                if s.spd < 10.0 {
+                    s.spd += 1.0 / 3.0;
+                    let len = (s.vel[0] * s.vel[0] + s.vel[1] * s.vel[1]).sqrt();
+                    if len > 0.0 {
+                        s.vel = [s.vel[0] * s.spd / len, s.vel[1] * s.spd / len];
+                    }
+                }
+            }
         }
     }
 
     fn update_shots(&mut self) {
+        let target = self.last_enemy_hit;
         for s in &mut self.shots {
+            if s.homing {
+                Self::home_shot(s, target);
+            }
             s.pos[0] += s.vel[0];
             s.pos[1] += s.vel[1];
+            s.age += 1;
         }
-        self.shots.retain(|s| s.pos[1] > -50.0);
+        self.shots.retain(|s| {
+            s.pos[1] > -50.0 && s.pos[1] < FIELD_H + 50.0 && s.pos[0] > -50.0 && s.pos[0] < FIELD_W + 50.0
+        });
     }
 
     fn update_bullets(&mut self) {
@@ -702,13 +1033,15 @@ impl Stage {
     }
 
     fn collide(&mut self) {
-        // Player shots vs enemies.
+        // Player shots vs enemies. Damage is the table value; orb amulets
+        // remember where they last connected so they can home (positionOf-
+        // LastEnemyHit, reset each frame). Hitting an enemy scores
+        // (min(dmg,70)/5)*10 (EnemyManager.cpp), regardless of any spellcard
+        // damage cut; the cut only reduces the life lost.
         let spell_penalty = self.spell_active && self.bombing == 0;
+        let mut last_hit = None;
+        let mut dmg_score: i64 = 0;
         for s in &mut self.shots {
-            let mut dmg = if s.needle { 6 } else { 4 };
-            if spell_penalty {
-                dmg = (dmg / 7).max(1);
-            }
             for e in &mut self.enemies {
                 if !e.occupied || !e.interactable {
                     continue;
@@ -717,60 +1050,85 @@ impl Stage {
                 let dx = s.pos[0] - e.pos[0];
                 let dy = s.pos[1] - e.pos[1];
                 if dx * dx + dy * dy < r * r {
+                    dmg_score += (s.damage.min(70) / 5 * 10) as i64;
+                    let dmg = if spell_penalty {
+                        if s.damage > 7 { s.damage / 7 } else { 1 }
+                    } else {
+                        s.damage
+                    };
                     if e.damageable {
                         e.life -= dmg;
                     }
+                    last_hit = Some([e.pos[0], e.pos[1]]);
                     s.pos[1] = -100.0;
                     break;
                 }
             }
         }
+        self.score += dmg_score;
+        self.last_enemy_hit = last_hit;
         self.shots.retain(|s| s.pos[1] > -90.0);
 
-        // Enemy deaths.
+        // Enemy deaths award the enemy's score value (default 100).
         let mut drops: Vec<([f32; 2], i16)> = Vec::new();
+        let mut death_fx: Vec<[f32; 2]> = Vec::new();
         for i in 0..self.enemies.len() {
             let e = &mut self.enemies[i];
             if e.occupied && e.interactable && e.life <= 0 {
                 drops.push(([e.pos[0], e.pos[1]], e.item_drop));
+                if !e.is_boss {
+                    death_fx.push([e.pos[0], e.pos[1]]);
+                }
+                self.score += e.score as i64;
                 e.on_death(&self.ecl, &mut self.world);
                 self.events.push(Event::Sfx("enep00"));
             }
+        }
+        for pos in death_fx {
+            // Bright flash ring + a puff, like the original enemy pop.
+            self.spawn_burst(pos, 12, 3.0, [1.0, 0.95, 0.7], 7.0);
+            self.particles.push(Particle {
+                pos,
+                vel: [0.0, 0.0],
+                life: 12.0,
+                max_life: 12.0,
+                size: 10.0,
+                color: [1.0, 1.0, 0.9],
+            });
         }
         for (pos, drop) in drops {
             self.spawn_drop(pos, drop);
         }
         self.flush_spawns();
 
-        // Bullets / enemy bodies vs player.
-        if !matches!(self.state, PlayerState::Alive) || self.invuln > 0 {
+        // Bullets / lasers / enemy bodies vs player. Player.cpp uses an AABB:
+        // a tiny hitbox (half-extent 1.25) for kills, expanded by 20 (bullets)
+        // or 48 (lasers) for grazes. Grazing is allowed during the post-respawn
+        // invulnerability, but never while dying or bombing.
+        const PH: f32 = 1.25;
+        let can_graze = matches!(self.state, PlayerState::Alive) && self.dying == 0 && self.bombing == 0;
+        if !can_graze {
             return;
         }
+        let can_be_hit = self.invuln == 0;
         let p = self.pos;
         let radii: Vec<f32> = self.world.bullets.iter().map(|b| self.bullet_radius(b)).collect();
-        let hit_bullet = self
-            .world
-            .bullets
-            .iter()
-            .zip(&radii)
-            .any(|(b, r)| {
-                let dx = b.pos[0] - p[0];
-                let dy = b.pos[1] - p[1];
-                let rr = r + 2.0;
-                dx * dx + dy * dy < rr * rr
-            });
-        let hit_body = self.enemies.iter().any(|e| {
-            if !e.occupied || !e.collidable || !e.interactable {
-                return false;
+
+        let mut kill = false;
+        let mut graze_count: i64 = 0;
+        for (b, &r) in self.world.bullets.iter_mut().zip(&radii) {
+            let dx = (b.pos[0] - p[0]).abs();
+            let dy = (b.pos[1] - p[1]).abs();
+            if can_be_hit && dx < r + PH && dy < r + PH {
+                kill = true;
+            } else if !b.grazed && dx < r + PH + 20.0 && dy < r + PH + 20.0 {
+                b.grazed = true;
+                graze_count += 1;
             }
-            let r = (e.hitbox[0].max(e.hitbox[1])) / 1.5 / 2.0 + 2.0;
-            let dx = e.pos[0] - p[0];
-            let dy = e.pos[1] - p[1];
-            dx * dx + dy * dy < r * r
-        });
-        let hit_laser = self.world.lasers.iter().any(|l| {
+        }
+        for l in &self.world.lasers {
             if !l.in_use {
-                return false;
+                continue;
             }
             let hitbox_live = match l.state {
                 0 => l.timer >= l.hitbox_start,
@@ -778,27 +1136,44 @@ impl Stage {
                 _ => false,
             };
             if !hitbox_live {
-                return false;
+                continue;
             }
-            // Distance from the player to the lit segment.
             let (dx, dy) = (p[0] - l.pos[0], p[1] - l.pos[1]);
             let (c, s) = (l.angle.cos(), l.angle.sin());
             let along = dx * c + dy * s;
             let across = (-dx * s + dy * c).abs();
-            along >= l.start_offset && along <= l.end_offset && across < l.width / 4.0 + 2.0
-        });
-        if (hit_bullet || hit_body || hit_laser) && std::env::var_os("TH06_GOD").is_some() {
-            return; // god mode for headless verification
+            let half = l.width / 4.0;
+            if can_be_hit && along >= l.start_offset && along <= l.end_offset && across < half + PH {
+                kill = true;
+            } else if along >= l.start_offset - 48.0
+                && along <= l.end_offset + 48.0
+                && across < half + PH + 48.0
+            {
+                graze_count += 1; // lasers graze every frame, like the original
+            }
         }
-        if hit_bullet || hit_body || hit_laser {
-            self.lives -= 1;
-            self.bombs = 3;
-            self.spell_capturing = false; // dying forfeits the capture
-            self.world.bullets.clear();
-            self.cancel_lasers();
-            self.spawn_burst(p, 20, 4.0, [1.0, 0.5, 0.5], 12.0);
-            self.state = PlayerState::Dead(60);
-            self.events.push(Event::Sfx("pldead00"));
+        if can_be_hit
+            && self.enemies.iter().any(|e| {
+                if !e.occupied || !e.collidable || !e.interactable {
+                    return false;
+                }
+                let r = (e.hitbox[0].max(e.hitbox[1])) / 1.5 / 2.0 + 2.0;
+                let dx = e.pos[0] - p[0];
+                let dy = e.pos[1] - p[1];
+                dx * dx + dy * dy < r * r
+            })
+        {
+            kill = true;
+        }
+
+        if graze_count > 0 {
+            self.graze += graze_count;
+            self.score += 500 * graze_count;
+            self.events.push(Event::Sfx("graze"));
+        }
+        if kill && std::env::var_os("TH06_GOD").is_none() {
+            // Open the deathbomb window; commit_death fires if it expires unbombed.
+            self.dying = DEATHBOMB_FRAMES;
         }
     }
 
@@ -961,16 +1336,35 @@ impl Stage {
                 _ => [1.0, 0.4, 0.4],       // power = red
             };
             match kind {
-                0 => self.world.power = (self.world.power + 1).min(128),
-                2 => self.world.power = (self.world.power + 8).min(128),
+                0 => self.collect_power(1),
+                2 => self.collect_power(8),
                 4 => self.world.power = 128,
-                1 => self.score += 10000,
+                1 => {
+                    // ITEM_POINT (Normal, calculatePointScore): 100000 at the
+                    // collection line (y < 128), else 60000 - (y-128)*100.
+                    let y = pos[1] as i64;
+                    self.score += if y < 128 { 100_000 } else { (60_000 - (y - 128) * 100).max(0) };
+                }
                 3 => self.bombs = (self.bombs + 1).min(8),
                 5 => self.lives = (self.lives + 1).min(8),
                 _ => {}
             }
             self.spawn_burst(pos, 4, 1.5, color, 6.0);
             self.events.push(Event::Sfx("item00"));
+        }
+    }
+
+    /// ItemManager power-item collection: below max, +`amount` power and +10
+    /// score; at max power, items convert to score via the g_PowerItemScore
+    /// table indexed by a running count.
+    fn collect_power(&mut self, amount: i32) {
+        if self.world.power >= 128 {
+            self.power_item_count = (self.power_item_count + amount as usize).min(30);
+            self.score += POWER_ITEM_SCORE[self.power_item_count];
+        } else {
+            self.power_item_count = 0;
+            self.world.power = (self.world.power + amount).min(128);
+            self.score += 10;
         }
     }
 
@@ -1054,6 +1448,29 @@ impl Stage {
             ));
         }
 
+        // Spellcard aura: a pulsing, spinning glow behind the boss.
+        if self.spell_active {
+            if let Some(boss) = self.enemies.iter().find(|e| e.is_boss && e.occupied) {
+                let t = self.anim as f32;
+                for i in 0..3 {
+                    let s = 150.0 + i as f32 * 60.0 + (t * 0.06 + i as f32).sin() * 18.0;
+                    let a = (0.18 - i as f32 * 0.04) * (0.7 + 0.3 * (t * 0.05).sin());
+                    cmds.push(DrawCmd {
+                        tex: TEX_WHITE,
+                        dst: [
+                            FIELD_X + boss.pos[0] - s / 2.0,
+                            FIELD_Y + boss.pos[1] - s / 2.0,
+                            s,
+                            s,
+                        ],
+                        src: [0.25, 0.25, 0.75, 0.75],
+                        tint: [0.9, 0.3, 0.5, a.max(0.0)],
+                        rot: t * 0.02 * (i as f32 + 1.0),
+                    });
+                }
+            }
+        }
+
         // Enemies via their ANM state.
         for (e, anim) in self.enemies.iter().zip(&self.anims) {
             if !e.occupied || e.invisible {
@@ -1114,17 +1531,52 @@ impl Stage {
             });
         }
 
-        // Player shots.
+        // Player shots (ReimuA fires amulets, both main and orb).
         for s in &self.shots {
-            let sp = if s.needle { NEEDLE } else { AMULET };
-            cmds.push(sprite_at(sp, s.pos, 0.85));
+            cmds.push(sprite_at(AMULET, s.pos, 0.85));
         }
 
-        // Player.
+        // Player: the player00.anm runner drives the idle/banking sprite.
         if matches!(self.state, PlayerState::Alive | PlayerState::Cleared(_)) {
-            let blink = self.invuln > 0 && (self.anim / 4) % 2 == 0;
+            let blink = (self.invuln > 0 || self.dying > 0) && (self.anim / 4) % 2 == 0;
             if !blink {
-                cmds.push(sprite_at(REIMU_IDLE[(self.anim / 8) as usize % 4], self.pos, 1.0));
+                let [ptw, pth] = self.player_tex_size;
+                let sp = self
+                    .player_runner
+                    .sprite
+                    .and_then(|i| self.player_sprites.get(&i))
+                    .unwrap_or_else(|| &self.player_sprites[&0]);
+                let (mut u0, mut u1) = (sp.x / ptw, (sp.x + sp.width) / ptw);
+                if self.player_runner.flip_x {
+                    std::mem::swap(&mut u0, &mut u1);
+                }
+                cmds.push(DrawCmd {
+                    tex: TEX_PLAYER,
+                    dst: [
+                        FIELD_X + self.pos[0] - sp.width / 2.0,
+                        FIELD_Y + self.pos[1] - sp.height / 2.0,
+                        sp.width,
+                        sp.height,
+                    ],
+                    src: [u0, sp.y / pth, u1, (sp.y + sp.height) / pth],
+                    tint: [1.0, 1.0, 1.0, 1.0],
+                    rot: 0.0,
+                });
+            }
+            // Floating option orbs (appear at power >= 8).
+            if self.world.power >= 8 {
+                for o in self.orb_positions() {
+                    let mut orb = sprite_at(AMULET, o, 0.8);
+                    orb.tint = [1.0, 0.6, 0.7, 0.95];
+                    cmds.push(orb);
+                }
+            }
+            // Focus hitbox marker: fades/spins in while focusing.
+            if self.focus_anim > 0.01 {
+                let mut m = sprite_at(HITBOX_MARKER, self.pos, 0.95);
+                m.tint = [1.0, 1.0, 1.0, self.focus_anim];
+                m.rot = self.anim as f32 * 0.1;
+                cmds.push(m);
             }
         }
 
@@ -1336,6 +1788,7 @@ impl Stage {
         // Score and power readouts.
         draw_text(cmds, [sx, 84.0], 16.0, [1.0, 1.0, 1.0, 1.0], &format!("Score {}", self.score));
         draw_text(cmds, [sx, 172.0], 16.0, [1.0, 0.8, 0.4, 1.0], &format!("Power {:3}", self.world.power));
+        draw_text(cmds, [sx, 190.0], 16.0, [0.8, 0.9, 1.0, 1.0], &format!("Graze {}", self.graze));
 
         let mut logo = hud_sprite(HUD_LOGO, [sx - 4.0, 300.0]);
         logo.tint = [1.0, 1.0, 1.0, 0.85];
@@ -1349,6 +1802,17 @@ impl Stage {
                 cmds.push(rect([FIELD_X, FIELD_Y, FIELD_W, FIELD_H], [1.0, 1.0, 1.0, 0.12]));
             }
             _ => {}
+        }
+
+        if self.paused {
+            cmds.push(rect([0.0, 0.0, 640.0, 480.0], [0.0, 0.0, 0.0, 0.62]));
+            draw_text(cmds, [FIELD_X + FIELD_W / 2.0 - 36.0, 150.0], 24.0, [1.0, 1.0, 1.0, 1.0], "PAUSE");
+            for (i, opt) in Self::PAUSE_OPTIONS.iter().enumerate() {
+                let sel = i == self.pause_cursor;
+                let tint = if sel { [1.0, 1.0, 0.4, 1.0] } else { [0.65, 0.65, 0.65, 1.0] };
+                let label = if sel { format!("> {opt}") } else { opt.to_string() };
+                draw_text(cmds, [FIELD_X + 40.0, 220.0 + i as f32 * 34.0], 18.0, tint, &label);
+            }
         }
     }
 }
