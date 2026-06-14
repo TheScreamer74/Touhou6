@@ -41,8 +41,9 @@ contains **zero** copyrighted assets — only code.
 | **Stage 1 — complete** (exact ECL patterns, midboss + Rumia, dialogue, spellcards, 3D background) | ✅ done |
 | Faithful player (Reimu A shot tiers, hitbox, graze, deathbomb, Fantasy Seal bomb) | ✅ done |
 | Scoring, results screen, high-score save, pause menu | ✅ done |
+| All four shot types (Reimu A/B, Marisa A/B) + character select | ✅ done |
 | Stages 2–6 + Extra | 🔜 next |
-| Other shot types (Reimu B, Marisa A/B) | ⬜ |
+| Web build (WASM, bring-your-own-files upload) | 🔜 planned |
 | Replays, Practice+, rewind | ⬜ |
 | JP / EN language selector | ⬜ |
 
