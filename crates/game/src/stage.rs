@@ -74,15 +74,15 @@ struct Shot {
     pos: [f32; 2],
     vel: [f32; 2],
     damage: i32,
-    /// BULLET_TYPE_1 orb amulet: homes toward the last enemy hit, then
-    /// accelerates. BULLET_TYPE_0 main amulets fly straight.
-    homing: bool,
+    /// BULLET_TYPE_*: 0 straight, 1 homing orb (Reimu A), 2 gravity orb-missile
+    /// (Marisa A), 3 laser (handled separately).
+    bt: u8,
     age: u32,
     /// Current speed magnitude (Player.cpp `unk_134.y`), grown while homing.
     spd: f32,
 }
 
-/// One entry of a ReimuA power-rank fire table (CharacterPowerBulletData).
+/// One entry of a power-rank fire table (CharacterPowerBulletData).
 struct ShotDef {
     /// Fires when `fireTimer % wait == frame` (frames 0..=30).
     wait: i32,
@@ -95,17 +95,22 @@ struct ShotDef {
     damage: i32,
     /// 0 = player center, 1 = left orb, 2 = right orb.
     spawn: u8,
-    /// BULLET_TYPE_1 (orb amulet).
-    homing: bool,
+    /// Bullet type (see Shot::bt).
+    bt: u8,
 }
 
+/// Reimu A constructor (motion.y = 0; bullet type from the homing flag).
 const fn sd(wait: i32, frame: i32, mx: f32, dir_deg: f32, vel: f32, damage: i32, spawn: u8, homing: bool) -> ShotDef {
-    ShotDef { wait, frame, motion: [mx, 0.0], dir_deg, vel, damage, spawn, homing }
+    ShotDef { wait, frame, motion: [mx, 0.0], dir_deg, vel, damage, spawn, bt: homing as u8 }
+}
+
+/// General constructor with explicit motion.y and bullet type.
+const fn sb(wait: i32, frame: i32, mx: f32, my: f32, dir_deg: f32, vel: f32, damage: i32, spawn: u8, bt: u8) -> ShotDef {
+    ShotDef { wait, frame, motion: [mx, my], dir_deg, vel, damage, spawn, bt }
 }
 
 /// ReimuA shot tiers (g_CharacterPowerDataReimuA in BulletData.cpp). Indexed
-/// by power rank; `REIMU_A_THRESH` maps power -> rank.
-const REIMU_A_THRESH: [i32; 9] = [8, 16, 32, 48, 64, 80, 96, 127, 999];
+/// by power rank (see `power_rank`).
 const REIMU_A_RANKS: [&[ShotDef]; 9] = [
     // Rank 1
     &[sd(5, 0, 0.0, -90.0, 12.0, 48, 0, false)],
@@ -189,9 +194,126 @@ const REIMU_A_RANKS: [&[ShotDef]; 9] = [
     ],
 ];
 
-fn reimu_a_rank(power: i32) -> usize {
+/// ReimuB shot tiers (g_CharacterPowerDataReimuB). All straight bullets:
+/// a front spread (centre) plus fast needles from the orbs (motion.y -16).
+const REIMU_B_RANKS: [&[ShotDef]; 9] = [
+    // Rank 1
+    &[sd(5, 0, 0.0, -90.0, 12.0, 48, 0, false)],
+    // Rank 2
+    &[
+        sd(5, 0, 0.0, -90.0, 12.0, 48, 0, false),
+        sb(15, 0, 0.0, -16.0, -90.0, 22.0, 12, 1, 0),
+        sb(15, 0, 0.0, -16.0, -90.0, 22.0, 12, 2, 0),
+    ],
+    // Rank 3
+    &[
+        sd(5, 0, -4.0, -91.0, 12.0, 32, 0, false),
+        sd(5, 0, 4.0, -89.0, 12.0, 32, 0, false),
+        sb(10, 0, 0.0, -16.0, -90.0, 22.0, 12, 1, 0),
+        sb(10, 0, 0.0, -16.0, -90.0, 22.0, 12, 2, 0),
+    ],
+    // Rank 4
+    &[
+        sd(5, 0, -4.0, -91.0, 12.0, 30, 0, false),
+        sd(5, 0, 4.0, -89.0, 12.0, 30, 0, false),
+        sb(8, 0, 0.0, -16.0, -90.0, 22.0, 12, 1, 0),
+        sb(8, 0, 0.0, -16.0, -90.0, 22.0, 12, 2, 0),
+    ],
+    // Rank 5
+    &[
+        sd(5, 0, 0.0, -97.0, 12.0, 20, 0, false),
+        sd(5, 0, 0.0, -90.0, 12.0, 28, 0, false),
+        sd(5, 0, 0.0, -83.0, 12.0, 20, 0, false),
+        sb(8, 0, 0.0, -16.0, -90.0, 22.0, 12, 1, 0),
+        sb(8, 0, 0.0, -16.0, -90.0, 22.0, 12, 2, 0),
+    ],
+    // Rank 6
+    &[
+        sd(5, 0, 0.0, -97.0, 12.0, 16, 0, false),
+        sd(5, 0, 0.0, -90.0, 12.0, 27, 0, false),
+        sd(5, 0, 0.0, -83.0, 12.0, 16, 0, false),
+        sb(5, 0, 8.0, -16.0, -90.0, 22.0, 12, 1, 0),
+        sb(5, 0, 8.0, -16.0, -90.0, 22.0, 12, 2, 0),
+        sb(8, 0, -8.0, -16.0, -90.0, 22.0, 10, 1, 0),
+        sb(8, 0, -8.0, -16.0, -90.0, 22.0, 10, 2, 0),
+    ],
+    // Rank 7
+    &[
+        sd(5, 0, 0.0, -98.0, 12.0, 16, 0, false),
+        sd(5, 0, 0.0, -90.0, 12.0, 22, 0, false),
+        sd(5, 0, 0.0, -82.0, 12.0, 16, 0, false),
+        sb(3, 0, 8.0, -16.0, -90.0, 22.0, 10, 1, 0),
+        sb(3, 0, 8.0, -16.0, -90.0, 22.0, 10, 2, 0),
+        sb(5, 0, -8.0, -16.0, -90.0, 22.0, 10, 1, 0),
+        sb(5, 0, -8.0, -16.0, -90.0, 22.0, 10, 2, 0),
+    ],
+    // Rank 8
+    &[
+        sd(5, 0, 0.0, -106.0, 12.0, 9, 0, false),
+        sd(5, 0, 0.0, -98.0, 12.0, 17, 0, false),
+        sd(5, 0, 0.0, -90.0, 12.0, 20, 0, false),
+        sd(5, 0, 0.0, -82.0, 12.0, 17, 0, false),
+        sd(5, 0, 0.0, -74.0, 12.0, 9, 0, false),
+        sb(3, 0, 12.0, -16.0, -90.0, 22.0, 10, 1, 0),
+        sb(3, 0, 12.0, -16.0, -90.0, 22.0, 10, 2, 0),
+        sb(5, 0, -12.0, -16.0, -90.0, 22.0, 10, 1, 0),
+        sb(5, 0, -12.0, -16.0, -90.0, 22.0, 10, 2, 0),
+        sb(10, 0, 0.0, -16.0, -90.0, 22.0, 10, 1, 0),
+        sb(10, 0, 0.0, -16.0, -90.0, 22.0, 10, 2, 0),
+    ],
+    // Rank 9
+    &[
+        sd(5, 0, 0.0, -106.0, 12.0, 9, 0, false),
+        sd(5, 0, 0.0, -98.0, 12.0, 17, 0, false),
+        sd(5, 0, 0.0, -90.0, 12.0, 20, 0, false),
+        sd(5, 0, 0.0, -82.0, 12.0, 17, 0, false),
+        sd(5, 0, 0.0, -74.0, 12.0, 9, 0, false),
+        sb(3, 0, 12.0, -16.0, -90.0, 22.0, 10, 1, 0),
+        sb(3, 0, 12.0, -16.0, -90.0, 22.0, 10, 2, 0),
+        sb(3, 0, -12.0, -16.0, -90.0, 22.0, 10, 1, 0),
+        sb(3, 0, -12.0, -16.0, -90.0, 22.0, 10, 2, 0),
+        sb(5, 0, 0.0, -16.0, -90.0, 22.0, 10, 1, 0),
+        sb(5, 0, 0.0, -16.0, -90.0, 22.0, 10, 2, 0),
+    ],
+];
+
+/// Player character + shot type.
+#[derive(Clone, Copy, PartialEq)]
+pub enum Character {
+    ReimuA,
+    ReimuB,
+    MarisaA,
+    MarisaB,
+}
+
+impl Character {
+    pub fn label(self) -> &'static str {
+        match self {
+            Character::ReimuA => "Reimu A",
+            Character::ReimuB => "Reimu B",
+            Character::MarisaA => "Marisa A",
+            Character::MarisaB => "Marisa B",
+        }
+    }
+    /// True for Marisa (uses player01.anm instead of player00).
+    pub fn is_marisa(self) -> bool {
+        matches!(self, Character::MarisaA | Character::MarisaB)
+    }
+    fn ranks(self) -> &'static [&'static [ShotDef]; 9] {
+        match self {
+            // Marisa tables land in later phases; fall back to Reimu for now.
+            Character::ReimuA | Character::MarisaA => &REIMU_A_RANKS,
+            Character::ReimuB | Character::MarisaB => &REIMU_B_RANKS,
+        }
+    }
+}
+
+/// Power thresholds shared by all shot types (CharacterPowerData.power).
+const POWER_THRESH: [i32; 9] = [8, 16, 32, 48, 64, 80, 96, 127, 999];
+
+fn power_rank(power: i32) -> usize {
     let mut i = 0;
-    while power >= REIMU_A_THRESH[i] {
+    while power >= POWER_THRESH[i] {
         i += 1;
     }
     i
@@ -321,6 +443,7 @@ pub struct Stage {
     bullet_sprites: HashMap<u32, Sprite>,
     bullet_tex_size: [f32; 2],
     // player
+    character: Character,
     /// player00.anm: sprites + scripts, for the banking/idle animation.
     player_sprites: HashMap<u32, Sprite>,
     player_scripts: HashMap<i32, Vec<AnmInstr>>,
@@ -372,7 +495,7 @@ pub struct Stage {
 }
 
 impl Stage {
-    pub fn new(ecl: Ecl, enemy_scripts: HashMap<i32, ScriptRef>, etama: &Entry, player: &Entry, msg: Msg, background: Option<Background>) -> Self {
+    pub fn new(ecl: Ecl, enemy_scripts: HashMap<i32, ScriptRef>, etama: &Entry, player: &Entry, character: Character, msg: Msg, background: Option<Background>) -> Self {
         let timeline_off = ecl.timeline_offset;
         let player_scripts: HashMap<i32, Vec<AnmInstr>> =
             player.scripts.iter().map(|(id, instrs)| (*id as i32, instrs.clone())).collect();
@@ -401,6 +524,7 @@ impl Stage {
             enemy_scripts,
             bullet_sprites: etama.sprites.iter().map(|s| (s.index, s.clone())).collect(),
             bullet_tex_size: [etama.width as f32, etama.height as f32],
+            character,
             player_sprites: player.sprites.iter().map(|s| (s.index, s.clone())).collect(),
             player_tex_size: [player.width as f32, player.height as f32],
             player_runner: AnmRunner::new(idle),
@@ -947,10 +1071,10 @@ impl Stage {
         [[self.pos[0] - h, self.pos[1] + v], [self.pos[0] + h, self.pos[1] + v]]
     }
 
-    /// SpawnBullets / FireSingleBullet for ReimuA: fire every table entry of
-    /// the current power rank whose timing matches the fire timer.
+    /// SpawnBullets / FireSingleBullet: fire every table entry of the current
+    /// character's power rank whose timing matches the fire timer.
     fn spawn_player_bullets(&mut self, timer: i32) {
-        let rank = REIMU_A_RANKS[reimu_a_rank(self.world.power)];
+        let rank = self.character.ranks()[power_rank(self.world.power)];
         let orbs = self.orb_positions();
         let orbs_shown = self.world.power >= 8;
         let mut fired_main = false;
@@ -959,7 +1083,7 @@ impl Stage {
                 continue;
             }
             if def.spawn != 0 && !orbs_shown {
-                continue; // orb amulets only exist at power >= 8
+                continue; // orb shots only exist at power >= 8
             }
             let base = match def.spawn {
                 1 => orbs[0],
@@ -971,11 +1095,11 @@ impl Stage {
                 pos: [base[0] + def.motion[0], base[1] + def.motion[1]],
                 vel: [a.cos() * def.vel, a.sin() * def.vel],
                 damage: def.damage,
-                homing: def.homing,
+                bt: def.bt,
                 age: 0,
                 spd: def.vel,
             });
-            fired_main |= !def.homing;
+            fired_main |= def.bt == 0;
         }
         if fired_main {
             self.events.push(Event::Sfx("plst00"));
@@ -1016,8 +1140,10 @@ impl Stage {
     fn update_shots(&mut self) {
         let target = self.last_enemy_hit;
         for s in &mut self.shots {
-            if s.homing {
-                Self::home_shot(s, target);
+            match s.bt {
+                1 => Self::home_shot(s, target), // Reimu A homing orb
+                2 => s.vel[1] -= 0.3,            // Marisa A orb-missile gravity
+                _ => {}
             }
             s.pos[0] += s.vel[0];
             s.pos[1] += s.vel[1];
@@ -1954,7 +2080,7 @@ const LASER_COLORS: [[f32; 4]; 16] = [
 ];
 
 /// Draw ASCII text using the 16x16 glyph grid in ascii.png.
-fn draw_text(cmds: &mut Vec<DrawCmd>, pos: [f32; 2], size: f32, tint: [f32; 4], text: &str) {
+pub fn draw_text(cmds: &mut Vec<DrawCmd>, pos: [f32; 2], size: f32, tint: [f32; 4], text: &str) {
     let mut x = pos[0];
     for ch in text.chars() {
         let c = ch as u32;

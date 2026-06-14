@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use th06_engine::audio::Audio;
-use th06_engine::{compose_rgba, Engine, Frame, Input, Key};
+use th06_engine::{compose_rgba, DrawCmd, Engine, Frame, Input, Key};
 use th06_formats::anm0::Anm0;
 use th06_formats::pbg3::Pbg3;
 
@@ -18,7 +18,7 @@ use th06_formats::std::Std;
 
 use background::Background;
 
-use stage::{Event, Stage};
+use stage::{Character, Event, Stage};
 use title::{Title, TitleAction};
 
 /// Everything needed to build a fresh stage 1 run.
@@ -35,7 +35,7 @@ struct StageAssets {
 }
 
 impl StageAssets {
-    fn new_stage(&self) -> Stage {
+    fn new_stage(&self, character: Character) -> Stage {
         let ecl = Ecl::parse(self.ecl_data.clone()).expect("parse ecl");
         let scripts = stage::build_enemy_scripts(&[
             (&self.stg1enm.entries[0], stage::TEX_FAIRY),
@@ -44,7 +44,7 @@ impl StageAssets {
         let msg = Msg::parse(self.msg_data.clone()).expect("parse msg");
         let background = Std::parse(&self.std_data)
             .map(|std| Background::new(std, &self.stg1bg.entries[0], self.bg_tex_slot));
-        Stage::new(ecl, scripts, &self.etama.entries[0], &self.player.entries[0], msg, background)
+        Stage::new(ecl, scripts, &self.etama.entries[0], &self.player.entries[0], character, msg, background)
     }
 }
 
@@ -90,8 +90,12 @@ fn install_crash_logger() {
 
 enum Scene {
     Title,
+    CharSelect { cursor: usize },
     Stage(Box<Stage>),
 }
+
+const CHARACTERS: [Character; 4] =
+    [Character::ReimuA, Character::ReimuB, Character::MarisaA, Character::MarisaB];
 
 struct Game {
     scene: Scene,
@@ -120,6 +124,42 @@ impl Game {
         }
     }
 
+    /// Render the character-select screen (title art + dark overlay + list).
+    fn charselect_cmds(&self, cursor: usize) -> Vec<DrawCmd> {
+        let mut cmds = vec![
+            DrawCmd {
+                tex: 0, // title background
+                dst: [0.0, 0.0, th06_engine::SCREEN_W as f32, th06_engine::SCREEN_H as f32],
+                src: [0.0, 0.0, 1.0, 1.0],
+                tint: [1.0, 1.0, 1.0, 1.0],
+                rot: 0.0,
+            },
+            DrawCmd {
+                tex: 7, // white pixel, dimmed
+                dst: [0.0, 0.0, th06_engine::SCREEN_W as f32, th06_engine::SCREEN_H as f32],
+                src: [0.25, 0.25, 0.75, 0.75],
+                tint: [0.0, 0.0, 0.05, 0.72],
+                rot: 0.0,
+            },
+        ];
+        stage::draw_text(&mut cmds, [180.0, 90.0], 26.0, [1.0, 1.0, 0.5, 1.0], "SELECT CHARACTER");
+        for (i, ch) in CHARACTERS.iter().enumerate() {
+            let sel = i == cursor;
+            let tint = if sel { [1.0, 1.0, 0.4, 1.0] } else { [0.6, 0.6, 0.7, 1.0] };
+            let label = if sel { format!("> {}", ch.label()) } else { ch.label().to_string() };
+            stage::draw_text(&mut cmds, [220.0, 180.0 + i as f32 * 40.0], 22.0, tint, &label);
+        }
+        let note = match CHARACTERS[cursor] {
+            Character::ReimuA => "Homing amulets - forgiving",
+            Character::ReimuB => "Piercing needles - focused",
+            Character::MarisaA => "Power missiles (WIP)",
+            Character::MarisaB => "Illusion lasers (WIP)",
+        };
+        stage::draw_text(&mut cmds, [150.0, 360.0], 14.0, [0.8, 0.85, 1.0, 1.0], note);
+        stage::draw_text(&mut cmds, [150.0, 400.0], 14.0, [0.7, 0.7, 0.7, 1.0], "Z: start   X: back");
+        cmds
+    }
+
     fn update(&mut self, input: &Input) -> Frame {
         if std::env::var_os("TH06_TICKRATE").is_some() {
             use std::sync::atomic::{AtomicU32, Ordering};
@@ -137,16 +177,44 @@ impl Game {
                 *last = Some(now);
             }
         }
+        // Character select is handled before the borrow of self.scene so it can
+        // freely touch audio / start a stage.
+        if let Scene::CharSelect { cursor } = &self.scene {
+            let n = CHARACTERS.len();
+            let mut cur = *cursor;
+            if input.pressed(Key::Up) {
+                cur = (cur + n - 1) % n;
+                if let Some(a) = &self.audio { a.play_sfx("tan00"); }
+            }
+            if input.pressed(Key::Down) {
+                cur = (cur + 1) % n;
+                if let Some(a) = &self.audio { a.play_sfx("tan00"); }
+            }
+            if input.pressed(Key::Bomb) || input.pressed(Key::Pause) {
+                self.scene = Scene::Title;
+                return Frame { cmds: self.charselect_cmds(0), bg: None, quit: false };
+            }
+            if input.pressed(Key::Shoot) || input.pressed(Key::Enter) {
+                let mut stage = self.assets.new_stage(CHARACTERS[cur]);
+                stage.set_hiscore(self.hiscore);
+                self.scene = Scene::Stage(Box::new(stage));
+                if let Some(a) = &self.audio {
+                    a.play_sfx("plst00");
+                }
+                return Frame { cmds: Vec::new(), bg: None, quit: false };
+            }
+            self.scene = Scene::CharSelect { cursor: cur };
+            return Frame { cmds: self.charselect_cmds(cur), bg: None, quit: false };
+        }
         match &mut self.scene {
+            Scene::CharSelect { .. } => unreachable!("handled above"),
             Scene::Title => {
                 let (cmds, action) = self.title.update(input);
                 match action {
                     TitleAction::StartGame => {
-                        let mut stage = self.assets.new_stage();
-                        stage.set_hiscore(self.hiscore);
-                        self.scene = Scene::Stage(Box::new(stage));
+                        self.scene = Scene::CharSelect { cursor: 0 };
                         if let Some(a) = &self.audio {
-                            a.play_sfx("plst00");
+                            a.play_sfx("tan00");
                         }
                     }
                     TitleAction::Quit => return Frame { cmds, bg: None, quit: true },
@@ -296,7 +364,7 @@ fn main() {
     let mut game = Game {
         scene: match scene_arg.as_str() {
             "stage" => {
-                let mut s = assets.new_stage();
+                let mut s = assets.new_stage(Character::ReimuA);
                 s.set_hiscore(hiscore);
                 if let Some(l) = debug_lives {
                     s.set_lives(l);
@@ -322,8 +390,8 @@ fn main() {
         let textures_ref: Vec<&th06_engine::Texture> = textures.iter().collect();
         let mut frame = Frame { cmds: Vec::new(), bg: None, quit: false };
         for f in 0..frames {
-            let input = if f == 3 {
-                Input::synthetic(&[], &[Key::Shoot]) // press Start
+            let input = if f == 3 || f == 15 {
+                Input::synthetic(&[], &[Key::Shoot]) // f3: Start, f15: confirm character
             } else if f > 3 {
                 // Hold shoot; stay low (don't ram enemies) so god mode can
                 // carry the run to the boss for verification.
