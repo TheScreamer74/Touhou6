@@ -70,6 +70,7 @@ fn main() {
     let mut frames = 120u32;
     let mut scene_arg = String::from("title");
     let mut debug_lives: Option<i32> = None;
+    let mut debug_stage = 1usize;
     let mut demo: Option<String> = None;
     let mut demo_interval = 300u32;
     let mut game_dir = String::from("../TH06 ~ The Embodiment of Scarlet Devil/kouma");
@@ -79,6 +80,7 @@ fn main() {
             "--frames" => frames = args.next().expect("--frames <n>").parse().expect("frame count"),
             "--scene" => scene_arg = args.next().expect("--scene <title|stage>"),
             "--lives" => debug_lives = Some(args.next().expect("--lives <n>").parse().expect("lives")),
+            "--stage" => debug_stage = args.next().expect("--stage <1-6>").parse().expect("stage"),
             "--demo" => demo = Some(args.next().expect("--demo <out_dir>")),
             "--demo-interval" => demo_interval = args.next().expect("--demo-interval <n>").parse().expect("interval"),
             "--game-dir" => game_dir = args.next().expect("--game-dir <path>"),
@@ -104,7 +106,7 @@ fn main() {
     game.set_hiscore_path(hiscore_path);
 
     if scene_arg == "stage" {
-        game.debug_start_stage(Character::ReimuA, debug_lives);
+        game.debug_start_stage(Character::ReimuA, debug_lives, debug_stage.saturating_sub(1));
     }
 
     if let Some(dir) = demo.clone() {
@@ -133,10 +135,20 @@ fn main() {
         }
         let _ = frame;
     } else if let Some(out) = screenshot {
-        let input = Input::synthetic(&[Key::Shoot], &[]);
-        let mut frame = game.update(&input);
-        for _ in 1..frames {
-            frame = game.update(&input);
+        // Auto-play: hold Shoot, steer under the boss/nearest enemy, and pulse
+        // Shoot to advance dialogue — so headless runs actually fight.
+        let mut frame = Frame { cmds: Vec::new(), bg: None, quit: false };
+        for f in 0..frames {
+            let mut held = vec![Key::Shoot];
+            if let Some((px, Some(tx))) = game.stage_aim() {
+                if tx < px - 4.0 {
+                    held.push(Key::Left);
+                } else if tx > px + 4.0 {
+                    held.push(Key::Right);
+                }
+            }
+            let pressed: &[Key] = if f % 12 == 0 { &[Key::Shoot] } else { &[] };
+            frame = game.update(&Input::synthetic(&held, pressed));
         }
         let textures_ref: Vec<&th06_engine::Texture> = textures.iter().collect();
         let pixels = engine.render_to_image(&frame.cmds, &textures_ref, frame.bg.as_ref());

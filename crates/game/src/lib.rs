@@ -45,10 +45,27 @@ const SFX_NAMES: [&str; 13] = [
     "cat00", "item00", "powerup", "graze",
 ];
 
-const BGM_NAMES: [&str; 8] = [
+/// All BGM tracks used in the main game (title + 6 stages × field/boss).
+const BGM_NAMES: [&str; 13] = [
     "th06_01.wav", "th06_02.wav", "th06_03.wav", "th06_04.wav", "th06_05.wav", "th06_06.wav",
-    "th06_07.wav", "th06_08.wav",
+    "th06_07.wav", "th06_08.wav", "th06_09.wav", "th06_10.wav", "th06_11.wav", "th06_12.wav",
+    "th06_13.wav",
 ];
+
+/// Number of normal-mode stages.
+pub const N_STAGES: usize = 6;
+/// Per-stage field theme.
+const STAGE_BGM: [&str; N_STAGES] =
+    ["th06_02.wav", "th06_04.wav", "th06_06.wav", "th06_08.wav", "th06_10.wav", "th06_12.wav"];
+/// Per-stage boss theme.
+const BOSS_BGM: [&str; N_STAGES] =
+    ["th06_03.wav", "th06_05.wav", "th06_07.wav", "th06_09.wav", "th06_11.wav", "th06_13.wav"];
+/// Per-stage boss dialogue portrait (Gui.cpp FACE_STAGE_A), all in ST.DAT.
+const BOSS_FACE: [&str; N_STAGES] =
+    ["face03a", "face05a", "face06a", "face08a", "face09a", "face09b"];
+/// Whether stage N ships a separate boss sprite sheet (stgNenm2); stages 3 & 4
+/// keep their boss in the main enemy sheet.
+const HAS_ENM2: [bool; N_STAGES] = [true, true, false, false, true, true];
 
 /// ANM texture names look like "data/title/title01.png"; archive entries
 /// are flat basenames.
@@ -56,38 +73,58 @@ fn basename(path: &str) -> &str {
     path.rsplit('/').next().unwrap()
 }
 
-/// Everything needed to build a fresh stage 1 run.
-struct StageAssets {
+/// Per-stage assets: scripts/data bytes plus the parsed sprite sheets and the
+/// texture slots they were uploaded to.
+struct StageData {
     ecl_data: Vec<u8>,
     msg_data: Vec<u8>,
+    std_data: Vec<u8>,
+    enm: Anm0,
+    enm_tex: usize,
+    enm2: Option<Anm0>,
+    enm2_tex: usize,
+    bg: Anm0,
+    bg_tex: usize,
+    boss_face_tex: usize,
+}
+
+/// Shared (cross-stage) assets plus the per-stage table.
+struct Assets {
     player: Anm0,
     player_tex: usize,
     player_marisa: Anm0,
     player_marisa_tex: usize,
-    stg1enm: Anm0,
-    stg1enm2: Anm0,
     etama: Anm0,
-    stg1bg: Anm0,
-    std_data: Vec<u8>,
-    bg_tex_slot: usize,
+    stages: Vec<StageData>,
 }
 
-impl StageAssets {
-    fn new_stage(&self, character: Character) -> Stage {
-        let ecl = Ecl::parse(self.ecl_data.clone()).expect("parse ecl");
-        let scripts = stage::build_enemy_scripts(&[
-            (&self.stg1enm.entries[0], stage::TEX_FAIRY),
-            (&self.stg1enm2.entries[0], stage::TEX_RUMIA),
-        ]);
-        let msg = Msg::parse(self.msg_data.clone()).expect("parse msg");
-        let background = Std::parse(&self.std_data)
-            .map(|std| Background::new(std, &self.stg1bg.entries[0], self.bg_tex_slot));
-        let (player_anm, player_tex) = if character.is_marisa() {
-            (&self.player_marisa.entries[0], self.player_marisa_tex)
+impl Assets {
+    fn new_stage(&self, idx: usize, character: Character) -> Stage {
+        let sd = &self.stages[idx];
+        let ecl = Ecl::parse(sd.ecl_data.clone()).expect("parse ecl");
+        let mut pairs = vec![(&sd.enm.entries[0], sd.enm_tex)];
+        if let Some(enm2) = &sd.enm2 {
+            pairs.push((&enm2.entries[0], sd.enm2_tex));
+        }
+        let scripts = stage::build_enemy_scripts(&pairs);
+        let msg = Msg::parse(sd.msg_data.clone()).expect("parse msg");
+        let background = Std::parse(&sd.std_data)
+            .map(|std| Background::new(std, &sd.bg.entries[0], sd.bg_tex));
+        let (player_anm, player_tex, face_player_tex) = if character.is_marisa() {
+            (&self.player_marisa.entries[0], self.player_marisa_tex, stage::TEX_FACE_MARISA)
         } else {
-            (&self.player.entries[0], self.player_tex)
+            (&self.player.entries[0], self.player_tex, stage::TEX_FACE_REIMU)
         };
-        Stage::new(ecl, scripts, &self.etama.entries[0], player_anm, player_tex, character, msg, background)
+        let cfg = stage::StageConfig {
+            face_player_tex,
+            face_boss_tex: sd.boss_face_tex,
+            stage_bgm: STAGE_BGM[idx],
+            boss_bgm: BOSS_BGM[idx],
+        };
+        Stage::new(
+            ecl, scripts, &self.etama.entries[0], player_anm, player_tex, character, msg,
+            background, cfg,
+        )
     }
 }
 
@@ -104,7 +141,11 @@ pub struct Game {
     scene: Scene,
     title: Title,
     audio: Option<Audio>,
-    assets: StageAssets,
+    assets: Assets,
+    /// Stage currently being played (0-based), and the chosen character — used
+    /// to build the next stage on clear.
+    current_stage: usize,
+    character: Character,
     hiscore: i64,
     /// Native persists the high score to disk; web keeps it in memory only.
     #[cfg(not(target_arch = "wasm32"))]
@@ -117,15 +158,25 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
     let anm = Anm0::parse(&files.tl["title01.anm"]).expect("parse title01.anm");
     let entry = &anm.entries[0];
 
-    // Texture slots (see stage.rs constants):
-    // 0 title bg, 1 title menu, 2 player00, 3 etama3, 4 stg1enm,
-    // 5 stg1enm2, 6 front, 7 white, 8 ascii, 9-10 faces, 11 stg1bg, 12 player01.
+    // Upload a composed texture and return its slot; the optional alpha mask
+    // is skipped when absent (some sheets ship without a `_a` mask).
+    let load = |map: &HashMap<String, Vec<u8>>, color: &str, mask: Option<&str>, textures: &mut Vec<Texture>| -> usize {
+        let alpha = mask.and_then(|m| map.get(m)).map(|v| v.as_slice());
+        let (rgba, w, h) = compose_rgba(&map[color], alpha);
+        let slot = textures.len();
+        textures.push(engine.create_texture(&rgba, w, h));
+        slot
+    };
+
+    // Fixed slots (referenced by stage.rs constants): 0 title bg, 1 title menu,
+    // 2 player00, 3 etama3, 4 stg1enm, 5 stg1enm2, 6 front, 7 white, 8 ascii,
+    // 9 face00a (Reimu), 10 face01a (Marisa), 11 stg1bg, 12 player01.
     let mut textures = Vec::new();
     let (bg_rgba, bg_w, bg_h) = compose_rgba(&files.tl["title00.jpg"], None);
-    textures.push(engine.create_texture(&bg_rgba, bg_w, bg_h));
+    textures.push(engine.create_texture(&bg_rgba, bg_w, bg_h)); // 0
     let alpha = entry.alpha_name.as_deref().map(|n| files.tl[basename(n)].as_slice());
     let (rgba, w, h) = compose_rgba(&files.tl[basename(&entry.name)], alpha);
-    textures.push(engine.create_texture(&rgba, w, h));
+    textures.push(engine.create_texture(&rgba, w, h)); // 1
     for (archive, color, mask) in [
         (&files.cm, "player00.png", Some("player00_a.png")),
         (&files.cm, "etama3.png", Some("etama3_a.png")),
@@ -135,28 +186,53 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
     ] {
         let alpha = mask.map(|m| archive[m].as_slice());
         let (rgba, w, h) = compose_rgba(&archive[color], alpha);
-        textures.push(engine.create_texture(&rgba, w, h));
+        textures.push(engine.create_texture(&rgba, w, h)); // 2,3,4,5,6
     }
-    textures.push(engine.create_texture(&[255u8; 2 * 2 * 4], 2, 2));
-    // Slot 8: ascii font (alpha mask doubles as tintable glyph color).
+    textures.push(engine.create_texture(&[255u8; 2 * 2 * 4], 2, 2)); // 7 white
+    // 8: ascii font (alpha mask doubles as tintable glyph color).
     let (rgba, w, h) = compose_rgba(&files.inn["ascii_a.png"], Some(files.inn["ascii_a.png"].as_slice()));
     textures.push(engine.create_texture(&rgba, w, h));
-    // Slots 9-10: dialogue portraits (Reimu, Rumia).
-    for face in ["face00a", "face01a"] {
-        let (rgba, w, h) = compose_rgba(
-            &files.cm[&format!("{face}.png")],
-            Some(files.cm[&format!("{face}_a.png")].as_slice()),
-        );
-        textures.push(engine.create_texture(&rgba, w, h));
+    // 9-10: player dialogue portraits (Reimu, Marisa).
+    load(&files.cm, "face00a.png", Some("face00a_a.png"), &mut textures); // 9
+    load(&files.cm, "face01a.png", Some("face01a_a.png"), &mut textures); // 10
+    // 11: stage 1 background texture.
+    load(&files.st, "stg1bg.png", Some("stg1bg_a.png"), &mut textures);
+    // 12: Marisa player body sprite (player01).
+    let player_marisa_tex = load(&files.cm, "player01.png", Some("player01_a.png"), &mut textures);
+
+    // Per-stage sprite sheets + boss faces, appended after the fixed slots.
+    let mut stages: Vec<StageData> = Vec::new();
+    for n in 1..=N_STAGES {
+        let (enm_tex, enm2, enm2_tex, bg_tex) = if n == 1 {
+            // Stage 1 reuses the fixed slots loaded above.
+            (4, Some(Anm0::parse(&files.st["stg1enm2.anm"]).expect("stg1enm2")), 5, 11)
+        } else {
+            let enm_tex = load(&files.st, &format!("stg{n}enm.png"), Some(&format!("stg{n}enm_a.png")), &mut textures);
+            let (enm2, enm2_tex) = if HAS_ENM2[n - 1] {
+                let t = load(&files.st, &format!("stg{n}enm2.png"), Some(&format!("stg{n}enm2_a.png")), &mut textures);
+                (Some(Anm0::parse(&files.st[&format!("stg{n}enm2.anm")]).expect("enm2")), t)
+            } else {
+                (None, 0)
+            };
+            let bg_tex = load(&files.st, &format!("stg{n}bg.png"), Some(&format!("stg{n}bg_a.png")), &mut textures);
+            (enm_tex, enm2, enm2_tex, bg_tex)
+        };
+        let face = BOSS_FACE[n - 1];
+        let boss_face_tex =
+            load(&files.st, &format!("{face}.png"), Some(&format!("{face}_a.png")), &mut textures);
+        stages.push(StageData {
+            ecl_data: files.st[&format!("ecldata{n}.ecl")].clone(),
+            msg_data: files.st_en[&format!("msg{n}.dat")].clone(),
+            std_data: files.st[&format!("stage{n}.std")].clone(),
+            enm: Anm0::parse(&files.st[&format!("stg{n}enm.anm")]).expect("enm"),
+            enm_tex,
+            enm2,
+            enm2_tex,
+            bg: Anm0::parse(&files.st[&format!("stg{n}bg.anm")]).expect("bg"),
+            bg_tex,
+            boss_face_tex,
+        });
     }
-    // Slot 11: stage 1 background texture.
-    let bg_tex_slot = textures.len();
-    let (rgba, w, h) = compose_rgba(&files.st["stg1bg.png"], Some(files.st["stg1bg_a.png"].as_slice()));
-    textures.push(engine.create_texture(&rgba, w, h));
-    // Slot 12: Marisa player sprite (player01).
-    let player_marisa_tex = textures.len();
-    let (rgba, w, h) = compose_rgba(&files.cm["player01.png"], Some(files.cm["player01_a.png"].as_slice()));
-    textures.push(engine.create_texture(&rgba, w, h));
 
     let title = Title::new(entry, 0, 1);
 
@@ -174,19 +250,13 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
         }
     }
 
-    let assets = StageAssets {
-        ecl_data: files.st["ecldata1.ecl"].clone(),
-        msg_data: files.st_en["msg1.dat"].clone(),
+    let assets = Assets {
         player: Anm0::parse(&files.cm["player00.anm"]).expect("parse player00"),
         player_tex: stage::TEX_PLAYER,
         player_marisa: Anm0::parse(&files.cm["player01.anm"]).expect("parse player01"),
         player_marisa_tex,
-        stg1enm: Anm0::parse(&files.st["stg1enm.anm"]).expect("parse stg1enm"),
-        stg1enm2: Anm0::parse(&files.st["stg1enm2.anm"]).expect("parse stg1enm2"),
         etama: Anm0::parse(&files.cm["etama3.anm"]).expect("parse etama3"),
-        stg1bg: Anm0::parse(&files.st["stg1bg.anm"]).expect("parse stg1bg"),
-        std_data: files.st["stage1.std"].clone(),
-        bg_tex_slot,
+        stages,
     };
 
     let game = Game {
@@ -194,6 +264,8 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
         title,
         audio,
         assets,
+        current_stage: 0,
+        character: Character::ReimuA,
         hiscore: 0,
         #[cfg(not(target_arch = "wasm32"))]
         hiscore_path: std::path::PathBuf::new(),
@@ -211,14 +283,26 @@ impl Game {
         self.hiscore_path = path;
     }
 
-    /// Jump straight into stage 1 (native `--scene stage` debugging).
-    pub fn debug_start_stage(&mut self, character: Character, lives: Option<i32>) {
-        let mut s = self.assets.new_stage(character);
+    /// Jump straight into a stage (native `--scene stage` debugging). `stage`
+    /// is 0-based and clamped to the available stages.
+    pub fn debug_start_stage(&mut self, character: Character, lives: Option<i32>, stage: usize) {
+        self.character = character;
+        self.current_stage = stage.min(N_STAGES - 1);
+        let mut s = self.assets.new_stage(self.current_stage, character);
         s.set_hiscore(self.hiscore);
         if let Some(l) = lives {
             s.set_lives(l);
         }
         self.scene = Scene::Stage(Box::new(s));
+    }
+
+    /// Headless auto-play aim: (player_x, target_x) while in a stage.
+    pub fn stage_aim(&self) -> Option<(f32, Option<f32>)> {
+        if let Scene::Stage(s) = &self.scene {
+            Some((s.player_x(), s.target_x()))
+        } else {
+            None
+        }
     }
 
     /// Start the title BGM (call once the audio context is unlocked).
@@ -287,7 +371,9 @@ impl Game {
                 return Frame { cmds: self.charselect_cmds(0), bg: None, quit: false };
             }
             if input.pressed(Key::Shoot) || input.pressed(Key::Enter) {
-                let mut stage = self.assets.new_stage(CHARACTERS[cur]);
+                self.character = CHARACTERS[cur];
+                self.current_stage = 0;
+                let mut stage = self.assets.new_stage(0, self.character);
                 stage.set_hiscore(self.hiscore);
                 self.scene = Scene::Stage(Box::new(stage));
                 if let Some(a) = &self.audio {
@@ -318,7 +404,10 @@ impl Game {
                 let cmds = stage.update(input);
                 let bg = stage.background_scene();
                 let events: Vec<Event> = stage.events.drain(..).collect();
+                // Snapshot now, before the event loop reborrows self.
+                let carry = stage.carry();
                 let mut back = false;
+                let mut next_stage = false;
                 for ev in events {
                     match ev {
                         Event::Sfx(name) => {
@@ -331,6 +420,7 @@ impl Game {
                             self.play_bgm(&file);
                         }
                         Event::BackToTitle => back = true,
+                        Event::NextStage => next_stage = true,
                         Event::Quit => return Frame { cmds, bg, quit: true },
                         Event::SaveScore(score) => {
                             if score > self.hiscore {
@@ -342,6 +432,19 @@ impl Game {
                             }
                         }
                     }
+                }
+                if next_stage {
+                    // Carry progress into the next stage; the last stage clear
+                    // returns to the title (ending not yet implemented).
+                    if self.current_stage + 1 < N_STAGES {
+                        self.current_stage += 1;
+                        let mut s = self.assets.new_stage(self.current_stage, self.character);
+                        s.apply_carry(carry);
+                        s.set_hiscore(self.hiscore);
+                        self.scene = Scene::Stage(Box::new(s));
+                        return Frame { cmds, bg: None, quit: false };
+                    }
+                    back = true;
                 }
                 if back {
                     self.scene = Scene::Title;

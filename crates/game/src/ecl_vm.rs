@@ -1082,7 +1082,7 @@ impl Enemy {
                 }
             }
             120 => {} // ANMFLAGROTATION
-            121 | 122 => {} // EXINSCALL / EXINSREPEAT — stage-specific extras
+            121 | 122 => { if std::env::var_os("TH06_TRACE_EX").is_some() { eprintln!("EXINS op{} args={:?}", instr.opcode, instr.args); } } // EXINSCALL / EXINSREPEAT — stage-specific extras
             123 => {
                 // TIMESET
                 let v = self.get_i32(instr.arg_i32(0), world);
@@ -1098,6 +1098,7 @@ impl Enemy {
             126 => {} // BOSSSETLIFECOUNT (gui)
             127 => {} // DEBUGWATCH
             128 | 129 => {} // ANMINTERRUPTMAIN / SLOT — anm interrupts pending
+            op if std::env::var_os("TH06_TRACE_OP").is_some() => { eprintln!("unhandled ECL op {op}"); }
             130 => self.disable_call_stack = instr.arg_i32(0) != 0,
             131 => {
                 // BULLETRANKINFLUENCE

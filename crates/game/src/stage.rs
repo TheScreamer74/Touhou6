@@ -38,15 +38,38 @@ pub const TEX_RUMIA: usize = 5;
 pub const TEX_FRONT: usize = 6;
 pub const TEX_WHITE: usize = 7;
 pub const TEX_ASCII: usize = 8;
-pub const TEX_FACE_PLAYER: usize = 9; // face00a (Reimu)
-pub const TEX_FACE_BOSS: usize = 10; // face01a (Rumia)
+pub const TEX_FACE_REIMU: usize = 9; // face00a (Reimu player portrait)
+pub const TEX_FACE_MARISA: usize = 10; // face01a (Marisa player portrait)
 
 pub enum Event {
     Sfx(&'static str),
     Bgm(&'static str),
     BackToTitle,
+    /// Stage cleared — advance to the next stage (Game decides the target).
+    NextStage,
     Quit,
     SaveScore(i64),
+}
+
+/// Per-stage wiring that varies by stage/character: dialogue portrait texture
+/// slots and the stage/boss music tracks.
+#[derive(Clone, Copy)]
+pub struct StageConfig {
+    pub face_player_tex: usize,
+    pub face_boss_tex: usize,
+    pub stage_bgm: &'static str,
+    pub boss_bgm: &'static str,
+}
+
+/// Player progress carried from one stage to the next.
+#[derive(Clone, Copy)]
+pub struct Carry {
+    pub lives: i32,
+    pub bombs: i32,
+    pub power: i32,
+    pub score: i64,
+    pub graze: i64,
+    pub power_item_count: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -629,6 +652,12 @@ pub struct Stage {
     spell_result: u32,
     spell_captured: bool,
     boss_bgm_started: bool,
+    /// Dialogue portrait texture slots (player left / boss right).
+    face_player_tex: usize,
+    face_boss_tex: usize,
+    /// Music tracks for this stage (field theme / boss theme).
+    stage_bgm: &'static str,
+    boss_bgm: &'static str,
     msg: Msg,
     dialogue: Dialogue,
     background: Option<Background>,
@@ -636,7 +665,7 @@ pub struct Stage {
 }
 
 impl Stage {
-    pub fn new(ecl: Ecl, enemy_scripts: HashMap<i32, ScriptRef>, etama: &Entry, player: &Entry, player_tex: usize, character: Character, msg: Msg, background: Option<Background>) -> Self {
+    pub fn new(ecl: Ecl, enemy_scripts: HashMap<i32, ScriptRef>, etama: &Entry, player: &Entry, player_tex: usize, character: Character, msg: Msg, background: Option<Background>, cfg: StageConfig) -> Self {
         let timeline_off = ecl.timeline_offset;
         let player_scripts: HashMap<i32, Vec<AnmInstr>> =
             player.scripts.iter().map(|(id, instrs)| (*id as i32, instrs.clone())).collect();
@@ -705,15 +734,59 @@ impl Stage {
             spell_result: 0,
             spell_captured: false,
             boss_bgm_started: false,
+            face_player_tex: cfg.face_player_tex,
+            face_boss_tex: cfg.face_boss_tex,
+            stage_bgm: cfg.stage_bgm,
+            boss_bgm: cfg.boss_bgm,
             msg,
             dialogue: Dialogue::default(),
             background,
-            events: vec![Event::Bgm("th06_02.wav")],
+            events: vec![Event::Bgm(cfg.stage_bgm)],
         }
+    }
+
+    /// Snapshot the player progress to carry into the next stage.
+    pub fn carry(&self) -> Carry {
+        Carry {
+            lives: self.lives,
+            bombs: self.bombs,
+            power: self.world.power,
+            score: self.score,
+            graze: self.graze,
+            power_item_count: self.power_item_count,
+        }
+    }
+
+    /// Restore progress carried from the previous stage.
+    pub fn apply_carry(&mut self, c: Carry) {
+        self.lives = c.lives;
+        self.bombs = c.bombs;
+        self.world.power = c.power;
+        self.score = c.score;
+        self.graze = c.graze;
+        self.power_item_count = c.power_item_count;
     }
 
     pub fn set_lives(&mut self, lives: i32) {
         self.lives = lives;
+    }
+
+    /// Current player x (headless auto-play harness).
+    pub fn player_x(&self) -> f32 {
+        self.pos[0]
+    }
+
+    /// X of the boss if present, else the lowest (closest) live enemy — the
+    /// headless harness steers the player under this to actually fight.
+    pub fn target_x(&self) -> Option<f32> {
+        if let Some(b) = self.enemies.iter().find(|e| e.occupied && e.is_boss) {
+            return Some(b.pos[0]);
+        }
+        self.enemies
+            .iter()
+            .filter(|e| e.occupied && e.interactable)
+            .max_by(|a, b| a.pos[1].total_cmp(&b.pos[1]))
+            .map(|e| e.pos[0])
     }
 
     pub fn set_hiscore(&mut self, hiscore: i64) {
@@ -758,10 +831,17 @@ impl Stage {
                     }
                 }
             }
-            PlayerState::GameOver(t) | PlayerState::Cleared(t) => {
+            PlayerState::GameOver(t) => {
                 *t -= 1;
                 if *t == 0 {
                     self.events.push(Event::BackToTitle);
+                    return self.draw();
+                }
+            }
+            PlayerState::Cleared(t) => {
+                *t -= 1;
+                if *t == 0 {
+                    self.events.push(Event::NextStage);
                     return self.draw();
                 }
             }
@@ -1616,7 +1696,7 @@ impl Stage {
         // midboss has no dialogue, so it keeps the stage theme).
         if !self.boss_bgm_started {
             self.boss_bgm_started = true;
-            self.events.push(Event::Bgm("th06_03.wav"));
+            self.events.push(Event::Bgm(self.boss_bgm));
         }
     }
 
@@ -1674,9 +1754,9 @@ impl Stage {
                     let track = i.arg_i32(0);
                     self.boss_bgm_started = true;
                     self.events.push(Event::Bgm(if track == 1 {
-                        "th06_03.wav"
+                        self.boss_bgm
                     } else {
-                        "th06_02.wav"
+                        self.stage_bgm
                     }));
                 }
                 10 => {
@@ -2218,7 +2298,7 @@ impl Stage {
             let pw = 96.0;
             let ph = 192.0;
             let py = FIELD_Y + FIELD_H - 80.0 - ph;
-            for (idx, tex) in [(0usize, TEX_FACE_PLAYER), (1usize, TEX_FACE_BOSS)] {
+            for (idx, tex) in [(0usize, self.face_player_tex), (1usize, self.face_boss_tex)] {
                 if !self.dialogue.portrait_shown[idx] {
                     continue;
                 }
