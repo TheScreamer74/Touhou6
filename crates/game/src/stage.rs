@@ -1962,6 +1962,17 @@ impl Stage {
             ));
         }
 
+        // Item collection line (y = 128): point items collected above it score
+        // the maximum, and at full power items above it auto-collect. EoSD
+        // draws no line — this is a QoL marker, brighter when auto-collect is
+        // live (full power).
+        if !self.spell_active {
+            let full = self.world.power >= 128;
+            let a = if full { 0.6 } else { 0.28 };
+            let tint = if full { [1.0, 0.9, 0.45, a] } else { [0.6, 0.8, 1.0, a] };
+            cmds.push(rect([FIELD_X, FIELD_Y + 128.0 - 1.0, FIELD_W, 2.0], tint));
+        }
+
         // Spellcard aura: soft pulsing glows behind the boss (BOMB_GLOW is a
         // round radial sprite, so this reads as an aura rather than squares).
         if self.spell_active {
