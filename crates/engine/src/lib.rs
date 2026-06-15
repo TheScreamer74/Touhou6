@@ -125,7 +125,12 @@ pub struct Texture {
 pub struct Engine {
     device: wgpu::Device,
     queue: wgpu::Queue,
+    // Native creates surfaces from this in `resumed`; on web the surface is
+    // built up front, so the stored instance is only kept alive here.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     instance: wgpu::Instance,
+    // Only read on web (to pick a surface format from caps).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     adapter: wgpu::Adapter,
     bind_layout: wgpu::BindGroupLayout,
     shader: wgpu::ShaderModule,
@@ -146,12 +151,23 @@ impl Engine {
         Self::from_device(instance, adapter, device, queue)
     }
 
-    /// Web: adapter/device acquisition is async and cannot block.
+    /// Web: build the engine *from a canvas*. WebGL's GL context comes from
+    /// the canvas, so the surface must exist before the adapter is requested
+    /// (and passed as `compatible_surface`). Returns the surface so the run
+    /// loop can reuse it rather than create a second context on the canvas.
     #[cfg(target_arch = "wasm32")]
-    pub async fn new_async() -> Self {
+    pub async fn new_web(
+        canvas: web_sys::HtmlCanvasElement,
+    ) -> (Self, wgpu::Surface<'static>) {
         let instance = wgpu::Instance::default();
+        let surface = instance
+            .create_surface(wgpu::SurfaceTarget::Canvas(canvas))
+            .expect("create surface from canvas");
         let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions::default())
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                compatible_surface: Some(&surface),
+                ..Default::default()
+            })
             .await
             .expect("no GPU adapter");
         let (device, queue) = adapter
@@ -162,7 +178,7 @@ impl Engine {
             })
             .await
             .expect("request device");
-        Self::from_device(instance, adapter, device, queue)
+        (Self::from_device(instance, adapter, device, queue), surface)
     }
 
     fn from_device(
@@ -621,6 +637,10 @@ impl Engine {
             pipeline: None,
             autoshot: std::env::var("TH06_AUTOSHOT").ok().filter(|s| !s.is_empty()),
             tick_count: 0,
+            #[cfg(target_arch = "wasm32")]
+            web_surface: None,
+            #[cfg(target_arch = "wasm32")]
+            canvas: None,
         }
     }
 
@@ -643,18 +663,23 @@ impl Engine {
         event_loop.run_app(&mut app).expect("run app");
     }
 
-    /// Web: hand the loop to the browser. Unlike the native path this returns
-    /// immediately — winit drives ticks via requestAnimationFrame.
+    /// Web: hand the loop to the browser, reusing the canvas + surface that
+    /// were created up front (see `new_web`). Returns immediately — winit
+    /// drives ticks via requestAnimationFrame.
     #[cfg(target_arch = "wasm32")]
     pub fn run_game_web(
         self,
+        canvas: web_sys::HtmlCanvasElement,
+        surface: wgpu::Surface<'static>,
         title: &str,
         textures: Vec<Texture>,
         update: impl FnMut(&Input) -> Frame + 'static,
     ) {
         use winit::platform::web::EventLoopExtWebSys;
         let event_loop = EventLoop::new().expect("event loop");
-        let app = self.make_app(title, textures, update);
+        let mut app = self.make_app(title, textures, update);
+        app.canvas = Some(canvas);
+        app.web_surface = Some(surface);
         event_loop.spawn_app(app);
     }
 }
@@ -740,6 +765,12 @@ struct App {
     /// play so playtests can be reviewed after the fact.
     autoshot: Option<String>,
     tick_count: u32,
+    /// Web: surface + canvas are built up front (WebGL needs the canvas to
+    /// exist before adapter acquisition) and handed to `resumed` to reuse.
+    #[cfg(target_arch = "wasm32")]
+    web_surface: Option<wgpu::Surface<'static>>,
+    #[cfg(target_arch = "wasm32")]
+    canvas: Option<web_sys::HtmlCanvasElement>,
 }
 
 impl ApplicationHandler for App {
@@ -748,15 +779,27 @@ impl ApplicationHandler for App {
             .with_title(&self.title)
             .with_inner_size(winit::dpi::LogicalSize::new(SCREEN_W, SCREEN_H))
             .with_resizable(false);
-        // On the web, append the rendering canvas to the document body so the
-        // page doesn't need to create one up front.
-        #[cfg(target_arch = "wasm32")]
-        let attrs = {
-            use winit::platform::web::WindowAttributesExtWebSys;
-            attrs.with_append(true)
+
+        // Native: create the window, then a surface on it.
+        #[cfg(not(target_arch = "wasm32"))]
+        let (window, surface) = {
+            let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
+            let surface = self.engine.instance.create_surface(window.clone()).expect("surface");
+            (window, surface)
         };
-        let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
-        let surface = self.engine.instance.create_surface(window.clone()).expect("surface");
+        // Web: bind the winit window to the existing canvas (for input/redraw)
+        // and reuse the surface already created on it in `new_web` — making a
+        // second surface would clash with the canvas's GL context.
+        #[cfg(target_arch = "wasm32")]
+        let (window, surface) = {
+            use winit::platform::web::WindowAttributesExtWebSys;
+            let canvas = self.canvas.clone().expect("web canvas");
+            let attrs = attrs.with_canvas(Some(canvas));
+            let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
+            let surface = self.web_surface.take().expect("web surface");
+            (window, surface)
+        };
+
         let size = window.inner_size();
         // Native (Metal) uses Bgra8Unorm; WebGL/WebGPU surfaces advertise their
         // own preferred formats, so pick a supported non-sRGB one there.

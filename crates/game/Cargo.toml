@@ -24,6 +24,6 @@ console_error_panic_hook = "0.1"
 js-sys = "0.3"
 web-sys = { version = "0.3", features = [
     "Document", "Window", "Element", "HtmlElement", "HtmlCanvasElement",
-    "HtmlInputElement", "File", "FileList", "Blob",
+    "HtmlInputElement", "File", "FileList", "Blob", "Node",
     "Event", "EventTarget", "Storage",
 ] }

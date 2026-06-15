@@ -6,8 +6,10 @@
 use std::collections::HashMap;
 
 use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
+use web_sys::HtmlCanvasElement;
 
-use th06_engine::Engine;
+use th06_engine::{Engine, SCREEN_H, SCREEN_W};
 use th06_formats::pbg3::Pbg3;
 
 use crate::{build_game, GameFiles};
@@ -55,8 +57,27 @@ pub async fn start_game(files: js_sys::Object) {
         bgm,
     };
 
-    let engine = Engine::new_async().await;
+    // Create the rendering canvas up front: WebGL needs it to exist before
+    // the GPU adapter is requested.
+    let document = web_sys::window().expect("window").document().expect("document");
+    let canvas: HtmlCanvasElement = document
+        .create_element("canvas")
+        .expect("create canvas")
+        .dyn_into()
+        .expect("canvas element");
+    canvas.set_width(SCREEN_W);
+    canvas.set_height(SCREEN_H);
+    canvas.set_id("th06-canvas");
+    canvas.set_tab_index(0); // focusable, so it receives keyboard input
+    document
+        .body()
+        .expect("body")
+        .append_child(&canvas)
+        .expect("append canvas");
+    let _ = canvas.focus();
+
+    let (engine, surface) = Engine::new_web(canvas.clone()).await;
     let (textures, mut game) = build_game(&engine, &game_files, true);
     game.start_title_bgm();
-    engine.run_game_web("Touhou 6 ~ EoSD", textures, move |input| game.update(input));
+    engine.run_game_web(canvas, surface, "Touhou 6 ~ EoSD", textures, move |input| game.update(input));
 }
