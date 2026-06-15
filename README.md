@@ -4,12 +4,12 @@
 ## Touhou 6 — the Embodiment of Scarlet Devil, for macOS
 
 **A native Apple Silicon reimplementation of ZUN's 2002 classic,**
-**built in Rust on Metal — bring your own copy of the game.**
+**built in Rust on Metal (and WebAssembly) — bring your own copy of the game.**
 
-![Platform](https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon%20%2B%20Intel)-black?logo=apple)
+![Platform](https://img.shields.io/badge/platform-macOS%20%2B%20Web%20(WASM)-black?logo=apple)
 ![Language](https://img.shields.io/badge/language-Rust-b7410e?logo=rust)
-![Renderer](https://img.shields.io/badge/renderer-wgpu%20%2F%20Metal-blueviolet)
-![Status](https://img.shields.io/badge/status-stage%201%20complete-crimson)
+![Renderer](https://img.shields.io/badge/renderer-wgpu%20%2F%20Metal%20%2F%20WebGL2-blueviolet)
+![Status](https://img.shields.io/badge/status-all%206%20stages%20playable-crimson)
 
 *"The border land was wrapped in Scarlet Magic.*
 *Girls believe that you solve this mystery..."*
@@ -36,26 +36,30 @@ contains **zero** copyrighted assets — only code.
 | PBG3 `.DAT` archive extraction | ✅ done |
 | ANM sprite/animation format + VM | ✅ done |
 | ECL / STD / MSG interpreters | ✅ done |
-| Title screen, interactive menu | ✅ done |
+| Title screen + faithful character / shot-type select | ✅ done |
 | Audio — BGM + sound effects | ✅ done |
-| **Stage 1 — complete** (exact ECL patterns, midboss + Rumia, dialogue, spellcards, 3D background) | ✅ done |
-| Faithful player (Reimu A shot tiers, hitbox, graze, deathbomb, Fantasy Seal bomb) | ✅ done |
+| **All 6 stages playable** — trash, midbosses, bosses, dialogue, spellcards, 3D backgrounds | ✅ done |
+| Stage progression carrying lives / bombs / power / score | ✅ done |
+| All four shot types (Reimu A/B, Marisa A/B) — distinct shots & bombs | ✅ done |
+| Faithful player — shot tiers, hitbox, graze, deathbomb | ✅ done |
 | Scoring, results screen, high-score save, pause menu | ✅ done |
-| All four shot types (Reimu A/B, Marisa A/B) + character select | ✅ done |
-| Stages 2–6 + Extra | 🔜 next |
-| Web build (WASM, bring-your-own-files upload) | 🔜 planned |
-| Replays, Practice+, rewind | ⬜ |
-| JP / EN language selector | ⬜ |
+| **Web build** (WebAssembly, bring-your-own-files upload, fullscreen) | ✅ done |
+| Boss ex-instructions (`EXINSCALL`) — some spellcard patterns simplified | 🚧 partial |
+| Difficulty select (Easy/Hard/Lunatic), Extra stage, endings | 🔜 next |
+| Replays, Practice+, JP/EN selector, gamepad | ⬜ |
 
-Stage 1 runs the **original ECL/STD/MSG scripts** directly, with the player,
+Stages run the **original ECL/STD/MSG scripts** directly, with the player,
 scoring and collision aligned opcode-by-opcode against the
-[happyhavoc/th06](https://github.com/happyhavoc/th06) matching decompilation —
-so behavior matches the real thing, including the original RNG.
+[happyhavoc/th06](https://github.com/happyhavoc/th06) (now
+[GensokyoClub/th06](https://github.com/GensokyoClub/th06)) matching
+decompilation — so behavior matches the real thing, including the original RNG.
 
 ## Already better than 2002
 
 - **Stable 60 Hz** — game logic runs on a fixed timestep, decoupled from
   display refresh. No more speed tied to your GPU. ProMotion-safe.
+- **Runs in the browser** — a WebAssembly build (drop in your own game folder;
+  files never leave your machine) with scaling + fullscreen.
 - **Native resolution scaling & Metal rendering** via wgpu.
 - **In-game pause menu** (resume / return to title / quit).
 - **Crash reports** written to `logs/` (the original just vanished).
@@ -72,9 +76,20 @@ cargo run -p th06 -- --game-dir "/path/to/your/th06/folder"
 ```
 
 The game folder must contain the v1.02h data files
-(`CM.DAT`, `IN.DAT`, `MD.DAT`, `ST.DAT`, `TL.DAT`, `ED.DAT` and the `bgm/`
+(`CM.DAT`, `IN.DAT`, `ST.DAT`, `TL.DAT`, `th06e_ST.DAT` and the `bgm/`
 directory). The Windows `.exe` files are never executed — only the data is
 read.
+
+## Play in the browser
+
+A WebAssembly build runs the same engine in a browser — you drop in your own
+game folder and the files stay on your machine (nothing is uploaded). See
+[`web/README.md`](web/README.md):
+
+```sh
+wasm-pack build crates/game --release --target web --out-dir ../../web/pkg
+cd web && python3 -m http.server 8080   # open http://localhost:8080
+```
 
 ## Controls
 
@@ -82,9 +97,10 @@ read.
 |---|---|
 | Arrows | Move |
 | `Z` | Shoot / confirm |
-| `X` | Bomb (Fantasy Seal) / back |
+| `X` | Bomb / back |
 | `Shift` | Focus (slow movement) |
 | `Esc` | Pause / back |
+| `F` | Fullscreen (web build) |
 
 ## Architecture
 
