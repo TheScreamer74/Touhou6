@@ -34,14 +34,31 @@
   button:hover { background: #d11646; }
   .err { color: #ff6b81; font-size: 0.85rem; min-height: 1rem; }
   .hidden { display: none !important; }
-  /* While playing, the canvas takes over the whole viewport, centered. */
+  /* While playing, the canvas takes over the whole viewport, centered on black. */
   body.playing #shell { display: none; }
-  body.playing { display: flex; align-items: center; justify-content: center; }
+  body.playing { display: flex; align-items: center; justify-content: center; margin: 0; height: 100vh; background: #000; }
+  /* The drawing buffer stays 640x480; CSS scales the display up to fill the
+     viewport while keeping 4:3 (nearest-neighbour). !important beats the inline
+     size winit puts on the canvas. */
   #th06-canvas {
     display: block; background: #000;
     image-rendering: pixelated;
-    width: 640px; height: 480px;
+    aspect-ratio: 4 / 3;
+    width: min(100vw, 133.333vh) !important;
+    height: auto !important;
+    max-height: 100vh;
   }
+  #th06-canvas:fullscreen {
+    width: 100vw !important; height: 100vh !important;
+    object-fit: contain; max-height: none;
+  }
+  #fsBtn {
+    position: fixed; top: 10px; right: 12px; z-index: 10; opacity: 0.55;
+    background: #15151f; color: #fff; border: 1px solid #33334a; border-radius: 8px;
+    padding: 0.35rem 0.8rem; font-size: 0.85rem; cursor: pointer;
+  }
+  #fsBtn:hover { opacity: 1; }
+  body:not(.playing) #fsBtn { display: none; }
   #status { color: #9a9ab0; font-size: 0.85rem; }
   code { background: #0d0d16; padding: 0.1rem 0.35rem; border-radius: 4px; }
 </style>
@@ -66,6 +83,8 @@
   <div id="status"></div>
 </div>
 
+<button id="fsBtn" title="Fullscreen (F)">⛶ Fullscreen</button>
+
 <script type="module">
 import init, { start_game } from "./pkg/th06.js";
 
@@ -75,6 +94,24 @@ import init, { start_game } from "./pkg/th06.js";
 const picker = document.getElementById("picker");
 const status = document.getElementById("status");
 const pickErr = document.getElementById("pickErr");
+
+// --- Fullscreen -----------------------------------------------------------
+// Toggle fullscreen on the rendering canvas. Triggered by the button, the F
+// key, or double-clicking the canvas. The drawing buffer stays 640x480; the
+// browser scales it (letterboxed via object-fit) to fill the screen.
+function toggleFullscreen() {
+  const canvas = document.getElementById("th06-canvas");
+  if (!canvas) return;
+  if (document.fullscreenElement) {
+    document.exitFullscreen();
+  } else {
+    canvas.requestFullscreen().catch(err => console.warn("fullscreen:", err));
+  }
+}
+document.getElementById("fsBtn").addEventListener("click", toggleFullscreen);
+window.addEventListener("keydown", (e) => {
+  if (e.key === "f" || e.key === "F") { e.preventDefault(); toggleFullscreen(); }
+}, true);
 
 document.getElementById("folder").addEventListener("change", async (e) => {
   const files = [...e.target.files];
@@ -102,6 +139,8 @@ document.getElementById("folder").addEventListener("change", async (e) => {
     await init();          // load + instantiate the wasm module
     await start_game(map); // hands ownership to winit; canvas is appended
     document.body.classList.add("playing"); // canvas takes over the viewport
+    const canvas = document.getElementById("th06-canvas");
+    if (canvas) canvas.addEventListener("dblclick", toggleFullscreen);
     status.textContent = "";
   } catch (err) {
     console.error(err);
