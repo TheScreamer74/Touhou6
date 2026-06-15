@@ -693,6 +693,8 @@ impl Stage {
                 kill_trash: false,
                 boss_present: false,
                 power: 0,
+                character: character.is_marisa() as u8,
+                shot_type: matches!(character, Character::ReimuB | Character::MarisaB) as u8,
             },
             enemies: Vec::new(),
             anims: Vec::new(),

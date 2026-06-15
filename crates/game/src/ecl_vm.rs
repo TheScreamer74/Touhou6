@@ -292,6 +292,9 @@ pub struct World {
     pub kill_trash: bool,
     pub boss_present: bool,
     pub power: i32,
+    /// Player identity for boss ex-instructions: 0 Reimu / 1 Marisa, shot 0 A / 1 B.
+    pub character: u8,
+    pub shot_type: u8,
 }
 
 impl World {
@@ -1082,7 +1085,27 @@ impl Enemy {
                 }
             }
             120 => {} // ANMFLAGROTATION
-            121 | 122 => { if std::env::var_os("TH06_TRACE_EX").is_some() { eprintln!("EXINS op{} args={:?}", instr.opcode, instr.args); } } // EXINSCALL / EXINSREPEAT — stage-specific extras
+            121 | 122 => {
+                // EXINSCALL / EXINSREPEAT: per-boss "ex-instructions"
+                // (g_EclExInsn). arg0 selects the handler. Most are still
+                // unimplemented (the boss falls back to its base behaviour);
+                // implemented ones are ported from EnemyEclInstr.cpp.
+                let idx = instr.arg_i32(0);
+                if std::env::var_os("TH06_TRACE_EX").is_some() {
+                    eprintln!("EXINS op{} idx={} args={:?}", instr.opcode, idx, instr.args);
+                }
+                if instr.opcode == 121 && idx == 3 {
+                    // ExInsPatchouliShottypeSetVars: pick the boss's pattern
+                    // variables by the player's character + shot type, so
+                    // Patchouli's spellcards vary correctly per shot.
+                    const T: [[[i32; 3]; 2]; 2] =
+                        [[[0, 3, 1], [2, 3, 4]], [[1, 4, 0], [4, 2, 3]]];
+                    let v = T[world.character.min(1) as usize][world.shot_type.min(1) as usize];
+                    self.ctx.ivars[0] = v[0];
+                    self.ctx.ivars[1] = v[1];
+                    self.ctx.ivars[2] = v[2];
+                }
+            }
             123 => {
                 // TIMESET
                 let v = self.get_i32(instr.arg_i32(0), world);
