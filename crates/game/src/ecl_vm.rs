@@ -1094,16 +1094,32 @@ impl Enemy {
                 if std::env::var_os("TH06_TRACE_EX").is_some() {
                     eprintln!("EXINS op{} idx={} args={:?}", instr.opcode, idx, instr.args);
                 }
-                if instr.opcode == 121 && idx == 3 {
-                    // ExInsPatchouliShottypeSetVars: pick the boss's pattern
-                    // variables by the player's character + shot type, so
-                    // Patchouli's spellcards vary correctly per shot.
-                    const T: [[[i32; 3]; 2]; 2] =
-                        [[[0, 3, 1], [2, 3, 4]], [[1, 4, 0], [4, 2, 3]]];
-                    let v = T[world.character.min(1) as usize][world.shot_type.min(1) as usize];
-                    self.ctx.ivars[0] = v[0];
-                    self.ctx.ivars[1] = v[1];
-                    self.ctx.ivars[2] = v[2];
+                if instr.opcode == 121 {
+                    match idx {
+                        1 => {
+                            // ExInsShootAtRandomArea: fire the configured pattern
+                            // from a random point in a box (w=param, h=0.75w)
+                            // around the enemy.
+                            let speed = instr.arg_i32(1) as f32;
+                            let bx = world.rng.f32_in_range(speed) + self.pos[0] - speed / 2.0;
+                            let sy = speed * 0.75;
+                            let by = world.rng.f32_in_range(sy) + self.pos[1] - sy / 2.0;
+                            self.bullet_props.pos = [bx, by];
+                            spawn_bullet_pattern(world, &self.bullet_props, self.invert_x);
+                        }
+                        3 => {
+                            // ExInsPatchouliShottypeSetVars: pick the boss's
+                            // pattern vars by the player's character + shot type,
+                            // so Patchouli's spellcards vary correctly per shot.
+                            const T: [[[i32; 3]; 2]; 2] =
+                                [[[0, 3, 1], [2, 3, 4]], [[1, 4, 0], [4, 2, 3]]];
+                            let v = T[world.character.min(1) as usize][world.shot_type.min(1) as usize];
+                            self.ctx.ivars[0] = v[0];
+                            self.ctx.ivars[1] = v[1];
+                            self.ctx.ivars[2] = v[2];
+                        }
+                        _ => {}
+                    }
                 }
             }
             123 => {
