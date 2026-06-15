@@ -133,13 +133,18 @@ impl Background {
                     self.fog_far = fbits(ins.args[2]);
                     self.script_idx += 1;
                 }
-                2 => {
-                    // CAMERA_FACING.
-                    self.facing =
-                        Vec3::new(fbits(ins.args[0]), fbits(ins.args[1]), fbits(ins.args[2]));
+                3 => {
+                    // CAMERA_FACING (the look direction). Only adopt it when the
+                    // z component is sane — some scripts store a near-zero facing
+                    // that would collapse the view; keep the default there.
+                    let f = Vec3::new(fbits(ins.args[0]), fbits(ins.args[1]), fbits(ins.args[2]));
+                    if f.z.abs() > 0.1 {
+                        self.facing = f;
+                    }
                     self.script_idx += 1;
                 }
-                _ => self.script_idx += 1, // facing-interp / fog-interp / pause: skipped
+                // op 2 = fog-interp, op 4 = facing-interp, op 5 = pause: skipped.
+                _ => self.script_idx += 1,
             }
         }
 
