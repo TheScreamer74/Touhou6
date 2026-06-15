@@ -34,7 +34,14 @@
   button:hover { background: #d11646; }
   .err { color: #ff6b81; font-size: 0.85rem; min-height: 1rem; }
   .hidden { display: none !important; }
-  canvas { display: block; image-rendering: pixelated; background: #000; }
+  /* While playing, the canvas takes over the whole viewport, centered. */
+  body.playing #shell { display: none; }
+  body.playing { display: flex; align-items: center; justify-content: center; }
+  #th06-canvas {
+    display: block; background: #000;
+    image-rendering: pixelated;
+    width: 640px; height: 480px;
+  }
   #status { color: #9a9ab0; font-size: 0.85rem; }
   code { background: #0d0d16; padding: 0.1rem 0.35rem; border-radius: 4px; }
 </style>
@@ -94,6 +101,7 @@ document.getElementById("folder").addEventListener("change", async (e) => {
   try {
     await init();          // load + instantiate the wasm module
     await start_game(map); // hands ownership to winit; canvas is appended
+    document.body.classList.add("playing"); // canvas takes over the viewport
     status.textContent = "";
   } catch (err) {
     console.error(err);
