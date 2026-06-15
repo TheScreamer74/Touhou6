@@ -71,6 +71,7 @@ fn main() {
     let mut scene_arg = String::from("title");
     let mut debug_lives: Option<i32> = None;
     let mut debug_stage = 1usize;
+    let mut debug_char = 0usize;
     let mut demo: Option<String> = None;
     let mut demo_interval = 300u32;
     let mut game_dir = String::from("../TH06 ~ The Embodiment of Scarlet Devil/kouma");
@@ -81,6 +82,7 @@ fn main() {
             "--scene" => scene_arg = args.next().expect("--scene <title|stage>"),
             "--lives" => debug_lives = Some(args.next().expect("--lives <n>").parse().expect("lives")),
             "--stage" => debug_stage = args.next().expect("--stage <1-6>").parse().expect("stage"),
+            "--char" => debug_char = args.next().expect("--char <0-3>").parse().expect("char"),
             "--demo" => demo = Some(args.next().expect("--demo <out_dir>")),
             "--demo-interval" => demo_interval = args.next().expect("--demo-interval <n>").parse().expect("interval"),
             "--game-dir" => game_dir = args.next().expect("--game-dir <path>"),
@@ -106,7 +108,9 @@ fn main() {
     game.set_hiscore_path(hiscore_path);
 
     if scene_arg == "stage" {
-        game.debug_start_stage(Character::ReimuA, debug_lives, debug_stage.saturating_sub(1));
+        let ch = [Character::ReimuA, Character::ReimuB, Character::MarisaA, Character::MarisaB]
+            [debug_char.min(3)];
+        game.debug_start_stage(ch, debug_lives, debug_stage.saturating_sub(1));
     }
 
     if let Some(dir) = demo.clone() {

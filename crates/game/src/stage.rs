@@ -82,9 +82,8 @@ const fn spr(tex: usize, x: f32, y: f32, w: f32, h: f32) -> SpriteRef {
     SpriteRef { tex, rect: [x, y, w, h] }
 }
 
+/// Fallback shot sprite (player00 amulet) when a script can't be resolved.
 const AMULET: SpriteRef = spr(TEX_PLAYER, 129.0, 1.0, 14.0, 14.0);
-/// player00 sprite 68: the tall thin needle (Reimu B).
-const NEEDLE: SpriteRef = spr(TEX_PLAYER, 193.0, 1.0, 14.0, 46.0);
 const BOMB_GLOW: SpriteRef = spr(TEX_PLAYER, 1.0, 97.0, 62.0, 62.0);
 /// player00 sprite 66: the focus hitbox marker.
 const HITBOX_MARKER: SpriteRef = spr(TEX_PLAYER, 160.0, 0.0, 16.0, 16.0);
@@ -102,8 +101,10 @@ struct Shot {
     /// BULLET_TYPE_*: 0 straight, 1 homing orb (Reimu A), 2 gravity orb-missile
     /// (Marisa A), 3 laser (handled separately).
     bt: u8,
-    /// Sprite look: 0 amulet, 1 needle, 2 missile.
-    look: u8,
+    /// Player-anm script id (BulletData anmScriptIdx). Resolved against the
+    /// current character's sheet at draw, so each character shows their own
+    /// shot sprite from the same id.
+    anm_script: i32,
     age: u32,
     /// Current speed magnitude (Player.cpp `unk_134.y`), grown while homing.
     spd: f32,
@@ -443,11 +444,17 @@ impl Character {
     }
 
     /// Sprite look for a shot of bullet type `bt`: 0 amulet, 1 needle, 2 missile.
-    fn shot_look(self, bt: u8) -> u8 {
-        match self {
-            Character::ReimuB => 1,                         // piercing-looking needles
-            Character::MarisaA if bt == 2 => 2,             // orb missiles
-            _ => 0,                                         // amulets
+    /// Player-anm script id for a shot (BulletData anmScriptIdx). Straight
+    /// shots are ANM_SCRIPT_PLAYER_BULLET (64) for everyone; orb/special shots
+    /// differ per character. Resolved against each character's own sheet, so
+    /// the same id yields Reimu's amulet vs Marisa's star automatically.
+    fn shot_anm_script(self, bt: u8) -> i32 {
+        match (self, bt) {
+            (_, 0) => 64,             // ANM_SCRIPT_PLAYER_BULLET (straight)
+            (Character::ReimuA, _) => 65, // REIMU_A_ORB_BULLET
+            (Character::ReimuB, _) => 66, // REIMU_B_ORB_BULLET
+            (Character::MarisaA, _) => 65, // MARISA_A_ORB_BULLET_1
+            (Character::MarisaB, _) => 69, // MARISA_B_ORB_LASER_1
         }
     }
 
@@ -1369,7 +1376,7 @@ impl Stage {
                 vel: [a.cos() * def.vel, a.sin() * def.vel],
                 damage: def.damage,
                 bt: def.bt,
-                look: self.character.shot_look(def.bt),
+                anm_script: self.character.shot_anm_script(def.bt),
                 age: 0,
                 spd: def.vel,
             });
@@ -1947,6 +1954,16 @@ impl Stage {
         }
     }
 
+    /// Resolve a player-anm script id to its first sprite from the *current*
+    /// character's sheet (player00 Reimu / player01 Marisa), so the same shot
+    /// id renders that character's own bullet art.
+    fn shot_sprite_ref(&self, script_id: i32) -> Option<SpriteRef> {
+        let script = self.player_scripts.get(&script_id)?;
+        let idx = script.iter().find(|i| i.opcode == 1).map(|i| i.arg_u32(0))?;
+        let sp = self.player_sprites.get(&idx)?;
+        Some(SpriteRef { tex: self.player_tex, rect: [sp.x, sp.y, sp.width, sp.height] })
+    }
+
     fn draw(&self) -> Vec<DrawCmd> {
         let mut cmds = Vec::with_capacity(96 + self.world.bullets.len());
         if self.background.is_some() {
@@ -1962,16 +1979,6 @@ impl Stage {
             ));
         }
 
-        // Item collection line (y = 128): point items collected above it score
-        // the maximum, and at full power items above it auto-collect. EoSD
-        // draws no line — this is a QoL marker, brighter when auto-collect is
-        // live (full power).
-        if !self.spell_active {
-            let full = self.world.power >= 128;
-            let a = if full { 0.6 } else { 0.28 };
-            let tint = if full { [1.0, 0.9, 0.45, a] } else { [0.6, 0.8, 1.0, a] };
-            cmds.push(rect([FIELD_X, FIELD_Y + 128.0 - 1.0, FIELD_W, 2.0], tint));
-        }
 
         // Spellcard aura: soft pulsing glows behind the boss (BOMB_GLOW is a
         // round radial sprite, so this reads as an aura rather than squares).
@@ -2058,24 +2065,17 @@ impl Stage {
             });
         }
 
-        // Player shots: amulet / needle / missile per character.
+        // Player shots: each shot's anm script id is resolved against the
+        // current character's own sheet, so Reimu shows amulets and Marisa her
+        // stars/missiles from the same ids. Tall sprites (needles/lasers) are
+        // oriented along their travel direction.
         for s in &self.shots {
-            match s.look {
-                1 => {
-                    // Needle, oriented along its travel direction.
-                    let mut n = sprite_at(NEEDLE, s.pos, 0.95);
-                    n.tint = [1.0, 0.5, 0.6, 0.95];
-                    n.rot = s.vel[1].atan2(s.vel[0]) + std::f32::consts::FRAC_PI_2;
-                    cmds.push(n);
-                }
-                2 => {
-                    // Orb missile (gold).
-                    let mut m = sprite_at(AMULET, s.pos, 0.95);
-                    m.tint = [1.0, 0.85, 0.3, 0.95];
-                    cmds.push(m);
-                }
-                _ => cmds.push(sprite_at(AMULET, s.pos, 0.85)),
+            let sr = self.shot_sprite_ref(s.anm_script).unwrap_or(AMULET);
+            let mut cmd = sprite_at(sr, s.pos, 0.95);
+            if sr.rect[3] > sr.rect[2] * 1.4 {
+                cmd.rot = s.vel[1].atan2(s.vel[0]) + std::f32::consts::FRAC_PI_2;
             }
+            cmds.push(cmd);
         }
 
         // MarisaB orb beams behind the player.
