@@ -133,17 +133,13 @@ impl Background {
                     self.fog_far = fbits(ins.args[2]);
                     self.script_idx += 1;
                 }
-                3 => {
-                    // CAMERA_FACING (the look direction). Only adopt it when the
-                    // z component is sane — some scripts store a near-zero facing
-                    // that would collapse the view; keep the default there.
-                    let f = Vec3::new(fbits(ins.args[0]), fbits(ins.args[1]), fbits(ins.args[2]));
-                    if f.z.abs() > 0.1 {
-                        self.facing = f;
-                    }
-                    self.script_idx += 1;
-                }
-                // op 2 = fog-interp, op 4 = facing-interp, op 5 = pause: skipped.
+                // CAMERA_FACING (op2) carries the real look direction
+                // (e.g. (0, 700, 0.65)), but applying it in this view model
+                // pushes the corridor side-decorations to the center instead of
+                // the edges (a residual perspective mismatch vs th06). Until the
+                // view model is reworked, keep the default top-down facing, which
+                // renders the play area clear. op2 facing / op3-4 interp / op5
+                // pause are all skipped.
                 _ => self.script_idx += 1,
             }
         }
