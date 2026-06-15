@@ -8,6 +8,23 @@ wgpu = "25"
 winit = "0.30"
 image = "0.25"
 bytemuck = { version = "1", features = ["derive"] }
-pollster = "0.4"
-rodio = "0.19"
 glam = "0.29"
+# Drop-in Instant that works on wasm (re-exports std on native).
+web-time = "1"
+
+# Native-only: rodio audio + blocking executor.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rodio = "0.19"
+pollster = "0.4"
+
+# Web: wgpu canvas backend, web-audio, JS glue.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+console_error_panic_hook = "0.1"
+web-sys = { version = "0.3", features = [
+    "Document", "Window", "Element", "HtmlCanvasElement",
+    "AudioContext", "AudioBuffer", "AudioBufferSourceNode",
+    "AudioDestinationNode", "GainNode", "AudioParam", "AudioContextState",
+] }
+js-sys = "0.3"

@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>東方紅魔郷 — EoSD (web beta)</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body {
+    margin: 0; height: 100%;
+    background: #0a0a12; color: #e8e8f0;
+    font-family: system-ui, -apple-system, sans-serif;
+  }
+  #shell {
+    min-height: 100%;
+    display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 1.2rem; text-align: center; padding: 2rem;
+  }
+  h1 { font-weight: 600; letter-spacing: 0.04em; margin: 0; }
+  .sub { color: #8a8aa0; font-size: 0.9rem; max-width: 32rem; line-height: 1.5; }
+  .panel {
+    background: #15151f; border: 1px solid #2a2a3a; border-radius: 12px;
+    padding: 1.5rem 1.8rem; display: flex; flex-direction: column; gap: 1rem;
+    align-items: center; min-width: 18rem;
+  }
+  input[type=password], input[type=text] {
+    background: #0d0d16; border: 1px solid #33334a; border-radius: 8px;
+    color: #fff; padding: 0.6rem 0.8rem; font-size: 1rem; width: 14rem;
+  }
+  button {
+    background: #b3123a; color: #fff; border: 0; border-radius: 8px;
+    padding: 0.6rem 1.4rem; font-size: 1rem; cursor: pointer;
+  }
+  button:hover { background: #d11646; }
+  .err { color: #ff6b81; font-size: 0.85rem; min-height: 1rem; }
+  .hidden { display: none !important; }
+  canvas { display: block; image-rendering: pixelated; background: #000; }
+  #status { color: #9a9ab0; font-size: 0.85rem; }
+  code { background: #0d0d16; padding: 0.1rem 0.35rem; border-radius: 4px; }
+</style>
+</head>
+<body>
+<div id="shell">
+  <h1>東方紅魔郷 <span style="color:#b3123a">·</span> Embodiment of Scarlet Devil</h1>
+  <div class="sub">Native reimplementation — web private beta.
+    Your game files stay on your device: they are read in the browser and
+    never uploaded anywhere.</div>
+
+  <!-- Step 1: invite key -->
+  <div id="gate" class="panel">
+    <div>Enter your invite key</div>
+    <input id="key" type="password" autocomplete="off" placeholder="invite key" />
+    <button id="keyBtn">Enter</button>
+    <div id="keyErr" class="err"></div>
+  </div>
+
+  <!-- Step 2: folder upload -->
+  <div id="picker" class="panel hidden">
+    <div>Select your <code>th06</code> game folder</div>
+    <div class="sub">Pick the folder containing <code>TL.DAT</code>,
+      <code>CM.DAT</code>, <code>ST.DAT</code>, <code>IN.DAT</code>,
+      <code>th06e_ST.DAT</code> and the <code>bgm/</code> directory.</div>
+    <input id="folder" type="file" webkitdirectory directory multiple />
+    <div id="pickErr" class="err"></div>
+  </div>
+
+  <div id="status"></div>
+</div>
+
+<script type="module">
+import init, { start_game } from "./pkg/th06.js";
+
+// --- Step 1: invite gate -------------------------------------------------
+// NOTE: this is a client-side convenience gate only. Anyone who can read
+// this page can bypass it. Real access control must be enforced by the
+// server hosting these files (HTTP auth, signed URLs, or simply not
+// publishing the URL). Treat the key below as "keep the beta low-profile",
+// not as security.
+//
+// Compare against a SHA-256 hash so the literal key isn't in the source.
+// Replace INVITE_HASH with the hash of your chosen key (see web/README.md).
+const INVITE_HASH = "REPLACE_WITH_SHA256_OF_YOUR_KEY";
+
+async function sha256Hex(s) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+const gate = document.getElementById("gate");
+const picker = document.getElementById("picker");
+const keyErr = document.getElementById("keyErr");
+
+async function tryKey() {
+  const key = document.getElementById("key").value.trim();
+  if (!key) return;
+  const ok = INVITE_HASH === "REPLACE_WITH_SHA256_OF_YOUR_KEY"
+    ? true // not configured yet: allow through for local testing
+    : (await sha256Hex(key)) === INVITE_HASH;
+  if (ok) {
+    gate.classList.add("hidden");
+    picker.classList.remove("hidden");
+  } else {
+    keyErr.textContent = "Invalid key.";
+  }
+}
+document.getElementById("keyBtn").addEventListener("click", tryKey);
+document.getElementById("key").addEventListener("keydown", e => {
+  if (e.key === "Enter") tryKey();
+});
+
+// --- Step 2: read the folder, hand bytes to wasm -------------------------
+const status = document.getElementById("status");
+const pickErr = document.getElementById("pickErr");
+
+document.getElementById("folder").addEventListener("change", async (e) => {
+  const files = [...e.target.files];
+  if (files.length === 0) return;
+  pickErr.textContent = "";
+  status.textContent = "Reading files…";
+
+  // Build { basename: Uint8Array } for every selected file.
+  const map = {};
+  for (const f of files) {
+    map[f.name] = new Uint8Array(await f.arrayBuffer());
+  }
+
+  const required = ["TL.DAT", "CM.DAT", "ST.DAT", "IN.DAT", "th06e_ST.DAT"];
+  const missing = required.filter(n => !(n in map));
+  if (missing.length) {
+    status.textContent = "";
+    pickErr.textContent = "Missing: " + missing.join(", ");
+    return;
+  }
+
+  status.textContent = "Starting engine…";
+  picker.classList.add("hidden");
+  try {
+    await init();          // load + instantiate the wasm module
+    await start_game(map); // hands ownership to winit; canvas is appended
+    status.textContent = "";
+  } catch (err) {
+    console.error(err);
+    status.textContent = "";
+    pickErr.classList.remove("hidden");
+    pickErr.textContent = "Failed to start: " + err;
+    picker.classList.remove("hidden");
+  }
+});
+</script>
+</body>
+</html>

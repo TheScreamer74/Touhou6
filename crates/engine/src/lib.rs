@@ -5,7 +5,8 @@ pub mod audio;
 
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use bytemuck::{Pod, Zeroable};
 use winit::application::ApplicationHandler;
@@ -125,6 +126,7 @@ pub struct Engine {
     device: wgpu::Device,
     queue: wgpu::Queue,
     instance: wgpu::Instance,
+    adapter: wgpu::Adapter,
     bind_layout: wgpu::BindGroupLayout,
     shader: wgpu::ShaderModule,
     bg_shader: wgpu::ShaderModule,
@@ -132,6 +134,8 @@ pub struct Engine {
 }
 
 impl Engine {
+    /// Native: block on adapter/device acquisition.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new() -> Self {
         let instance = wgpu::Instance::default();
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
@@ -139,7 +143,34 @@ impl Engine {
         let (device, queue) =
             pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
                 .expect("request device");
+        Self::from_device(instance, adapter, device, queue)
+    }
 
+    /// Web: adapter/device acquisition is async and cannot block.
+    #[cfg(target_arch = "wasm32")]
+    pub async fn new_async() -> Self {
+        let instance = wgpu::Instance::default();
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions::default())
+            .await
+            .expect("no GPU adapter");
+        let (device, queue) = adapter
+            .request_device(&wgpu::DeviceDescriptor {
+                // WebGL2 has tighter limits than native; clamp to its defaults.
+                required_limits: wgpu::Limits::downlevel_webgl2_defaults(),
+                ..Default::default()
+            })
+            .await
+            .expect("request device");
+        Self::from_device(instance, adapter, device, queue)
+    }
+
+    fn from_device(
+        instance: wgpu::Instance,
+        adapter: wgpu::Adapter,
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+    ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("sprite"),
             source: wgpu::ShaderSource::Wgsl(SHADER.into()),
@@ -184,7 +215,7 @@ impl Engine {
             }],
         });
 
-        Self { device, queue, instance, bind_layout, shader, bg_shader, bg_uniform_layout }
+        Self { device, queue, instance, adapter, bind_layout, shader, bg_shader, bg_uniform_layout }
     }
 
     fn make_bg_pipeline(&self, format: wgpu::TextureFormat) -> wgpu::RenderPipeline {
@@ -566,18 +597,13 @@ impl Engine {
         data
     }
 
-    /// Open a window and run the game loop. `update` is called at a fixed
-    /// 60 Hz regardless of display refresh rate (the original game tied
-    /// logic speed to frame timing — this is the stable-FPS fix). Returns
-    /// the frame's draw commands; `Frame::quit` exits.
-    pub fn run_game(
+    fn make_app(
         self,
         title: &str,
         textures: Vec<Texture>,
         update: impl FnMut(&Input) -> Frame + 'static,
-    ) {
-        let event_loop = EventLoop::new().expect("event loop");
-        let mut app = App {
+    ) -> App {
+        App {
             engine: self,
             title: title.to_string(),
             cmds: Vec::new(),
@@ -595,11 +621,41 @@ impl Engine {
             pipeline: None,
             autoshot: std::env::var("TH06_AUTOSHOT").ok().filter(|s| !s.is_empty()),
             tick_count: 0,
-        };
+        }
+    }
+
+    /// Open a window and run the game loop. `update` is called at a fixed
+    /// 60 Hz regardless of display refresh rate (the original game tied
+    /// logic speed to frame timing — this is the stable-FPS fix). Returns
+    /// the frame's draw commands; `Frame::quit` exits.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn run_game(
+        self,
+        title: &str,
+        textures: Vec<Texture>,
+        update: impl FnMut(&Input) -> Frame + 'static,
+    ) {
+        let event_loop = EventLoop::new().expect("event loop");
+        let mut app = self.make_app(title, textures, update);
         if let Some(dir) = &app.autoshot {
             std::fs::create_dir_all(dir).expect("create autoshot dir");
         }
         event_loop.run_app(&mut app).expect("run app");
+    }
+
+    /// Web: hand the loop to the browser. Unlike the native path this returns
+    /// immediately — winit drives ticks via requestAnimationFrame.
+    #[cfg(target_arch = "wasm32")]
+    pub fn run_game_web(
+        self,
+        title: &str,
+        textures: Vec<Texture>,
+        update: impl FnMut(&Input) -> Frame + 'static,
+    ) {
+        use winit::platform::web::EventLoopExtWebSys;
+        let event_loop = EventLoop::new().expect("event loop");
+        let app = self.make_app(title, textures, update);
+        event_loop.spawn_app(app);
     }
 }
 
@@ -688,19 +744,33 @@ struct App {
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        let window = Arc::new(
-            event_loop
-                .create_window(
-                    Window::default_attributes()
-                        .with_title(&self.title)
-                        .with_inner_size(winit::dpi::LogicalSize::new(SCREEN_W, SCREEN_H))
-                        .with_resizable(false),
-                )
-                .expect("create window"),
-        );
+        let attrs = Window::default_attributes()
+            .with_title(&self.title)
+            .with_inner_size(winit::dpi::LogicalSize::new(SCREEN_W, SCREEN_H))
+            .with_resizable(false);
+        // On the web, append the rendering canvas to the document body so the
+        // page doesn't need to create one up front.
+        #[cfg(target_arch = "wasm32")]
+        let attrs = {
+            use winit::platform::web::WindowAttributesExtWebSys;
+            attrs.with_append(true)
+        };
+        let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
         let surface = self.engine.instance.create_surface(window.clone()).expect("surface");
         let size = window.inner_size();
+        // Native (Metal) uses Bgra8Unorm; WebGL/WebGPU surfaces advertise their
+        // own preferred formats, so pick a supported non-sRGB one there.
+        #[cfg(not(target_arch = "wasm32"))]
         let format = wgpu::TextureFormat::Bgra8Unorm;
+        #[cfg(target_arch = "wasm32")]
+        let format = {
+            let caps = surface.get_capabilities(&self.engine.adapter);
+            caps.formats
+                .iter()
+                .copied()
+                .find(|f| !f.is_srgb())
+                .unwrap_or(caps.formats[0])
+        };
         surface.configure(
             &self.engine.device,
             &wgpu::SurfaceConfiguration {

@@ -3,8 +3,27 @@ name = "th06"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+# rlib for the native binary to link; cdylib for the wasm-bindgen web build.
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 th06-formats = { path = "../formats" }
 th06-engine = { path = "../engine" }
-image = "0.25"
 glam = "0.29"
+
+# Native binary only: image I/O for screenshots/demo dumps.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+image = "0.25"
+
+# Web entry: JS glue + DOM file upload.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+console_error_panic_hook = "0.1"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = [
+    "Document", "Window", "Element", "HtmlElement", "HtmlCanvasElement",
+    "HtmlInputElement", "File", "FileList", "Blob",
+    "Event", "EventTarget", "Storage",
+] }
