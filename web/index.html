@@ -46,16 +46,8 @@
     Your game files stay on your device: they are read in the browser and
     never uploaded anywhere.</div>
 
-  <!-- Step 1: invite key -->
-  <div id="gate" class="panel">
-    <div>Enter your invite key</div>
-    <input id="key" type="password" autocomplete="off" placeholder="invite key" />
-    <button id="keyBtn">Enter</button>
-    <div id="keyErr" class="err"></div>
-  </div>
-
-  <!-- Step 2: folder upload -->
-  <div id="picker" class="panel hidden">
+  <!-- Folder upload -->
+  <div id="picker" class="panel">
     <div>Select your <code>th06</code> game folder</div>
     <div class="sub">Pick the folder containing <code>TL.DAT</code>,
       <code>CM.DAT</code>, <code>ST.DAT</code>, <code>IN.DAT</code>,
@@ -70,45 +62,10 @@
 <script type="module">
 import init, { start_game } from "./pkg/th06.js";
 
-// --- Step 1: invite gate -------------------------------------------------
-// NOTE: this is a client-side convenience gate only. Anyone who can read
-// this page can bypass it. Real access control must be enforced by the
-// server hosting these files (HTTP auth, signed URLs, or simply not
-// publishing the URL). Treat the key below as "keep the beta low-profile",
-// not as security.
-//
-// Compare against a SHA-256 hash so the literal key isn't in the source.
-// Replace INVITE_HASH with the hash of your chosen key (see web/README.md).
-const INVITE_HASH = "REPLACE_WITH_SHA256_OF_YOUR_KEY";
-
-async function sha256Hex(s) {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
-  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
-}
-
-const gate = document.getElementById("gate");
+// --- Read the folder, hand bytes to wasm ---------------------------------
+// Access is implicit: only someone who already owns the game files can play,
+// and nothing is uploaded — files are read locally in the browser.
 const picker = document.getElementById("picker");
-const keyErr = document.getElementById("keyErr");
-
-async function tryKey() {
-  const key = document.getElementById("key").value.trim();
-  if (!key) return;
-  const ok = INVITE_HASH === "REPLACE_WITH_SHA256_OF_YOUR_KEY"
-    ? true // not configured yet: allow through for local testing
-    : (await sha256Hex(key)) === INVITE_HASH;
-  if (ok) {
-    gate.classList.add("hidden");
-    picker.classList.remove("hidden");
-  } else {
-    keyErr.textContent = "Invalid key.";
-  }
-}
-document.getElementById("keyBtn").addEventListener("click", tryKey);
-document.getElementById("key").addEventListener("keydown", e => {
-  if (e.key === "Enter") tryKey();
-});
-
-// --- Step 2: read the folder, hand bytes to wasm -------------------------
 const status = document.getElementById("status");
 const pickErr = document.getElementById("pickErr");
 
