@@ -42,9 +42,11 @@ contains **zero** copyrighted assets — only code.
 | Stage progression carrying lives / bombs / power / score | ✅ done |
 | All four shot types (Reimu A/B, Marisa A/B) — distinct shots & bombs | ✅ done |
 | Faithful player — shot tiers, hitbox, graze, deathbomb | ✅ done |
+| Faithful items — point-of-collection latch, bullet-cancel → point items, death/boss-kill scatter drops | ✅ done |
 | Scoring, results screen, high-score save, pause menu | ✅ done |
 | **Web build** (WebAssembly, bring-your-own-files upload, fullscreen) | ✅ done |
 | Boss ex-instructions (`EXINSCALL`) — some spellcard patterns simplified | 🚧 partial |
+| Per-character bomb visuals, HUD layout polish, game-over name entry | 🚧 in progress |
 | Difficulty select (Easy/Hard/Lunatic), Extra stage, endings | 🔜 next |
 | Replays, Practice+, JP/EN selector, gamepad | ⬜ |
 
