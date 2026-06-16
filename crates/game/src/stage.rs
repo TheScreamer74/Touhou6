@@ -493,11 +493,36 @@ struct BombOrb {
     hue: f32,
 }
 
-/// Falling collectible (ItemManager port, simplified physics).
+/// Falling collectible (ItemManager port). `kind` matches ItemType:
+/// 0 power small, 1 point, 2 power big, 3 bomb, 4 full power, 5 life,
+/// 6 point-bullet (from cancelled bullets). `state` is the ItemManager state:
+/// 0 = normal fall, 1 = homing to player (latched, never reverts), 2 = the
+/// 60-frame scatter arc used by death/boss-kill drops, then it falls.
 struct Item {
     pos: [f32; 2],
     vy: f32,
-    kind: i32, // 0 power small, 1 point, 2 power big, 3 bomb, 4 full, 5 life
+    kind: i32,
+    state: u8,
+    timer: i32,
+    start: [f32; 2],
+    target: [f32; 2],
+}
+
+impl Item {
+    /// Normal drop: pops up (vy -2.2) then falls under gravity.
+    fn fall(pos: [f32; 2], kind: i32) -> Self {
+        Item { pos, vy: -2.2, kind, state: 0, timer: 0, start: [0.0; 2], target: [0.0; 2] }
+    }
+    /// Cancelled-bullet point item: homes to the player immediately (state 1).
+    fn homing(pos: [f32; 2], kind: i32) -> Self {
+        Item { pos, vy: 0.0, kind, state: 1, timer: 0, start: [0.0; 2], target: [0.0; 2] }
+    }
+    /// Death / boss-kill scatter (state 2): arcs to a random target over 60
+    /// frames (SpawnItem state==2: x in 48..336, y in -64..128) then falls.
+    fn scatter(pos: [f32; 2], kind: i32, rng: &mut Rng) -> Self {
+        let target = [rng.f32_in_range(288.0) + 48.0, rng.f32_in_range(192.0) - 64.0];
+        Item { pos, vy: 0.0, kind, state: 2, timer: 0, start: pos, target }
+    }
 }
 
 /// A short-lived visual puff (enemy death, item pickup, bullet cancel).
@@ -1071,7 +1096,7 @@ impl Stage {
             }
             e.frame_move();
             if !e.update_bounds() {
-                e.occupied = false;
+                e.despawn(&mut self.world);
                 continue;
             }
             e.handle_callbacks(&self.ecl, &mut self.world);
@@ -1330,10 +1355,25 @@ impl Stage {
         }
     }
 
-    /// Player::Die plus the respawn bookkeeping: lose a life and 16 power.
+    /// Player::Die plus the respawn bookkeeping: lose a life, scatter items and
+    /// drop power. With lives left: 1 big + 5 small power items scatter and power
+    /// drops by 16 (Player.cpp). On the fatal death: 5 full-power items, power 0.
     fn commit_death(&mut self) {
         self.lives -= 1;
-        self.world.power = (self.world.power - 16).max(0);
+        let pos = self.pos;
+        if self.lives >= 0 {
+            self.items.push(Item::scatter(pos, 2, &mut self.world.rng)); // POWER_BIG
+            for _ in 0..5 {
+                self.items.push(Item::scatter(pos, 0, &mut self.world.rng)); // POWER_SMALL
+            }
+            self.world.power = (self.world.power - 16).max(0);
+        } else {
+            for _ in 0..5 {
+                self.items.push(Item::scatter(pos, 4, &mut self.world.rng)); // FULL_POWER
+            }
+            self.world.power = 0;
+        }
+        self.power_item_count = 0;
         self.bombs = 3;
         self.spell_capturing = false; // dying forfeits the capture
         self.world.bullets.clear();
@@ -1806,7 +1846,7 @@ impl Stage {
             }
             k => k as i32,
         };
-        self.items.push(Item { pos, vy: -2.2, kind });
+        self.items.push(Item::fall(pos, kind));
     }
 
     /// Burst of fading puffs, used for enemy deaths and pickups.
@@ -1840,18 +1880,41 @@ impl Stage {
     fn update_items(&mut self) {
         let player = self.pos;
         let alive = matches!(self.state, PlayerState::Alive);
-        let magnet = alive && self.world.power >= 128 && player[1] < 128.0;
+        // Point of collection: at max power, crossing y<128 latches every
+        // falling item to homing (state 1). Once latched it stays homing even
+        // if the player drops back below the line; only items spawned afterwards
+        // (still state 0) keep falling. Matches ItemManager::OnUpdate.
+        let poc = alive && self.world.power >= 128 && player[1] < 128.0;
         let mut collected: Vec<(i32, [f32; 2])> = Vec::new();
         for it in &mut self.items {
-            if magnet {
-                let dx = player[0] - it.pos[0];
-                let dy = player[1] - it.pos[1];
-                let len = (dx * dx + dy * dy).sqrt().max(0.001);
-                it.pos[0] += dx / len * 8.0;
-                it.pos[1] += dy / len * 8.0;
+            if it.state == 2 {
+                // Scatter arc: lerp to target over 60 frames, then fall.
+                it.timer += 1;
+                if it.timer < 60 {
+                    let f = it.timer as f32 / 60.0;
+                    it.pos[0] = f * it.target[0] + it.start[0] * (1.0 - f);
+                    it.pos[1] = f * it.target[1] + it.start[1] * (1.0 - f);
+                } else {
+                    if it.timer == 60 {
+                        it.vy = 0.0;
+                    }
+                    it.vy = (it.vy + 0.03).min(3.0);
+                    it.pos[1] += it.vy;
+                }
             } else {
-                it.vy = (it.vy + 0.04).min(2.5);
-                it.pos[1] += it.vy;
+                if poc {
+                    it.state = 1;
+                }
+                if it.state == 1 {
+                    let dx = player[0] - it.pos[0];
+                    let dy = player[1] - it.pos[1];
+                    let len = (dx * dx + dy * dy).sqrt().max(0.001);
+                    it.pos[0] += dx / len * 8.0;
+                    it.pos[1] += dy / len * 8.0;
+                } else {
+                    it.vy = (it.vy + 0.03).min(3.0);
+                    it.pos[1] += it.vy;
+                }
             }
             if alive {
                 let dx = player[0] - it.pos[0];
@@ -1865,19 +1928,31 @@ impl Stage {
         self.items.retain(|it| it.kind != -100 && it.pos[1] < FIELD_H + 16.0);
         for (kind, pos) in collected {
             let color = match kind {
-                1 => [0.5, 0.7, 1.0],       // point = blue
+                1 | 6 => [0.5, 0.7, 1.0],   // point / point-bullet = blue
                 3 | 5 => [1.0, 0.6, 0.6],   // bomb/life = red
                 _ => [1.0, 0.4, 0.4],       // power = red
             };
             match kind {
                 0 => self.collect_power(1),
                 2 => self.collect_power(8),
-                4 => self.world.power = 128,
+                4 => {
+                    // ITEM_FULL_POWER: reaching max cancels bullets into points.
+                    if self.world.power < 128 {
+                        self.bullets_to_points();
+                    }
+                    self.world.power = 128;
+                    self.score += 1000;
+                }
                 1 => {
                     // ITEM_POINT (Normal, calculatePointScore): 100000 at the
                     // collection line (y < 128), else 60000 - (y-128)*100.
                     let y = pos[1] as i64;
                     self.score += if y < 128 { 100_000 } else { (60_000 - (y - 128) * 100).max(0) };
+                }
+                6 => {
+                    // ITEM_POINT_BULLET: (grazeInStage/3)*10 + 500, or 100 while
+                    // a bomb is active.
+                    self.score += if self.bombing > 0 { 100 } else { (self.graze / 3) * 10 + 500 };
                 }
                 3 => self.bombs = (self.bombs + 1).min(8),
                 5 => self.lives = (self.lives + 1).min(8),
@@ -1899,6 +1974,10 @@ impl Stage {
             self.power_item_count = 0;
             self.world.power = (self.world.power + amount).min(128);
             self.score += 10;
+            // Reaching max power cancels every bullet into point items.
+            if self.world.power >= 128 {
+                self.bullets_to_points();
+            }
         }
     }
 
@@ -1909,6 +1988,17 @@ impl Stage {
                 l.timer = 0;
             }
         }
+    }
+
+    /// BulletManager::TurnAllBulletsIntoPoints: each live bullet becomes a
+    /// homing point-bullet item; lasers are cancelled too. Used on full power,
+    /// spellcard start, and spellcard capture.
+    fn bullets_to_points(&mut self) {
+        for b in &self.world.bullets {
+            self.items.push(Item::homing(b.pos, 6));
+        }
+        self.world.bullets.clear();
+        self.cancel_lasers();
     }
 
     fn drain_world_events(&mut self) {
@@ -1933,16 +2023,24 @@ impl Stage {
                     self.spell_active = true;
                     self.spell_name = spellcard_name(id).to_string();
                     self.spell_capturing = true;
-                    self.world.bullets.clear();
+                    // SPELLCARDSTART cancels the prior pattern into point items.
+                    self.bullets_to_points();
                     self.events.push(Event::Sfx("cat00"));
                 }
                 WorldEvent::SpellcardEnd => {
+                    let captured = self.spell_active && self.spell_capturing;
                     if self.spell_active {
                         self.spell_result = 120;
                         self.spell_captured = self.spell_capturing;
                     }
                     self.spell_active = false;
-                    self.world.bullets.clear();
+                    // A captured card (SPELLCARDEND, isActive==1) rewards the
+                    // remaining bullets as point items; a timeout just clears.
+                    if captured {
+                        self.bullets_to_points();
+                    } else {
+                        self.world.bullets.clear();
+                    }
                 }
                 WorldEvent::BulletCancel => {
                     self.world.bullets.clear();
@@ -1959,7 +2057,7 @@ impl Stage {
                 }
                 WorldEvent::DropItem(pos, kind) => {
                     if kind >= 0 {
-                        self.items.push(Item { pos, vy: -2.2, kind });
+                        self.items.push(Item::fall(pos, kind));
                     }
                 }
             }
@@ -2059,10 +2157,18 @@ impl Stage {
             ));
         }
 
-        // Items (etama3 sprites 0..6, index = item kind).
+        // Items (etama3 sprites 0..6, index = item kind). Point-bullet items
+        // (kind 6) fall back to the point-item sprite if the sheet lacks one.
         let [btw, bth] = self.bullet_tex_size;
         for it in &self.items {
-            let Some(sp) = self.bullet_sprites.get(&(it.kind as u32)) else { continue };
+            let sp = match self.bullet_sprites.get(&(it.kind as u32)) {
+                Some(sp) => sp,
+                None if it.kind == 6 => match self.bullet_sprites.get(&1) {
+                    Some(sp) => sp,
+                    None => continue,
+                },
+                None => continue,
+            };
             cmds.push(DrawCmd {
                 tex: TEX_BULLET,
                 dst: [

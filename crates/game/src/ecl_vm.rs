@@ -478,7 +478,7 @@ impl Enemy {
             let instr = match ecl.instr_at(self.ctx.pc) {
                 Some(i) => i,
                 None => {
-                    self.occupied = false;
+                    self.despawn(world);
                     return;
                 }
             };
@@ -490,7 +490,7 @@ impl Enemy {
                         Flow::Next => {}
                         Flow::Jumped => continue,
                         Flow::Kill => {
-                            self.occupied = false;
+                            self.despawn(world);
                             return;
                         }
                     }
@@ -1319,6 +1319,22 @@ impl Enemy {
                 self.stack_depth = 0;
                 world.kill_trash = true;
             }
+        }
+    }
+
+    /// Port of Enemy::Despawn: free the slot and, critically, clear the boss
+    /// flag when a boss/midboss leaves without being killed (timeout or
+    /// flying off-screen). Without this the timeline's "wait for boss" /
+    /// trash-spawn gate (`boss_present`) never reopens and the stage softlocks.
+    pub fn despawn(&mut self, world: &mut World) {
+        if self.death_mode == 0 {
+            self.occupied = false;
+        } else {
+            self.interactable = false;
+        }
+        if self.is_boss {
+            world.boss_present = false;
+            world.events.push(WorldEvent::BossSet(false));
         }
     }
 

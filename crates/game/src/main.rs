@@ -156,8 +156,11 @@ fn main() {
         // Auto-play: hold Shoot, steer under the boss/nearest enemy, and pulse
         // Shoot to advance dialogue — so headless runs actually fight.
         let mut frame = Frame { cmds: Vec::new(), bg: None, quit: false };
+        // TH06_NOSHOOT: steer but never fire — lets a midboss reach its timeout
+        // so the leave-without-kill path can be exercised headlessly.
+        let no_shoot = std::env::var_os("TH06_NOSHOOT").is_some();
         for f in 0..frames {
-            let mut held = vec![Key::Shoot];
+            let mut held = if no_shoot { Vec::new() } else { vec![Key::Shoot] };
             if let Some((px, Some(tx))) = game.stage_aim() {
                 if tx < px - 4.0 {
                     held.push(Key::Left);
@@ -165,7 +168,9 @@ fn main() {
                     held.push(Key::Right);
                 }
             }
-            let pressed: &[Key] = if std::env::var_os("TH06_BOMB").is_some() && f == 40 {
+            let pressed: &[Key] = if no_shoot {
+                &[]
+            } else if std::env::var_os("TH06_BOMB").is_some() && f == 40 {
                 &[Key::Bomb]
             } else if f % 12 == 0 {
                 &[Key::Shoot]
