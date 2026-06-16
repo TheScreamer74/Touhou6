@@ -2253,29 +2253,39 @@ impl Stage {
             }
         }
 
-        // Master Spark: the damage covers the full playfield width above the
-        // player, so draw a full-width glow plus a bright flickering core
-        // rising from the player.
+        // Master Spark: a huge bright beam fired straight up from the player.
+        // The damage is full playfield width, but the *visible* spark is a wide
+        // central column — bright white core wrapped in pink/cyan bloom, with a
+        // flare at the muzzle — built from stacked alpha quads (the renderer is
+        // alpha-blended, so overlapping layers bloom toward white).
         if self.bomb_kind == 3 && self.bombing > 0 {
-            let flick = 0.75 + 0.25 * (self.anim as f32 * 0.8).sin();
-            let h = self.pos[1];
-            // Full-width outer wash.
-            cmds.push(DrawCmd {
-                tex: TEX_WHITE,
-                dst: [FIELD_X, FIELD_Y, FIELD_W, h],
-                src: [0.25, 0.25, 0.75, 0.75],
-                tint: [0.8, 0.6, 1.0, 0.3 * flick],
-                rot: 0.0,
-            });
-            // Bright core layers centred on the player.
-            for (w, col) in [(220.0, [1.0, 0.85, 1.0, 0.6]), (120.0, [1.0, 1.0, 1.0, 0.9]), (54.0, [1.0, 1.0, 1.0, 1.0])] {
-                cmds.push(DrawCmd {
-                    tex: TEX_WHITE,
-                    dst: [FIELD_X + self.pos[0] - w / 2.0, FIELD_Y, w, h],
-                    src: [0.25, 0.25, 0.75, 0.75],
-                    tint: [col[0], col[1], col[2], col[3] * flick],
-                    rot: 0.0,
-                });
+            let t = self.anim as f32;
+            let flick = 0.85 + 0.15 * (t * 0.9).sin();
+            let pulse = 0.92 + 0.08 * (t * 0.5).sin();
+            let h = self.pos[1]; // beam reaches from the top edge to the player
+            let cx = self.pos[0];
+            // Faint full-width wash: the spark lights the whole field.
+            cmds.push(rect([FIELD_X, FIELD_Y, FIELD_W, h], [0.80, 0.70, 1.0, 0.20 * flick]));
+            // Wide column: cyan/pink outer glow grading into a white-hot core.
+            for (w, col) in [
+                (210.0, [0.55, 0.85, 1.0, 0.32]), // cyan outer
+                (150.0, [1.0, 0.65, 1.0, 0.42]),  // pink mid
+                (96.0, [1.0, 0.95, 1.0, 0.65]),   // bright
+                (52.0, [1.0, 1.0, 1.0, 0.92]),    // core
+                (22.0, [1.0, 1.0, 1.0, 1.0]),     // hot center
+            ] {
+                let ww = w * pulse;
+                cmds.push(rect(
+                    [FIELD_X + cx - ww / 2.0, FIELD_Y, ww, h],
+                    [col[0], col[1], col[2], col[3] * flick],
+                ));
+            }
+            // Muzzle flare: layered glow bloom where the beam leaves the player.
+            for s in [130.0, 80.0, 44.0] {
+                let mut g = sprite_at(BOMB_GLOW, self.pos, 0.9 * flick);
+                g.dst = [FIELD_X + cx - s / 2.0, FIELD_Y + h - s / 2.0, s, s];
+                g.rot = t * 0.08;
+                cmds.push(g);
             }
         }
         // Dream cross: a vertical + horizontal beam through the player.
