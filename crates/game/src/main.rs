@@ -63,6 +63,20 @@ fn load_hiscore(path: &Path) -> i64 {
     std::fs::read_to_string(path).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0)
 }
 
+/// Read the high-score table (one `score<TAB>stage<TAB>name` row per line).
+fn load_scores(path: &Path) -> Vec<th06::ScoreEntry> {
+    let Ok(body) = std::fs::read_to_string(path) else { return Vec::new() };
+    body.lines()
+        .filter_map(|line| {
+            let mut it = line.splitn(3, '\t');
+            let score = it.next()?.trim().parse().ok()?;
+            let stage = it.next()?.trim().parse().ok()?;
+            let name = it.next()?.to_string();
+            Some(th06::ScoreEntry { name, score, stage })
+        })
+        .collect()
+}
+
 fn main() {
     install_crash_logger();
     let mut args = std::env::args().skip(1);
@@ -106,6 +120,10 @@ fn main() {
     let hiscore_path = game_dir.join("th06_hiscore.txt");
     game.set_hiscore(load_hiscore(&hiscore_path));
     game.set_hiscore_path(hiscore_path);
+
+    let scores_path = game_dir.join("th06_scores.txt");
+    game.set_scores(load_scores(&scores_path));
+    game.set_scores_path(scores_path);
 
     if scene_arg == "stage" {
         let ch = [Character::ReimuA, Character::ReimuB, Character::MarisaA, Character::MarisaB]

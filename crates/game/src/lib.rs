@@ -132,7 +132,27 @@ pub enum Scene {
     Title,
     CharSelect { cursor: usize },
     Stage(Box<Stage>),
+    /// High-score name entry after a game over whose score made the table.
+    NameEntry { score: i64, stage: u8, name: String, sel: usize },
+    /// The high-score table; `highlight` marks a freshly entered row.
+    Leaderboard { highlight: Option<usize> },
 }
+
+/// One high-score table row.
+#[derive(Clone)]
+pub struct ScoreEntry {
+    pub name: String,
+    pub score: i64,
+    pub stage: u8,
+}
+
+/// Selectable characters for the name-entry ribbon (ResultScreen.cpp char set,
+/// trimmed to the glyphs our ascii font draws).
+const NAME_RIBBON: &str =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,!?+-/ ";
+const RIBBON_COLS: usize = 14;
+const MAX_NAME_LEN: usize = 8;
+const MAX_SCORES: usize = 10;
 
 pub const CHARACTERS: [Character; 4] =
     [Character::ReimuA, Character::ReimuB, Character::MarisaA, Character::MarisaB];
@@ -149,9 +169,13 @@ pub struct Game {
     /// Base texture slot for the character-select art (see build_game).
     select_tex: usize,
     hiscore: i64,
+    /// High-score table (descending), capped at MAX_SCORES.
+    scores: Vec<ScoreEntry>,
     /// Native persists the high score to disk; web keeps it in memory only.
     #[cfg(not(target_arch = "wasm32"))]
     hiscore_path: std::path::PathBuf,
+    #[cfg(not(target_arch = "wasm32"))]
+    scores_path: std::path::PathBuf,
 }
 
 /// Build the full set of GPU textures and a `Game` at the title screen.
@@ -279,8 +303,11 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
         character: Character::ReimuA,
         select_tex,
         hiscore: 0,
+        scores: Vec::new(),
         #[cfg(not(target_arch = "wasm32"))]
         hiscore_path: std::path::PathBuf::new(),
+        #[cfg(not(target_arch = "wasm32"))]
+        scores_path: std::path::PathBuf::new(),
     };
     (textures, game)
 }
@@ -294,6 +321,46 @@ impl Game {
     pub fn set_hiscore_path(&mut self, path: std::path::PathBuf) {
         self.hiscore_path = path;
     }
+
+    /// Seed the high-score table (kept sorted descending, capped).
+    pub fn set_scores(&mut self, mut scores: Vec<ScoreEntry>) {
+        scores.sort_by(|a, b| b.score.cmp(&a.score));
+        scores.truncate(MAX_SCORES);
+        self.scores = scores;
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn set_scores_path(&mut self, path: std::path::PathBuf) {
+        self.scores_path = path;
+    }
+
+    /// A score makes the table if there is a free slot or it beats the lowest.
+    fn score_qualifies(&self, score: i64) -> bool {
+        self.scores.len() < MAX_SCORES || self.scores.iter().any(|e| score > e.score)
+    }
+
+    /// Insert a finished run and return its row index in the sorted table.
+    fn insert_score(&mut self, name: String, score: i64, stage: u8) -> usize {
+        self.scores.push(ScoreEntry { name, score, stage });
+        self.scores.sort_by(|a, b| b.score.cmp(&a.score));
+        self.scores.truncate(MAX_SCORES);
+        self.scores.iter().position(|e| e.score == score).unwrap_or(0)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn save_scores(&self) {
+        if self.scores_path.as_os_str().is_empty() {
+            return;
+        }
+        let body: String = self
+            .scores
+            .iter()
+            .map(|e| format!("{}\t{}\t{}\n", e.score, e.stage, e.name))
+            .collect();
+        let _ = std::fs::write(&self.scores_path, body);
+    }
+    #[cfg(target_arch = "wasm32")]
+    fn save_scores(&self) {}
 
     /// Jump straight into a stage (native `--scene stage` debugging). `stage`
     /// is 0-based and clamped to the available stages.
@@ -385,6 +452,78 @@ impl Game {
         cmds
     }
 
+    /// Full-screen black backdrop used by the name-entry / leaderboard screens.
+    fn dark_bg() -> DrawCmd {
+        DrawCmd {
+            tex: stage::TEX_WHITE,
+            dst: [0.0, 0.0, th06_engine::SCREEN_W as f32, th06_engine::SCREEN_H as f32],
+            src: [0.25, 0.25, 0.75, 0.75],
+            tint: [0.02, 0.0, 0.05, 1.0],
+            rot: 0.0,
+        }
+    }
+
+    fn name_entry_cmds(&self, score: i64, stage: u8, name: &str, sel: usize) -> Vec<DrawCmd> {
+        let mut cmds = vec![Self::dark_bg()];
+        stage::draw_text(&mut cmds, [180.0, 40.0], 22.0, [1.0, 0.5, 0.5, 1.0], "GAME OVER");
+        stage::draw_text(&mut cmds, [120.0, 84.0], 14.0, [1.0, 0.9, 0.5, 1.0], &format!("Score {:09}", score));
+        stage::draw_text(&mut cmds, [120.0, 104.0], 14.0, [0.8, 0.85, 1.0, 1.0], &format!("Reached Stage {}", stage));
+        stage::draw_text(&mut cmds, [120.0, 150.0], 14.0, [1.0, 1.0, 1.0, 1.0], "Enter your name:");
+
+        // Current name with a blinking caret.
+        let shown = if name.chars().count() < MAX_NAME_LEN { format!("{name}_") } else { name.to_string() };
+        stage::draw_text(&mut cmds, [120.0, 176.0], 20.0, [0.6, 1.0, 0.6, 1.0], &shown);
+
+        // Character ribbon grid; the selected glyph is highlighted.
+        let ribbon: Vec<char> = NAME_RIBBON.chars().collect();
+        let (ox, oy, cell) = (120.0f32, 220.0f32, 26.0f32);
+        for (i, ch) in ribbon.iter().enumerate() {
+            let col = (i % RIBBON_COLS) as f32;
+            let row = (i / RIBBON_COLS) as f32;
+            let x = ox + col * cell;
+            let y = oy + row * cell;
+            let tint = if i == sel { [1.0, 1.0, 0.3, 1.0] } else { [0.7, 0.7, 0.8, 1.0] };
+            if i == sel {
+                cmds.push(DrawCmd {
+                    tex: stage::TEX_WHITE,
+                    dst: [x - 3.0, y - 2.0, cell - 4.0, cell - 4.0],
+                    src: [0.25, 0.25, 0.75, 0.75],
+                    tint: [0.4, 0.4, 0.1, 0.8],
+                    rot: 0.0,
+                });
+            }
+            stage::draw_text(&mut cmds, [x, y], 18.0, tint, &ch.to_string());
+        }
+        stage::draw_text(&mut cmds, [120.0, 410.0], 12.0, [0.8, 0.8, 0.9, 1.0],
+            "Arrows: pick   Z: add   X: erase   Enter: confirm");
+        cmds
+    }
+
+    fn leaderboard_cmds(&self, highlight: Option<usize>) -> Vec<DrawCmd> {
+        let mut cmds = vec![Self::dark_bg()];
+        stage::draw_text(&mut cmds, [210.0, 36.0], 22.0, [1.0, 0.85, 0.4, 1.0], "HIGH SCORES");
+        let (rx, nx, sx, tx, oy, dy) = (70.0f32, 120.0f32, 280.0f32, 470.0f32, 90.0f32, 30.0f32);
+        stage::draw_text(&mut cmds, [rx, oy], 13.0, [0.6, 0.7, 1.0, 1.0], "#");
+        stage::draw_text(&mut cmds, [nx, oy], 13.0, [0.6, 0.7, 1.0, 1.0], "Name");
+        stage::draw_text(&mut cmds, [sx, oy], 13.0, [0.6, 0.7, 1.0, 1.0], "Score");
+        stage::draw_text(&mut cmds, [tx, oy], 13.0, [0.6, 0.7, 1.0, 1.0], "Stage");
+        for i in 0..MAX_SCORES {
+            let y = oy + 24.0 + i as f32 * dy;
+            let hot = highlight == Some(i);
+            let tint = if hot { [1.0, 1.0, 0.4, 1.0] } else { [0.9, 0.9, 0.95, 1.0] };
+            stage::draw_text(&mut cmds, [rx, y], 16.0, tint, &format!("{}", i + 1));
+            if let Some(e) = self.scores.get(i) {
+                stage::draw_text(&mut cmds, [nx, y], 16.0, tint, &e.name);
+                stage::draw_text(&mut cmds, [sx, y], 16.0, tint, &format!("{:09}", e.score));
+                stage::draw_text(&mut cmds, [tx, y], 16.0, tint, &format!("{}", e.stage));
+            } else {
+                stage::draw_text(&mut cmds, [nx, y], 16.0, [0.4, 0.4, 0.5, 1.0], "--------");
+            }
+        }
+        stage::draw_text(&mut cmds, [200.0, 440.0], 13.0, [0.85, 0.85, 0.9, 1.0], "Z: return to title");
+        cmds
+    }
+
     pub fn update(&mut self, input: &Input) -> Frame {
         // Character select is handled before the borrow of self.scene so it can
         // freely touch audio / start a stage.
@@ -417,8 +556,55 @@ impl Game {
             self.scene = Scene::CharSelect { cursor: cur };
             return Frame { cmds: self.charselect_cmds(cur), bg: None, quit: false };
         }
+
+        // Name entry (after a qualifying game over): a char ribbon driven by the
+        // arrows, Z appends, X backspaces, Enter confirms.
+        if let Scene::NameEntry { score, stage, name, sel } = &self.scene {
+            let (score, stage) = (*score, *stage);
+            let mut name = name.clone();
+            let mut sel = *sel;
+            let ribbon: Vec<char> = NAME_RIBBON.chars().collect();
+            let n = ribbon.len();
+            let sfx = |g: &Game| if let Some(a) = &g.audio { a.play_sfx("tan00"); };
+            if input.pressed(Key::Left) { sel = (sel + n - 1) % n; sfx(self); }
+            if input.pressed(Key::Right) { sel = (sel + 1) % n; sfx(self); }
+            if input.pressed(Key::Up) { sel = (sel + n - RIBBON_COLS) % n; sfx(self); }
+            if input.pressed(Key::Down) { sel = (sel + RIBBON_COLS) % n; sfx(self); }
+            if input.pressed(Key::Shoot) && name.chars().count() < MAX_NAME_LEN {
+                name.push(ribbon[sel]);
+                if let Some(a) = &self.audio { a.play_sfx("plst00"); }
+            }
+            if input.pressed(Key::Bomb) {
+                name.pop();
+                sfx(self);
+            }
+            if input.pressed(Key::Enter) || input.pressed(Key::Pause) {
+                let final_name = if name.trim().is_empty() { "PLAYER".to_string() } else { name.trim().to_string() };
+                let rank = self.insert_score(final_name, score, stage);
+                self.save_scores();
+                self.scene = Scene::Leaderboard { highlight: Some(rank) };
+                return Frame { cmds: self.leaderboard_cmds(Some(rank)), bg: None, quit: false };
+            }
+            let cmds = self.name_entry_cmds(score, stage, &name, sel);
+            self.scene = Scene::NameEntry { score, stage, name, sel };
+            return Frame { cmds, bg: None, quit: false };
+        }
+
+        // Leaderboard: any confirm returns to the title.
+        if let Scene::Leaderboard { highlight } = &self.scene {
+            let hl = *highlight;
+            if input.pressed(Key::Shoot) || input.pressed(Key::Enter) || input.pressed(Key::Bomb) {
+                self.scene = Scene::Title;
+                self.title.reset();
+                self.play_bgm("th06_01.wav");
+                return Frame { cmds: Vec::new(), bg: None, quit: false };
+            }
+            return Frame { cmds: self.leaderboard_cmds(hl), bg: None, quit: false };
+        }
+
         match &mut self.scene {
             Scene::CharSelect { .. } => unreachable!("handled above"),
+            Scene::NameEntry { .. } | Scene::Leaderboard { .. } => unreachable!("handled above"),
             Scene::Title => {
                 let (cmds, action) = self.title.update(input);
                 match action {
@@ -441,6 +627,7 @@ impl Game {
                 let carry = stage.carry();
                 let mut back = false;
                 let mut next_stage = false;
+                let mut game_over: Option<i64> = None;
                 for ev in events {
                     match ev {
                         Event::Sfx(name) => {
@@ -454,6 +641,7 @@ impl Game {
                         }
                         Event::BackToTitle => back = true,
                         Event::NextStage => next_stage = true,
+                        Event::GameOver(score) => game_over = Some(score),
                         Event::Quit => return Frame { cmds, bg, quit: true },
                         Event::SaveScore(score) => {
                             if score > self.hiscore {
@@ -465,6 +653,18 @@ impl Game {
                             }
                         }
                     }
+                }
+                if let Some(score) = game_over {
+                    // A qualifying score opens name entry; otherwise straight to
+                    // the leaderboard. Either way the run is over.
+                    let stage = self.current_stage as u8 + 1;
+                    self.play_bgm("th06_01.wav");
+                    self.scene = if self.score_qualifies(score) {
+                        Scene::NameEntry { score, stage, name: String::new(), sel: 0 }
+                    } else {
+                        Scene::Leaderboard { highlight: None }
+                    };
+                    return Frame { cmds, bg: None, quit: false };
                 }
                 if next_stage {
                     // Carry progress into the next stage; the last stage clear

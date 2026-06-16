@@ -49,6 +49,9 @@ pub enum Event {
     NextStage,
     Quit,
     SaveScore(i64),
+    /// All lives lost — carries the final score so Game can offer the
+    /// high-score name entry / leaderboard (Game supplies the stage number).
+    GameOver(i64),
 }
 
 /// Per-stage wiring that varies by stage/character: dialogue portrait texture
@@ -870,7 +873,7 @@ impl Stage {
             PlayerState::GameOver(t) => {
                 *t -= 1;
                 if *t == 0 {
-                    self.events.push(Event::BackToTitle);
+                    self.events.push(Event::GameOver(self.score));
                     return self.draw();
                 }
             }
