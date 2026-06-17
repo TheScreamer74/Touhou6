@@ -192,6 +192,14 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
         textures.push(engine.create_texture(&rgba, w, h));
         slot
     };
+    // Background textures tile and scroll, so they use a wrapping sampler.
+    let load_bg = |map: &HashMap<String, Vec<u8>>, color: &str, mask: Option<&str>, textures: &mut Vec<Texture>| -> usize {
+        let alpha = mask.and_then(|m| map.get(m)).map(|v| v.as_slice());
+        let (rgba, w, h) = compose_rgba(&map[color], alpha);
+        let slot = textures.len();
+        textures.push(engine.create_texture_wrapped(&rgba, w, h));
+        slot
+    };
 
     // Fixed slots (referenced by stage.rs constants): 0 title bg, 1 title menu,
     // 2 player00, 3 etama3, 4 stg1enm, 5 stg1enm2, 6 front, 7 white, 8 ascii,
@@ -221,7 +229,7 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
     load(&files.cm, "face00a.png", Some("face00a_a.png"), &mut textures); // 9
     load(&files.cm, "face01a.png", Some("face01a_a.png"), &mut textures); // 10
     // 11: stage 1 background texture.
-    load(&files.st, "stg1bg.png", Some("stg1bg_a.png"), &mut textures);
+    load_bg(&files.st, "stg1bg.png", Some("stg1bg_a.png"), &mut textures);
     // 12: Marisa player body sprite (player01).
     let player_marisa_tex = load(&files.cm, "player01.png", Some("player01_a.png"), &mut textures);
 
@@ -239,7 +247,7 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
             } else {
                 (None, 0)
             };
-            let bg_tex = load(&files.st, &format!("stg{n}bg.png"), Some(&format!("stg{n}bg_a.png")), &mut textures);
+            let bg_tex = load_bg(&files.st, &format!("stg{n}bg.png"), Some(&format!("stg{n}bg_a.png")), &mut textures);
             (enm_tex, enm2, enm2_tex, bg_tex)
         };
         let face = BOSS_FACE[n - 1];
