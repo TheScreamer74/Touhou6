@@ -682,6 +682,12 @@ pub struct Stage {
     items: Vec<Item>,
     particles: Vec<Particle>,
     score: i64,
+    /// Displayed score, rolled toward `score` each frame (Gui guiScore).
+    gui_score: i64,
+    next_score_inc: i64,
+    /// "Full Power Mode!!" popup: frames remaining + edge-tracking of max power.
+    full_power_timer: u32,
+    was_full: bool,
     hiscore: i64,
     clear_bonus: i64,
     /// Running count for scoring power items collected at max power.
@@ -770,6 +776,10 @@ impl Stage {
             items: Vec::new(),
             particles: Vec::new(),
             score: 0,
+            gui_score: 0,
+            next_score_inc: 0,
+            full_power_timer: 0,
+            was_full: false,
             hiscore: 0,
             clear_bonus: 0,
             power_item_count: 0,
@@ -887,6 +897,14 @@ impl Stage {
             bg.tick();
         }
         self.hud.tick();
+        self.roll_gui_score();
+        // "Full Power Mode!!" popup when power first reaches max.
+        let full = self.world.power >= 128;
+        if full && !self.was_full {
+            self.full_power_timer = 120;
+        }
+        self.was_full = full;
+        self.full_power_timer = self.full_power_timer.saturating_sub(1);
 
         // Player state machine.
         let mut respawn = false;
@@ -2561,6 +2579,30 @@ impl Stage {
         cmds
     }
 
+    /// Roll the displayed score toward the real score (GameManager guiScore).
+    fn roll_gui_score(&mut self) {
+        if self.gui_score == self.score {
+            return;
+        }
+        if self.score < self.gui_score {
+            self.score = self.gui_score;
+        }
+        let mut inc = (self.score - self.gui_score) >> 5;
+        inc = inc.clamp(10, 78910);
+        inc -= inc % 10;
+        if self.next_score_inc < inc {
+            self.next_score_inc = inc;
+        }
+        if self.gui_score + self.next_score_inc > self.score {
+            self.next_score_inc = self.score - self.gui_score;
+        }
+        self.gui_score += self.next_score_inc;
+        if self.gui_score >= self.score {
+            self.next_score_inc = 0;
+            self.gui_score = self.score;
+        }
+    }
+
     fn draw_hud(&self, cmds: &mut Vec<DrawCmd>) {
         let border = [0.12, 0.05, 0.08, 1.0];
         cmds.push(rect([0.0, 0.0, 640.0, FIELD_Y], border));
@@ -2577,8 +2619,8 @@ impl Stage {
         let vx = 496.0; // value column (Gui.cpp)
         let val = [1.0, 1.0, 1.0, 1.0];
 
-        draw_text(cmds, [vx, 58.0], 14.0, val, &format!("{:09}", self.hiscore.max(self.score)));
-        draw_text(cmds, [vx, 82.0], 14.0, val, &format!("{:09}", self.score));
+        draw_text(cmds, [vx, 58.0], 14.0, val, &format!("{:09}", self.hiscore.max(self.gui_score)));
+        draw_text(cmds, [vx, 82.0], 14.0, val, &format!("{:09}", self.gui_score));
 
         for i in 0..self.lives.max(0) {
             cmds.push(hud_sprite(HUD_STAR_RED, [vx + i as f32 * 16.0, 122.0]));
@@ -2595,6 +2637,11 @@ impl Stage {
 
         draw_text(cmds, [vx, 206.0], 13.0, val, &format!("{}", self.graze));
         draw_text(cmds, [vx, 226.0], 13.0, val, &format!("{}", self.point_items));
+
+        // "Full Power Mode!!" popup at max power (Gui::ShowFullPowerMode).
+        if self.full_power_timer > 0 {
+            draw_text(cmds, [FIELD_X + 92.0, 232.0], 16.0, [1.0, 1.0, 0.4, 1.0], "Full Power Mode!!");
+        }
 
         match self.state {
             PlayerState::GameOver(_) => {
