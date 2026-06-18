@@ -41,6 +41,8 @@ pub const TEX_WHITE: usize = 7;
 pub const TEX_ASCII: usize = 8;
 pub const TEX_FACE_REIMU: usize = 9; // face00a (Reimu player portrait)
 pub const TEX_FACE_MARISA: usize = 10; // face01a (Marisa player portrait)
+// 11 stg1bg, 12 player01.
+pub const TEX_POWER_GRAD: usize = 13; // 2x1 power-bar gradient
 
 /// Sound effects by SoundIdx (SoundPlayer.cpp g_SFXList order). Indexing this
 /// with the raw idx the ECL/bullet code passes gives the right cue — the
@@ -2775,21 +2777,20 @@ impl Stage {
             self.hud.draw_sprite(cmds, 17, vx + i as f32 * 16.0, 146.0, 1.0);
         }
 
-        // Power bar: a gradient quad width = currentPower px (Gui.cpp:1152-1198),
-        // 0xe0e0e0 -> 0x80e0e0. DrawCmd is single-tint, so approximate the
-        // gradient with vertical slices. Then the MAX sprite (vms[18]) at full,
-        // else the numeric value, both at (496,186).
+        // Power bar: the decomp's gradient quad, width = currentPower px
+        // (Gui.cpp:1152-1198), 0xe0e0e0 -> 0x80e0e0. Drawn as the 2x1 gradient
+        // texture sampled at its texel centres (0.25..0.75) so the endpoints are
+        // exact and the GPU linearly interpolates between them. Then the MAX
+        // sprite (vms[18]) at full, else the numeric value, both at (496,186).
         let power = self.world.power.max(0);
         if power > 0 {
-            let slices = 16;
-            for s in 0..slices {
-                let f0 = s as f32 / slices as f32;
-                let f1 = (s + 1) as f32 / slices as f32;
-                let g = 0.878 + (0.502 - 0.878) * (f0 + f1) / 2.0; // green/red ch e0->80
-                let x0 = vx + power as f32 * f0;
-                let w = power as f32 * (f1 - f0);
-                cmds.push(rect([x0, 186.0, w, 16.0], [g, 0.878, 0.878, 1.0]));
-            }
+            cmds.push(DrawCmd {
+                tex: TEX_POWER_GRAD,
+                dst: [vx, 186.0, power as f32, 16.0],
+                src: [0.25, 0.5, 0.75, 0.5],
+                tint: [1.0, 1.0, 1.0, 1.0],
+                rot: 0.0,
+            });
         }
         if power >= 128 {
             self.hud.draw_sprite(cmds, 18, vx, 186.0, 1.0);

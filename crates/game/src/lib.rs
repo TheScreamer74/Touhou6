@@ -236,6 +236,10 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
     load_bg(&files.st, "stg1bg.png", Some("stg1bg_a.png"), &mut textures);
     // 12: Marisa player body sprite (player01).
     let player_marisa_tex = load(&files.cm, "player01.png", Some("player01_a.png"), &mut textures);
+    // 13: power-bar gradient, 2x1 (0xe0e0e0 -> 0x80e0e0) sampled linearly so the
+    // HUD power bar is the decomp's exact per-vertex gradient (Gui.cpp:1162-1163).
+    debug_assert_eq!(textures.len(), stage::TEX_POWER_GRAD);
+    textures.push(engine.create_texture(&[224, 224, 224, 255, 128, 224, 224, 255], 2, 1));
 
     // Per-stage sprite sheets + boss faces, appended after the fixed slots.
     let mut stages: Vec<StageData> = Vec::new();
