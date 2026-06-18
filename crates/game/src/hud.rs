@@ -52,13 +52,16 @@ impl Hud {
         self.tex_size
     }
 
-    /// Pixel rect [x, y, w, h] of the sprite that front.anm script `id`
-    /// currently shows — used by the boss UI, which positions/scales these
-    /// sprites itself (`Gui::DrawGameScene`).
-    pub fn script_sprite(&self, id: u32) -> Option<[f32; 4]> {
+    /// Draw state of front.anm script `id`: its current sprite rect
+    /// [x, y, w, h], self-placed pos, scale and alpha. The boss UI repositions
+    /// and re-scales these sprites itself (`Gui::DrawGameScene`) but keeps the
+    /// script's own scaleY/alpha (e.g. the health bar's 0.3 height + fade-in).
+    pub fn script_state(&self, id: u32) -> Option<([f32; 4], [f32; 2], [f32; 2], f32)> {
         let idx = self.ids.iter().position(|&i| i == id)?;
-        let sprite = self.runners[idx].sprite?;
-        self.sprites.get(&sprite).copied()
+        let r = &self.runners[idx];
+        let sprite = r.sprite?;
+        let rect = *self.sprites.get(&sprite)?;
+        Some((rect, r.pos, r.scale, r.alpha))
     }
 
     /// Emit the self-placing HUD sprites (labels + intro emblems). Elements the

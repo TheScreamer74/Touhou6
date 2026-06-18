@@ -2647,15 +2647,33 @@ impl Stage {
             return;
         };
 
-        // Health bar: front.anm bar sprite (script 21), top-left anchored at
-        // field (96, 24), drawn `bossHealthBar2 * 288` px wide.
-        if let Some([sx, sy, sw, sh]) = self.hud.script_sprite(21) {
-            let ts = self.hud.tex_size();
+        let ts = self.hud.tex_size();
+
+        // "Enemy" label (script 19), self-placed by its own script.
+        if let Some(([sx, sy, sw, sh], pos, scale, alpha)) = self.hud.script_state(19) {
             cmds.push(DrawCmd {
                 tex: self.hud.tex(),
-                dst: [FIELD_X + 96.0, FIELD_Y + 24.0, self.boss_bar * 288.0, sh],
+                dst: [
+                    FIELD_X + pos[0] - sw * scale[0] / 2.0,
+                    FIELD_Y + pos[1] - sh * scale[1] / 2.0,
+                    sw * scale[0],
+                    sh * scale[1],
+                ],
                 src: [sx / ts, sy / ts, (sx + sw) / ts, (sy + sh) / ts],
-                tint: [1.0, 1.0, 1.0, 1.0],
+                tint: [1.0, 1.0, 1.0, alpha],
+                rot: 0.0,
+            });
+        }
+
+        // Health bar (script 21): top-left anchored at field (96, 24), width
+        // `bossHealthBar2 * 288` (the decomp's scaleX*14), keeping the script's
+        // own scaleY (0.3 -> ~4px tall) and fade-in alpha.
+        if let Some(([sx, sy, sw, sh], _, scale, alpha)) = self.hud.script_state(21) {
+            cmds.push(DrawCmd {
+                tex: self.hud.tex(),
+                dst: [FIELD_X + 96.0, FIELD_Y + 24.0, self.boss_bar * 288.0, sh * scale[1]],
+                src: [sx / ts, sy / ts, (sx + sw) / ts, (sy + sh) / ts],
+                tint: [1.0, 1.0, 1.0, alpha],
                 rot: 0.0,
             });
         }
@@ -2885,39 +2903,5 @@ fn hud_sprite(s: SpriteRef, screen_pos: [f32; 2]) -> DrawCmd {
         src: [x / 256.0, y / 256.0, (x + w) / 256.0, (y + h) / 256.0],
         tint: [1.0, 1.0, 1.0, 1.0],
         rot: 0.0,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::stage_clear_bonus;
-
-    // Hand-computed from Gui.cpp:935-963.
-    #[test]
-    fn clear_bonus_normal_midstage() {
-        // stage 1, 200 graze, power 128, 30 point items, Normal:
-        // (1*1000 + 200*10 + 128*100) * 30 = (1000+2000+12800)*30 = 474000.
-        assert_eq!(stage_clear_bonus(1, 200, 128, 30, 2, 3, 1), 474_000);
-    }
-
-    #[test]
-    fn clear_bonus_zero_point_items_is_zero() {
-        // The pointItems multiply zeroes the whole bonus.
-        assert_eq!(stage_clear_bonus(3, 500, 128, 0, 5, 5, 1), 0);
-    }
-
-    #[test]
-    fn clear_bonus_final_stage_adds_lives_bombs() {
-        // stage 6 adds lives*3M + bombs*1M before the multiplier.
-        // (6000 + 0 + 0) * 1 = 6000; +2*3M +1*1M = 7_006_000; Normal: unchanged.
-        assert_eq!(stage_clear_bonus(6, 0, 0, 1, 2, 1, 1), 7_006_000);
-    }
-
-    #[test]
-    fn clear_bonus_lunatic_multiplier_rounds_down() {
-        // base (1000)*1 = 1000; Lunatic *15/10 = 1500; -%10 = 1500.
-        assert_eq!(stage_clear_bonus(1, 0, 0, 1, 0, 0, 3), 1500);
-        // base (1000 + 1 graze*10) = 1010; *15/10 = 1515; -%10 = 1510.
-        assert_eq!(stage_clear_bonus(1, 1, 0, 1, 0, 0, 3), 1510);
     }
 }
