@@ -6,6 +6,7 @@
 pub mod anm_vm;
 pub mod background;
 pub mod ecl_vm;
+pub mod hud;
 pub mod stage;
 pub mod title;
 
@@ -94,6 +95,7 @@ struct Assets {
     player_marisa: Anm0,
     player_marisa_tex: usize,
     etama: Anm0,
+    front: Anm0,
     stages: Vec<StageData>,
 }
 
@@ -120,9 +122,10 @@ impl Assets {
             stage_bgm: STAGE_BGM[idx],
             boss_bgm: BOSS_BGM[idx],
         };
+        let hud = crate::hud::Hud::new(&self.front.entries[0], stage::TEX_FRONT);
         Stage::new(
             ecl, scripts, &self.etama.entries[0], player_anm, player_tex, character, msg,
-            background, cfg,
+            background, hud, cfg,
         )
     }
 }
@@ -298,6 +301,7 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
         player_marisa: Anm0::parse(&files.cm["player01.anm"]).expect("parse player01"),
         player_marisa_tex,
         etama: Anm0::parse(&files.cm["etama3.anm"]).expect("parse etama3"),
+        front: Anm0::parse(&files.cm["front.anm"]).expect("parse front"),
         stages,
     };
 

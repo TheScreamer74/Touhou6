@@ -11,6 +11,7 @@ use th06_formats::ecl::Ecl;
 use th06_formats::msg::Msg;
 
 use crate::anm_vm::AnmRunner;
+use crate::hud::Hud;
 use crate::background::Background;
 use th06_engine::BgScene;
 use crate::ecl_vm::{Bullet, Enemy, Rng, SpawnReq, World, WorldEvent};
@@ -100,7 +101,6 @@ const BOMB_GLOW: SpriteRef = spr(TEX_PLAYER, 1.0, 97.0, 62.0, 62.0);
 /// player00 sprite 66: the focus hitbox marker.
 const HITBOX_MARKER: SpriteRef = spr(TEX_PLAYER, 160.0, 0.0, 16.0, 16.0);
 
-const HUD_LOGO: SpriteRef = spr(TEX_FRONT, 128.0, 128.0, 128.0, 128.0);
 const HUD_STAR_RED: SpriteRef = spr(TEX_FRONT, 32.0, 240.0, 16.0, 16.0);
 const HUD_STAR_GREEN: SpriteRef = spr(TEX_FRONT, 48.0, 240.0, 16.0, 16.0);
 
@@ -705,11 +705,12 @@ pub struct Stage {
     msg: Msg,
     dialogue: Dialogue,
     background: Option<Background>,
+    hud: Hud,
     pub events: Vec<Event>,
 }
 
 impl Stage {
-    pub fn new(ecl: Ecl, enemy_scripts: HashMap<i32, ScriptRef>, etama: &Entry, player: &Entry, player_tex: usize, character: Character, msg: Msg, background: Option<Background>, cfg: StageConfig) -> Self {
+    pub fn new(ecl: Ecl, enemy_scripts: HashMap<i32, ScriptRef>, etama: &Entry, player: &Entry, player_tex: usize, character: Character, msg: Msg, background: Option<Background>, hud: Hud, cfg: StageConfig) -> Self {
         let timeline_off = ecl.timeline_offset;
         let player_scripts: HashMap<i32, Vec<AnmInstr>> =
             player.scripts.iter().map(|(id, instrs)| (*id as i32, instrs.clone())).collect();
@@ -789,6 +790,7 @@ impl Stage {
             msg,
             dialogue: Dialogue::default(),
             background,
+            hud,
             events: vec![Event::Bgm(cfg.stage_bgm)],
         }
     }
@@ -884,6 +886,7 @@ impl Stage {
         if let Some(bg) = &mut self.background {
             bg.tick();
         }
+        self.hud.tick();
 
         // Player state machine.
         let mut respawn = false;
@@ -2565,53 +2568,33 @@ impl Stage {
         cmds.push(rect([0.0, 0.0, FIELD_X, 480.0], border));
         cmds.push(rect([FIELD_X + FIELD_W, 0.0, 640.0 - FIELD_X - FIELD_W, 480.0], border));
 
-        // The playfield matches the original exactly (32,16,384,448), so the
-        // sidebar uses the original Gui::OnDraw screen coordinates: labels in a
-        // left column, values/stars/bar anchored at x=496.
-        let lx = FIELD_X + FIELD_W; // 416 — label column
+        // Persistent HUD graphics (labels + intro emblems) from front.anm,
+        // placed in the original Gui screen coordinates.
+        self.hud.draw(cmds);
+
+        // Dynamic values drawn over the front.anm labels. (Phase 2 will move
+        // these onto the original number font / rolling score.)
         let vx = 496.0; // value column (Gui.cpp)
-        let label = [1.0, 0.4, 0.25, 1.0]; // EoSD label red
         let val = [1.0, 1.0, 1.0, 1.0];
 
-        // High Score / Score: 9-digit zero-padded (Gui "%.9d", y 58 / 82).
-        draw_text(cmds, [lx, 58.0], 11.0, label, "HighScore");
         draw_text(cmds, [vx, 58.0], 14.0, val, &format!("{:09}", self.hiscore.max(self.score)));
-        draw_text(cmds, [lx, 82.0], 11.0, label, "Score");
         draw_text(cmds, [vx, 82.0], 14.0, val, &format!("{:09}", self.score));
 
-        // Player / Bomb stars (y 122 / 146, x 496 step 16).
-        draw_text(cmds, [lx, 122.0], 14.0, label, "Player");
         for i in 0..self.lives.max(0) {
             cmds.push(hud_sprite(HUD_STAR_RED, [vx + i as f32 * 16.0, 122.0]));
         }
-        draw_text(cmds, [lx, 146.0], 14.0, label, "Bomb");
         for i in 0..self.bombs.max(0) {
             cmds.push(hud_sprite(HUD_STAR_GREEN, [vx + i as f32 * 16.0, 146.0]));
         }
 
-        // Power gauge: a bar whose width is the power value (max 128), bright at
-        // the left grading to cyan, plus the number or a "MAX" tag (Gui y 186).
-        draw_text(cmds, [lx, 186.0], 14.0, label, "Power");
-        if self.world.power > 0 {
-            let w = self.world.power.min(128) as f32;
-            cmds.push(rect([vx, 192.0, w, 7.0], [0.55, 0.85, 1.0, 0.9]));
-            cmds.push(rect([vx, 192.0, w * 0.4, 7.0], [0.9, 0.95, 1.0, 0.9]));
-        }
         if self.world.power >= 128 {
             draw_text(cmds, [vx, 184.0], 13.0, [1.0, 1.0, 0.5, 1.0], "MAX");
         } else {
-            draw_text(cmds, [vx + 56.0, 184.0], 12.0, val, &format!("{}", self.world.power));
+            draw_text(cmds, [vx, 184.0], 13.0, val, &format!("{}", self.world.power));
         }
 
-        // Graze / Point (Gui y 206 / 226).
-        draw_text(cmds, [lx, 206.0], 14.0, label, "Graze");
         draw_text(cmds, [vx, 206.0], 13.0, val, &format!("{}", self.graze));
-        draw_text(cmds, [lx, 226.0], 14.0, label, "Point");
         draw_text(cmds, [vx, 226.0], 13.0, val, &format!("{}", self.point_items));
-
-        let mut logo = hud_sprite(HUD_LOGO, [lx + 40.0, 320.0]);
-        logo.tint = [1.0, 1.0, 1.0, 0.85];
-        cmds.push(logo);
 
         match self.state {
             PlayerState::GameOver(_) => {
