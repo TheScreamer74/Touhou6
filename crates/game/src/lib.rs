@@ -97,6 +97,7 @@ struct Assets {
     etama: Anm0,
     front: Anm0,
     text: Anm0,
+    face_chara: Anm0,
     stages: Vec<StageData>,
 }
 
@@ -132,9 +133,16 @@ impl Assets {
             .find(|(id, _)| *id == 7)
             .map(|(_, i)| i.clone())
             .unwrap_or_default();
+        // face*.anm script 3 = FACE_ENEMY_SPELLCARD_PORTRAIT (the slide-in).
+        let portrait_script = self.face_chara.entries[0]
+            .scripts
+            .iter()
+            .find(|(id, _)| *id == 3)
+            .map(|(_, i)| i.clone())
+            .unwrap_or_default();
         Stage::new(
             ecl, scripts, &self.etama.entries[0], player_anm, player_tex, character, msg,
-            background, hud, cfg, spell_name_script,
+            background, hud, cfg, spell_name_script, portrait_script,
         )
     }
 }
@@ -316,6 +324,7 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
         etama: Anm0::parse(&files.cm["etama3.anm"]).expect("parse etama3"),
         front: Anm0::parse(&files.cm["front.anm"]).expect("parse front"),
         text: Anm0::parse(&files.inn["text.anm"]).expect("parse text"),
+        face_chara: Anm0::parse(&files.cm["face00a.anm"]).expect("parse face00a"),
         stages,
     };
 

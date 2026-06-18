@@ -723,6 +723,10 @@ pub struct Stage {
     /// drives the spell-name announce animation (fly-in, shrink, fly-up/off).
     spell_name_script: Vec<AnmInstr>,
     spell_name_runner: Option<AnmRunner>,
+    /// Boss spellcard portrait (face*.anm script 3) + which boss-face sprite.
+    portrait_script: Vec<AnmInstr>,
+    portrait_runner: Option<AnmRunner>,
+    spell_portrait_sprite: i32,
     spell_bonus_timer: u32,
     spell_bonus_amount: i64,
     /// "BONUS" popup (bullet-cancel total) — frames remaining, amount.
@@ -747,7 +751,7 @@ pub struct Stage {
 }
 
 impl Stage {
-    pub fn new(ecl: Ecl, enemy_scripts: HashMap<i32, ScriptRef>, etama: &Entry, player: &Entry, player_tex: usize, character: Character, msg: Msg, background: Option<Background>, hud: Hud, cfg: StageConfig, spell_name_script: Vec<AnmInstr>) -> Self {
+    pub fn new(ecl: Ecl, enemy_scripts: HashMap<i32, ScriptRef>, etama: &Entry, player: &Entry, player_tex: usize, character: Character, msg: Msg, background: Option<Background>, hud: Hud, cfg: StageConfig, spell_name_script: Vec<AnmInstr>, portrait_script: Vec<AnmInstr>) -> Self {
         let timeline_off = ecl.timeline_offset;
         let player_scripts: HashMap<i32, Vec<AnmInstr>> =
             player.scripts.iter().map(|(id, instrs)| (*id as i32, instrs.clone())).collect();
@@ -825,6 +829,9 @@ impl Stage {
             spell_secs: 0,
             spell_name_script,
             spell_name_runner: None,
+            portrait_script,
+            portrait_runner: None,
+            spell_portrait_sprite: 0,
             spell_bonus_timer: 0,
             spell_bonus_amount: 0,
             bonus_score_timer: 0,
@@ -966,6 +973,12 @@ impl Stage {
             r.tick();
             if !r.visible() {
                 self.spell_name_runner = None;
+            }
+        }
+        if let Some(r) = &mut self.portrait_runner {
+            r.tick();
+            if !r.visible() {
+                self.portrait_runner = None;
             }
         }
 
@@ -2208,13 +2221,15 @@ impl Stage {
                     let name = SFX_BY_IDX.get(idx as usize).copied().unwrap_or("tan00");
                     self.events.push(Event::Sfx(name));
                 }
-                WorldEvent::SpellcardStart(id, _raw) => {
+                WorldEvent::SpellcardStart(id, sprite, _raw) => {
                     self.spell_active = true;
                     self.spell_name = spellcard_name(id).to_string();
                     self.spell_id = id;
+                    self.spell_portrait_sprite = sprite;
                     self.spell_capturing = true;
-                    // Start the name announce animation (text.anm script 7).
+                    // Start the name announce + portrait slide-in (ShowSpellcard).
                     self.spell_name_runner = Some(AnmRunner::new(self.spell_name_script.clone()));
+                    self.portrait_runner = Some(AnmRunner::new(self.portrait_script.clone()));
                     // SPELLCARDSTART cancels the prior pattern into point items.
                     self.bullets_to_points();
                     self.events.push(Event::Sfx("cat00"));
@@ -2605,6 +2620,24 @@ impl Stage {
                 [1.0, 0.251, 0.251, 1.0] // COLOR4 0xff4040
             };
             draw_text(&mut cmds, [FIELD_X + FIELD_W - 28.0, FIELD_Y + 8.0], 16.0, tint, &format!("{secs:02}"));
+        }
+
+        // Boss spellcard portrait (enemySpellcardPortrait): the boss face sprite
+        // selected by spellcardSprite, slid in from (480,240) to (320,240) and
+        // faded out by face*.anm script 3.
+        if let Some(r) = &self.portrait_runner {
+            if r.visible() {
+                let psx = if self.spell_portrait_sprite == 0 { 0.0 } else { 128.0 };
+                let w = 128.0 * r.scale[0];
+                let h = 256.0 * r.scale[1];
+                cmds.push(DrawCmd {
+                    tex: self.face_boss_tex,
+                    dst: [r.pos[0] - w / 2.0, r.pos[1] - h / 2.0, w, h],
+                    src: [psx / 256.0, 0.0, (psx + 128.0) / 256.0, 1.0],
+                    tint: [1.0, 1.0, 1.0, r.alpha],
+                    rot: 0.0,
+                });
+            }
         }
 
         // Spellcard name announce: driven by text.anm script 7's VM (fly-in at
