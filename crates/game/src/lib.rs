@@ -121,6 +121,7 @@ impl Assets {
             face_boss_tex: sd.boss_face_tex,
             stage_bgm: STAGE_BGM[idx],
             boss_bgm: BOSS_BGM[idx],
+            stage_num: idx as i32 + 1,
         };
         let hud = crate::hud::Hud::new(&self.front.entries[0], stage::TEX_FRONT);
         Stage::new(

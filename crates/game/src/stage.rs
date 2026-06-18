@@ -72,6 +72,8 @@ pub struct StageConfig {
     pub face_boss_tex: usize,
     pub stage_bgm: &'static str,
     pub boss_bgm: &'static str,
+    /// 1-based stage number (Gui currentStage), for the clear bonus + banner.
+    pub stage_num: i32,
 }
 
 /// Player progress carried from one stage to the next.
@@ -711,6 +713,10 @@ pub struct Stage {
     /// Music tracks for this stage (field theme / boss theme).
     stage_bgm: &'static str,
     boss_bgm: &'static str,
+    /// 1-based stage number + the cumulative graze at stage start, for the
+    /// clear bonus (Gui currentStage / grazeInStage).
+    stage_num: i32,
+    graze_start: i64,
     msg: Msg,
     dialogue: Dialogue,
     background: Option<Background>,
@@ -801,6 +807,8 @@ impl Stage {
             face_boss_tex: cfg.face_boss_tex,
             stage_bgm: cfg.stage_bgm,
             boss_bgm: cfg.boss_bgm,
+            stage_num: cfg.stage_num,
+            graze_start: 0,
             msg,
             dialogue: Dialogue::default(),
             background,
@@ -829,6 +837,8 @@ impl Stage {
         self.score = c.score;
         self.graze = c.graze;
         self.power_item_count = c.power_item_count;
+        // grazeInStage counts from the stage start (Gui clear bonus).
+        self.graze_start = c.graze;
     }
 
     pub fn set_lives(&mut self, lives: i32) {
@@ -978,8 +988,15 @@ impl Stage {
             && self.enemies.is_empty()
             && !self.world.boss_present
         {
-            // Clear bonus + persist the score (capped graze/lives bonus).
-            let bonus = self.lives.max(0) as i64 * 1_000_000 + self.bombs.max(0) as i64 * 300_000;
+            let bonus = stage_clear_bonus(
+                self.stage_num,
+                (self.graze - self.graze_start).max(0),
+                self.world.power as i64,
+                self.point_items,
+                self.lives.max(0) as i64,
+                self.bombs.max(0) as i64,
+                self.world.difficulty,
+            );
             self.score += bonus;
             self.clear_bonus = bonus;
             if self.score > self.hiscore {
@@ -2733,7 +2750,7 @@ impl Stage {
                 cmds.push(rect([FIELD_X, FIELD_Y, FIELD_W, FIELD_H], [0.0, 0.0, 0.08, 0.72]));
                 let cx = FIELD_X + 40.0;
                 let mut y = FIELD_Y + 90.0;
-                draw_text(cmds, [FIELD_X + FIELD_W / 2.0 - 80.0, FIELD_Y + 50.0], 22.0, [1.0, 1.0, 0.5, 1.0], "STAGE 1 CLEAR");
+                draw_text(cmds, [FIELD_X + FIELD_W / 2.0 - 80.0, FIELD_Y + 50.0], 22.0, [1.0, 1.0, 0.5, 1.0], &format!("STAGE {} CLEAR", self.stage_num));
                 let rows = [
                     ("Graze".to_string(), self.graze.to_string()),
                     ("Spell".to_string(), if self.spell_captured { "Captured".into() } else { "-".into() }),
@@ -2782,6 +2799,38 @@ const LASER_COLORS: [[f32; 4]; 16] = [
     [1.0, 0.6, 0.3, 0.8],
     [1.0, 1.0, 1.0, 0.8],
 ];
+
+/// Stage-clear bonus, an exact port of `Gui.cpp:935-963`:
+/// `(stage*1000 + grazeInStage*10 + power*100) * pointItems`, then (final stage
+/// only) `+lives*3M + bombs*1M`, then the difficulty multiplier with a `-= %10`
+/// round-down. `difficulty`: 0 Easy, 1 Normal, 2 Hard, 3 Lunatic, 4 Extra.
+/// (The lifeCount-config penalty isn't modelled — the port has no such option.)
+fn stage_clear_bonus(
+    stage: i32,
+    graze_in_stage: i64,
+    power: i64,
+    point_items: i64,
+    lives: i64,
+    bombs: i64,
+    difficulty: u8,
+) -> i64 {
+    let mut s = stage as i64 * 1000;
+    s += graze_in_stage * 10;
+    s += power * 100;
+    s *= point_items;
+    if stage >= 6 {
+        s += lives * 3_000_000;
+        s += bombs * 1_000_000;
+    }
+    s = match difficulty {
+        0 => s / 2,          // Easy
+        2 => s * 12 / 10,    // Hard
+        3 => s * 15 / 10,    // Lunatic
+        4 => s * 2,          // Extra
+        _ => return s,       // Normal: no multiplier, no round-down
+    };
+    s - s % 10
+}
 
 /// Draw ASCII text using the 16x16 glyph grid in ascii.png.
 pub fn draw_text(cmds: &mut Vec<DrawCmd>, pos: [f32; 2], size: f32, tint: [f32; 4], text: &str) {
@@ -2836,5 +2885,39 @@ fn hud_sprite(s: SpriteRef, screen_pos: [f32; 2]) -> DrawCmd {
         src: [x / 256.0, y / 256.0, (x + w) / 256.0, (y + h) / 256.0],
         tint: [1.0, 1.0, 1.0, 1.0],
         rot: 0.0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::stage_clear_bonus;
+
+    // Hand-computed from Gui.cpp:935-963.
+    #[test]
+    fn clear_bonus_normal_midstage() {
+        // stage 1, 200 graze, power 128, 30 point items, Normal:
+        // (1*1000 + 200*10 + 128*100) * 30 = (1000+2000+12800)*30 = 474000.
+        assert_eq!(stage_clear_bonus(1, 200, 128, 30, 2, 3, 1), 474_000);
+    }
+
+    #[test]
+    fn clear_bonus_zero_point_items_is_zero() {
+        // The pointItems multiply zeroes the whole bonus.
+        assert_eq!(stage_clear_bonus(3, 500, 128, 0, 5, 5, 1), 0);
+    }
+
+    #[test]
+    fn clear_bonus_final_stage_adds_lives_bombs() {
+        // stage 6 adds lives*3M + bombs*1M before the multiplier.
+        // (6000 + 0 + 0) * 1 = 6000; +2*3M +1*1M = 7_006_000; Normal: unchanged.
+        assert_eq!(stage_clear_bonus(6, 0, 0, 1, 2, 1, 1), 7_006_000);
+    }
+
+    #[test]
+    fn clear_bonus_lunatic_multiplier_rounds_down() {
+        // base (1000)*1 = 1000; Lunatic *15/10 = 1500; -%10 = 1500.
+        assert_eq!(stage_clear_bonus(1, 0, 0, 1, 0, 0, 3), 1500);
+        // base (1000 + 1 graze*10) = 1010; *15/10 = 1515; -%10 = 1510.
+        assert_eq!(stage_clear_bonus(1, 1, 0, 1, 0, 0, 3), 1510);
     }
 }
