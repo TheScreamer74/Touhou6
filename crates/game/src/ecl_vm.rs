@@ -200,6 +200,8 @@ pub struct Enemy {
     pub anm_pose_state: u8,  // 0xff = unset, 0 = default, 1 = left, 2 = right
     pub anm_dirty: bool,
     pub boss_id: u8,
+    /// Boss remaining-attack count shown by the HUD (ECL BOSSSETLIFECOUNT).
+    pub spell_count: i32,
 }
 
 impl Default for Enemy {
@@ -265,6 +267,7 @@ impl Default for Enemy {
             anm_pose_state: 0xff,
             anm_dirty: false,
             boss_id: 0,
+            spell_count: 0,
         }
     }
 }
@@ -1171,7 +1174,7 @@ impl Enemy {
                     .push(WorldEvent::DropItem([self.pos[0], self.pos[1]], instr.arg_i32(0)));
             }
             125 => {} // STDUNPAUSE
-            126 => {} // BOSSSETLIFECOUNT (gui)
+            126 => self.spell_count = instr.arg_i32(0), // BOSSSETLIFECOUNT (gui)
             127 => {} // DEBUGWATCH
             128 | 129 => {} // ANMINTERRUPTMAIN / SLOT — anm interrupts pending
             op if std::env::var_os("TH06_TRACE_OP").is_some() => { eprintln!("unhandled ECL op {op}"); }

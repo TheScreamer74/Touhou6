@@ -18,6 +18,8 @@ pub struct Hud {
     tex_slot: usize,
     tex_size: f32,
     runners: Vec<AnmRunner>,
+    /// front.anm script id of each runner (parallel to `runners`).
+    ids: Vec<u32>,
 }
 
 impl Hud {
@@ -27,12 +29,13 @@ impl Hud {
             .iter()
             .map(|s| (s.index, [s.x, s.y, s.width, s.height]))
             .collect();
-        let runners = front
+        let runners: Vec<_> = front
             .scripts
             .iter()
             .map(|(_, instrs)| AnmRunner::new(instrs.clone()))
             .collect();
-        Self { sprites, tex_slot, tex_size: front.width as f32, runners }
+        let ids = front.scripts.iter().map(|(id, _)| *id).collect();
+        Self { sprites, tex_slot, tex_size: front.width as f32, runners, ids }
     }
 
     pub fn tick(&mut self) {
@@ -41,11 +44,33 @@ impl Hud {
         }
     }
 
+    pub fn tex(&self) -> usize {
+        self.tex_slot
+    }
+
+    pub fn tex_size(&self) -> f32 {
+        self.tex_size
+    }
+
+    /// Pixel rect [x, y, w, h] of the sprite that front.anm script `id`
+    /// currently shows — used by the boss UI, which positions/scales these
+    /// sprites itself (`Gui::DrawGameScene`).
+    pub fn script_sprite(&self, id: u32) -> Option<[f32; 4]> {
+        let idx = self.ids.iter().position(|&i| i == id)?;
+        let sprite = self.runners[idx].sprite?;
+        self.sprites.get(&sprite).copied()
+    }
+
     /// Emit the self-placing HUD sprites (labels + intro emblems). Elements the
     /// game positions each frame (stars, digits) are skipped here.
     pub fn draw(&self, cmds: &mut Vec<DrawCmd>) {
         let ts = self.tex_size;
-        for r in &self.runners {
+        for (r, &id) in self.runners.iter().zip(&self.ids) {
+            // Boss frame / health bar (scripts 19/20/21) are placed by the boss
+            // UI in stage.rs each frame, not self-placed here.
+            if matches!(id, 19 | 20 | 21) {
+                continue;
+            }
             if !r.visible() || !r.positioned {
                 continue;
             }

@@ -688,6 +688,9 @@ pub struct Stage {
     /// "Full Power Mode!!" popup: frames remaining + edge-tracking of max power.
     full_power_timer: u32,
     was_full: bool,
+    /// Eased boss health bar (Gui bossHealthBar2): rises 0.01/frame toward the
+    /// boss life fraction, falls 0.02/frame.
+    boss_bar: f32,
     hiscore: i64,
     clear_bonus: i64,
     /// Running count for scoring power items collected at max power.
@@ -780,6 +783,7 @@ impl Stage {
             next_score_inc: 0,
             full_power_timer: 0,
             was_full: false,
+            boss_bar: 0.0,
             hiscore: 0,
             clear_bonus: 0,
             power_item_count: 0,
@@ -905,6 +909,7 @@ impl Stage {
         }
         self.was_full = full;
         self.full_power_timer = self.full_power_timer.saturating_sub(1);
+        self.roll_boss_bar();
 
         // Player state machine.
         let mut respawn = false;
@@ -2230,14 +2235,8 @@ impl Stage {
             });
         }
 
-        // Boss HP bar.
-        if let Some(boss) = self.enemies.iter().find(|e| e.is_boss && e.occupied) {
-            let frac = (boss.life.max(0) as f32 / boss.max_life.max(1) as f32).clamp(0.0, 1.0);
-            cmds.push(rect(
-                [FIELD_X + 8.0, FIELD_Y + 4.0, (FIELD_W - 16.0) * frac, 4.0],
-                [0.9, 0.15, 0.15, 0.9],
-            ));
-        }
+        // (Boss health bar / timer / spell name are drawn in draw_hud, over the
+        // field, from front.anm sprites — Gui::DrawGameScene.)
 
         // Items (etama3 sprites 0..6, index = item kind). Point-bullet items
         // (kind 6) fall back to the point-item sprite if the sheet lacks one.
@@ -2603,6 +2602,87 @@ impl Stage {
         }
     }
 
+    /// Ease the boss health bar toward the boss's life fraction (Gui
+    /// bossHealthBar2 toward bossHealthBar1): up 0.01/frame, down 0.02/frame.
+    fn roll_boss_bar(&mut self) {
+        let target = self
+            .enemies
+            .iter()
+            .find(|e| e.is_boss && e.occupied)
+            .map(|b| (b.life.max(0) as f32 / b.max_life.max(1) as f32).clamp(0.0, 1.0));
+        match target {
+            Some(t) => {
+                if self.boss_bar < t {
+                    self.boss_bar = (self.boss_bar + 0.01).min(t);
+                } else if self.boss_bar > t {
+                    self.boss_bar = (self.boss_bar - 0.02).max(t);
+                }
+            }
+            None => self.boss_bar = 0.0,
+        }
+    }
+
+    /// Boss UI over the field (Gui::DrawGameScene): the front.anm health bar,
+    /// the remaining-attack count, the spellcard timer, and the spell name.
+    /// Positions are the decomp's arcade-region coords plus the field origin.
+    fn draw_boss_ui(&self, cmds: &mut Vec<DrawCmd>) {
+        let Some(boss) = self.enemies.iter().find(|e| e.is_boss && e.occupied) else {
+            return;
+        };
+
+        // Health bar: front.anm bar sprite (script 21), top-left anchored at
+        // field (96, 24), drawn `bossHealthBar2 * 288` px wide.
+        if let Some([sx, sy, sw, sh]) = self.hud.script_sprite(21) {
+            let ts = self.hud.tex_size();
+            cmds.push(DrawCmd {
+                tex: self.hud.tex(),
+                dst: [FIELD_X + 96.0, FIELD_Y + 24.0, self.boss_bar * 288.0, sh],
+                src: [sx / ts, sy / ts, (sx + sw) / ts, (sy + sh) / ts],
+                tint: [1.0, 1.0, 1.0, 1.0],
+                rot: 0.0,
+            });
+        }
+
+        // Remaining-attack count (eclSetLives) at field (80, 16), yellow.
+        if boss.spell_count > 0 {
+            draw_text(
+                cmds,
+                [FIELD_X + 76.0, FIELD_Y + 12.0],
+                14.0,
+                [1.0, 1.0, 0.5, 1.0],
+                &boss.spell_count.to_string(),
+            );
+        }
+
+        // Spellcard timer at the field's top-right, colour by seconds left.
+        if let Some(secs) = boss.spell_seconds_left() {
+            let secs = secs.min(99);
+            let tint = if secs >= 20 {
+                [0.627, 0.816, 1.0, 1.0] // COLOR1 0xa0d0ff
+            } else if secs >= 10 {
+                [0.627, 0.502, 1.0, 1.0] // COLOR2 0xa080ff
+            } else if secs >= 5 {
+                [0.878, 0.502, 0.753, 1.0] // COLOR3 0xe080c0
+            } else {
+                [1.0, 0.251, 0.251, 1.0] // COLOR4 0xff4040
+            };
+            draw_text(cmds, [FIELD_X + FIELD_W - 32.0, FIELD_Y + 10.0], 15.0, tint, &format!("{:02}", secs));
+        }
+
+        // Spell name (ASCII; Shift-JIS names fall back to "Spell Card"),
+        // right-aligned at the bottom of the field while the spell is active.
+        if self.spell_active && !self.spell_name.is_empty() {
+            let width = self.spell_name.chars().count() as f32 * 13.0 * 0.75;
+            draw_text(
+                cmds,
+                [FIELD_X + FIELD_W - width - 8.0, FIELD_Y + FIELD_H - 22.0],
+                13.0,
+                [1.0, 0.95, 0.95, 1.0],
+                &self.spell_name,
+            );
+        }
+    }
+
     fn draw_hud(&self, cmds: &mut Vec<DrawCmd>) {
         let border = [0.12, 0.05, 0.08, 1.0];
         cmds.push(rect([0.0, 0.0, 640.0, FIELD_Y], border));
@@ -2642,6 +2722,8 @@ impl Stage {
         if self.full_power_timer > 0 {
             draw_text(cmds, [FIELD_X + 92.0, 232.0], 16.0, [1.0, 1.0, 0.4, 1.0], "Full Power Mode!!");
         }
+
+        self.draw_boss_ui(cmds);
 
         match self.state {
             PlayerState::GameOver(_) => {
