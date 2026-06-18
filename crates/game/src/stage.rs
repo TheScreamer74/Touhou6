@@ -2647,23 +2647,28 @@ impl Stage {
         if let Some(r) = &self.spell_name_runner {
             if r.visible() && !self.spell_name.is_empty() {
                 let scale = r.scale[0].max(0.01);
+                // The original draws the name in the clipped game-region viewport
+                // with short Japanese text; the VM x is fixed at 256 until the
+                // fly-off. Centre it in the playfield so the longer English name
+                // stays readable, and follow the VM x once it flies off right.
+                let cx = if r.pos[0] > 256.5 { r.pos[0] } else { FIELD_X + FIELD_W / 2.0 };
                 let bar_len = self.spell_name.chars().count() as f32 * 15.0 / 2.0 + 16.0;
                 if let Some(([sx, sy, sw, sh], _, bscale, _)) = self.hud.script_state(24) {
                     let ts = self.hud.tex_size();
                     let bh = sh * bscale[1];
                     cmds.push(DrawCmd {
                         tex: self.hud.tex(),
-                        dst: [r.pos[0] - bar_len / 2.0, r.pos[1] - bh / 2.0, bar_len, bh],
+                        dst: [cx - bar_len / 2.0, r.pos[1] - bh / 2.0, bar_len, bh],
                         src: [sx / ts, sy / ts, (sx + sw) / ts, (sy + sh) / ts],
                         tint: [1.0, 1.0, 1.0, r.alpha],
                         rot: 0.0,
                     });
                 }
-                // Name text: 15px glyphs scaled by the VM, centred at the VM pos.
+                // Name text: 15px glyphs scaled by the VM, centred at `cx`.
                 let w = self.spell_name.chars().count() as f32 * 14.0 * scale;
                 draw_num_scaled(
                     &mut cmds,
-                    [r.pos[0] - w / 2.0, r.pos[1] - 7.5 * scale],
+                    [cx - w / 2.0, r.pos[1] - 7.5 * scale],
                     scale,
                     [1.0, 0.94, 0.94, r.alpha],
                     &self.spell_name,
