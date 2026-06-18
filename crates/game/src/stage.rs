@@ -862,6 +862,7 @@ impl Stage {
         self.lives = lives;
     }
 
+
     /// Debug: seed starting power / score.
     pub fn set_power(&mut self, power: i32) {
         self.world.power = power.clamp(0, 128);
@@ -2829,22 +2830,24 @@ impl Stage {
                 cmds.push(rect([FIELD_X, FIELD_Y, FIELD_W, FIELD_H], [0.0, 0.0, 0.0, 0.6]));
             }
             PlayerState::Cleared(_) => {
-                cmds.push(rect([FIELD_X, FIELD_Y, FIELD_W, FIELD_H], [0.0, 0.0, 0.08, 0.72]));
-                let cx = FIELD_X + 40.0;
-                let mut y = FIELD_Y + 90.0;
-                draw_text(cmds, [FIELD_X + FIELD_W / 2.0 - 80.0, FIELD_Y + 50.0], 22.0, [1.0, 1.0, 0.5, 1.0], &format!("STAGE {} CLEAR", self.stage_num));
-                let rows = [
-                    ("Graze".to_string(), self.graze.to_string()),
-                    ("Spell".to_string(), if self.spell_captured { "Captured".into() } else { "-".into() }),
-                    ("Clear bonus".to_string(), self.clear_bonus.to_string()),
-                    ("Score".to_string(), self.score.to_string()),
-                    ("Hi-Score".to_string(), self.hiscore.to_string()),
-                ];
-                for (label, val) in rows {
-                    draw_text(cmds, [cx, y], 16.0, [0.8, 0.85, 1.0, 1.0], &label);
-                    draw_text(cmds, [cx + 130.0, y], 16.0, [1.0, 1.0, 1.0, 1.0], &val);
-                    y += 30.0;
-                }
+                // Stage-clear bonus breakdown (Gui.cpp:88-172), drawn over the
+                // field at (GAME_REGION_LEFT+42, TOP+112).
+                let x = FIELD_X + 42.0;
+                let graze_in = (self.graze - self.graze_start).max(0);
+                let (diff_text, _) = match self.world.difficulty {
+                    0 => ("Easy Rank      * 0.5", 0),
+                    2 => ("Hard Rank      * 1.2", 0),
+                    3 => ("Lunatic Rank   * 1.5", 0),
+                    4 => ("Extra Rank     * 2.0", 0),
+                    _ => ("Normal Rank    * 1.0", 0),
+                };
+                draw_num(cmds, [x, FIELD_Y + 112.0], [1.0, 1.0, 0.251, 1.0], "Stage Clear");
+                draw_num(cmds, [x, FIELD_Y + 144.0], [1.0, 1.0, 1.0, 1.0], &format!("Stage * 1000 = {:5}", self.stage_num as i64 * 1000));
+                draw_num(cmds, [x, FIELD_Y + 160.0], [0.878, 0.878, 1.0, 1.0], &format!("Power *  100 = {:5}", self.world.power as i64 * 100));
+                draw_num(cmds, [x, FIELD_Y + 176.0], [0.816, 0.816, 1.0, 1.0], &format!("Graze *   10 = {:5}", graze_in * 10));
+                draw_num(cmds, [x, FIELD_Y + 192.0], [1.0, 0.502, 0.502, 1.0], &format!("    * Point Item {:3}", self.point_items));
+                draw_num(cmds, [x, FIELD_Y + 224.0], [1.0, 0.502, 0.502, 1.0], diff_text);
+                draw_num(cmds, [x, FIELD_Y + 240.0], [1.0, 1.0, 1.0, 1.0], &format!("Total     = {:8}", self.clear_bonus));
             }
             _ => {}
         }
