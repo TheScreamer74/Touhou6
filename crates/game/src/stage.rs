@@ -721,6 +721,9 @@ pub struct Stage {
     spell_secs: i32,
     spell_bonus_timer: u32,
     spell_bonus_amount: i64,
+    /// "BONUS" popup (bullet-cancel total) — frames remaining, amount.
+    bonus_score_timer: u32,
+    bonus_score_amount: i64,
     boss_bgm_started: bool,
     /// Dialogue portrait texture slots (player left / boss right).
     face_player_tex: usize,
@@ -818,6 +821,8 @@ impl Stage {
             spell_secs: 0,
             spell_bonus_timer: 0,
             spell_bonus_amount: 0,
+            bonus_score_timer: 0,
+            bonus_score_amount: 0,
             spell_capturing: false,
             spell_result: 0,
             spell_captured: false,
@@ -950,6 +955,7 @@ impl Stage {
             self.spell_secs = secs;
         }
         self.spell_bonus_timer = self.spell_bonus_timer.saturating_sub(1);
+        self.bonus_score_timer = self.bonus_score_timer.saturating_sub(1);
 
         // Player state machine.
         let mut respawn = false;
@@ -1781,17 +1787,25 @@ impl Stage {
         // Enemy deaths award the enemy's score value (default 100).
         let mut drops: Vec<([f32; 2], i16)> = Vec::new();
         let mut death_fx: Vec<[f32; 2]> = Vec::new();
+        let mut boss_died = false;
         for i in 0..self.enemies.len() {
             let e = &mut self.enemies[i];
             if e.occupied && e.interactable && e.life <= 0 {
                 drops.push(([e.pos[0], e.pos[1]], e.item_drop));
                 if !e.is_boss {
                     death_fx.push([e.pos[0], e.pos[1]]);
+                } else {
+                    boss_died = true;
                 }
                 self.score += e.score as i64;
                 e.on_death(&self.ecl, &mut self.world);
                 self.events.push(Event::Sfx("enep00"));
             }
+        }
+        // A boss death cancels the field for the bonus (EnemyManager.cpp:693
+        // DespawnBullets(12800, false)) — bonus only, no point items.
+        if boss_died {
+            self.despawn_bullets(false);
         }
         for pos in death_fx {
             // Bright flash ring + a puff, like the original enemy pop.
@@ -2144,6 +2158,35 @@ impl Stage {
         self.cancel_lasers();
     }
 
+    /// BulletManager::DespawnBullets: cancel every bullet/laser, awarding an
+    /// escalating bonus (2000, +10 each, capped at 12800), optionally as point
+    /// items, then add it to the score and show the "BONUS" popup.
+    fn despawn_bullets(&mut self, award_points: bool) {
+        const MAX_BONUS: i64 = 12800;
+        let positions: Vec<[f32; 2]> = self.world.bullets.iter().map(|b| b.pos).collect();
+        let laser_count = self.world.lasers.iter().filter(|l| l.in_use && l.state < 2).count();
+        let mut bullet_score = 2000i64;
+        let mut total = 0i64;
+        for pos in &positions {
+            if award_points {
+                self.items.push(Item::homing(*pos, 6));
+            }
+            total += bullet_score;
+            bullet_score = (bullet_score + 10).min(MAX_BONUS);
+        }
+        for _ in 0..laser_count {
+            total += bullet_score;
+            bullet_score = (bullet_score + 10).min(MAX_BONUS);
+        }
+        self.world.bullets.clear();
+        self.cancel_lasers();
+        self.score += total;
+        if total != 0 {
+            self.bonus_score_amount = total;
+            self.bonus_score_timer = 250;
+        }
+    }
+
     fn drain_world_events(&mut self) {
         let events: Vec<WorldEvent> = self.world.events.drain(..).collect();
         for ev in events {
@@ -2169,8 +2212,11 @@ impl Stage {
                         self.spell_captured = self.spell_capturing;
                     }
                     self.spell_active = false;
-                    // Capture bonus: score * (1 + secondsLeft/10) (EclManager.cpp:
-                    // 759-766), score from the per-card table; show the popup.
+                    // Any spellcard end despawns the field for the bullet-cancel
+                    // bonus + BONUS popup (EclManager.cpp:755 DespawnBullets).
+                    self.despawn_bullets(true);
+                    // A captured card additionally awards score*(1 + secs/10)
+                    // (EclManager.cpp:759-766) with the "Spell Card Bonus!" popup.
                     if captured {
                         let base = SPELLCARD_SCORE
                             .get(self.spell_id.max(0) as usize)
@@ -2180,13 +2226,6 @@ impl Stage {
                         self.score += bonus;
                         self.spell_bonus_amount = bonus;
                         self.spell_bonus_timer = 280;
-                    }
-                    // A captured card (SPELLCARDEND, isActive==1) rewards the
-                    // remaining bullets as point items; a timeout just clears.
-                    if captured {
-                        self.bullets_to_points();
-                    } else {
-                        self.world.bullets.clear();
                     }
                 }
                 WorldEvent::BulletCancel => {
@@ -2812,6 +2851,18 @@ impl Stage {
                 104.0
             };
             draw_num(cmds, [px, 232.0], [0.753, 0.690, 1.0, 1.0], "Full Power Mode!!");
+        }
+
+        // "BONUS %8d" popup (Gui.cpp:179-183,891-906): light yellow, slides in
+        // from the right edge to x=104, y=32.
+        if self.bonus_score_timer > 0 {
+            let elapsed = 250 - self.bonus_score_timer.min(250);
+            let px = if elapsed < 30 {
+                640.0 - elapsed as f32 * 312.0 / 30.0
+            } else {
+                104.0
+            };
+            draw_num(cmds, [px, 32.0], [1.0, 1.0, 0.502, 1.0], &format!("BONUS {:8}", self.bonus_score_amount));
         }
 
         // "Spell Card Bonus!" + "+N" popup (Gui.cpp:192-210), centred near top.
