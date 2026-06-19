@@ -147,6 +147,14 @@ impl Assets {
     }
 }
 
+/// Coarse run phase reported by [`Game::record_phase`] for the split recorder.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RecordPhase {
+    Menu,
+    Stage(usize),
+    Ended,
+}
+
 pub enum Scene {
     Title,
     CharSelect { cursor: usize },
@@ -461,6 +469,17 @@ impl Game {
             }
         }
         false
+    }
+
+    /// Coarse phase for the split recorder: menu (title/char-select), an
+    /// in-progress stage (0-based index, covers its clear breakdown), or the
+    /// post-run screens. Used to cut a continuous run into per-stage segments.
+    pub fn record_phase(&self) -> RecordPhase {
+        match &self.scene {
+            Scene::Title | Scene::CharSelect { .. } => RecordPhase::Menu,
+            Scene::Stage(_) => RecordPhase::Stage(self.current_stage),
+            Scene::NameEntry { .. } | Scene::Leaderboard { .. } => RecordPhase::Ended,
+        }
     }
 
     /// Headless auto-play aim: (player_x, target_x) while in a stage.
