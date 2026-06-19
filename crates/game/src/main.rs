@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use th06::{build_game, Character, GameFiles};
+use th06::{build_game, Character, GameFiles, RecordPhase};
 use th06_engine::{Engine, Frame, Input, Key};
 
 /// All files from one PBG3 archive, keyed by entry name.
@@ -77,6 +77,64 @@ fn load_scores(path: &Path) -> Vec<th06::ScoreEntry> {
         .collect()
 }
 
+/// Auto-player input for a full title-to-clear run: tap Shoot to walk the menus,
+/// then in a stage hold Shoot and slide horizontally under the boss/nearest
+/// enemy (no bullet dodging — relies on god mode to survive).
+fn auto_play_input(game: &th06::Game, f: u32) -> Input {
+    match game.stage_aim() {
+        Some((px, target)) => {
+            let mut held = vec![Key::Shoot];
+            if let Some(tx) = target {
+                if tx < px - 4.0 {
+                    held.push(Key::Left);
+                } else if tx > px + 4.0 {
+                    held.push(Key::Right);
+                }
+            }
+            let pressed: &[Key] = if f % 12 == 0 { &[Key::Shoot] } else { &[] };
+            Input::synthetic(&held, pressed)
+        }
+        // Menus: pulse Shoot to advance title -> char select -> stage, paced so
+        // the menu screens are actually visible in a recording.
+        None => {
+            if f % 48 == 0 {
+                Input::synthetic(&[], &[Key::Shoot])
+            } else {
+                Input::default()
+            }
+        }
+    }
+}
+
+/// Encode one segment's PNG sequence (`<frames_dir>/f_%06d.png`) to an mp4 with
+/// ffmpeg, then delete the PNG dir to bound disk use. Returns false if ffmpeg
+/// is missing or fails.
+fn encode_segment(frames_dir: &Path, out_mp4: &Path) -> bool {
+    let status = std::process::Command::new("ffmpeg")
+        .args(["-y", "-framerate", "60", "-i"])
+        .arg(frames_dir.join("f_%06d.png"))
+        .args(["-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "20"])
+        .arg(out_mp4)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+    let ok = matches!(status, Ok(s) if s.success());
+    if ok {
+        let _ = std::fs::remove_dir_all(frames_dir);
+    }
+    ok
+}
+
+/// Segment directory/file label for a phase, e.g. `00_menu`, `01_stage1`.
+fn phase_label(phase: RecordPhase, idx: usize, entered_stage: bool) -> String {
+    match phase {
+        RecordPhase::Menu if !entered_stage => format!("{idx:02}_menu"),
+        RecordPhase::Menu | RecordPhase::Ended => format!("{idx:02}_end"),
+        RecordPhase::Stage(s) => format!("{idx:02}_stage{}", s + 1),
+    }
+}
+
 fn main() {
     install_crash_logger();
     let mut args = std::env::args().skip(1);
@@ -89,9 +147,11 @@ fn main() {
     let mut demo: Option<String> = None;
     let mut demo_interval = 300u32;
     let mut record: Option<String> = None;
+    let mut record_split: Option<String> = None;
     let mut debug_power: Option<i32> = None;
     let mut debug_score: Option<i64> = None;
     let mut god = false;
+    let mut probe_run = false;
     let mut warp: Option<bool> = None; // Some(false) = midboss, Some(true) = boss
     let mut game_dir = String::from("../TH06 ~ The Embodiment of Scarlet Devil/kouma");
     while let Some(arg) = args.next() {
@@ -105,9 +165,11 @@ fn main() {
             "--demo" => demo = Some(args.next().expect("--demo <out_dir>")),
             "--demo-interval" => demo_interval = args.next().expect("--demo-interval <n>").parse().expect("interval"),
             "--record" => record = Some(args.next().expect("--record <out_dir>")),
+            "--record-split" => record_split = Some(args.next().expect("--record-split <out_dir>")),
             "--power" => debug_power = Some(args.next().expect("--power <0-128>").parse().expect("power")),
             "--score" => debug_score = Some(args.next().expect("--score <n>").parse().expect("score")),
             "--god" => god = true,
+            "--probe-run" => probe_run = true,
             "--midboss" => warp = Some(false),
             "--boss" => warp = Some(true),
             "--game-dir" => game_dir = args.next().expect("--game-dir <path>"),
@@ -127,7 +189,8 @@ fn main() {
 
     let engine = Engine::new();
     // Headless dumps (screenshot / record / demo) run silent.
-    let with_audio = screenshot.is_none() && record.is_none() && demo.is_none();
+    let with_audio =
+        screenshot.is_none() && record.is_none() && record_split.is_none() && demo.is_none() && !probe_run;
     let (textures, mut game) = build_game(&engine, &files, with_audio);
 
     let hiscore_path = game_dir.join("th06_hiscore.txt");
@@ -142,6 +205,30 @@ fn main() {
     // Safe: still single-threaded here, before the game/run loop starts.
     if god {
         unsafe { std::env::set_var("TH06_GOD", "1") };
+    }
+
+    // Drive a full god-mode run from the title and print the frame at every
+    // phase change (no rendering), to measure per-stage clear times and confirm
+    // the auto-player can actually reach each stage clear.
+    if probe_run {
+        unsafe { std::env::set_var("TH06_GOD", "1") };
+        game.start_title_bgm();
+        let mut last = game.record_phase();
+        eprintln!("frame 0: {last:?}");
+        for f in 0..frames {
+            let input = auto_play_input(&game, f);
+            game.update(&input);
+            let phase = game.record_phase();
+            if phase != last {
+                eprintln!("frame {f}: {last:?} -> {phase:?}");
+                last = phase;
+                if phase == RecordPhase::Ended {
+                    break;
+                }
+            }
+        }
+        eprintln!("probe done at <= {frames} frames, ended in {last:?}");
+        return;
     }
 
     if scene_arg == "stage" {
@@ -160,6 +247,73 @@ fn main() {
                 unsafe { std::env::remove_var("TH06_GOD") };
             }
         }
+    }
+
+    // Full god-mode run from the title, recorded to one mp4 per phase
+    // (menu nav, then each stage incl. its clear screen). Each segment is
+    // encoded and its PNGs deleted as soon as the phase changes, so peak disk
+    // stays around a single stage's frames.
+    if let Some(out_root) = record_split.clone() {
+        unsafe { std::env::set_var("TH06_GOD", "1") };
+        let out_root = PathBuf::from(out_root);
+        std::fs::create_dir_all(&out_root).expect("create record dir");
+        game.start_title_bgm();
+        let textures_ref: Vec<&th06_engine::Texture> = textures.iter().collect();
+
+        let mut idx = 0usize;
+        let mut entered_stage = false;
+        let mut phase = game.record_phase();
+        let mut label = phase_label(phase, idx, entered_stage);
+        let mut frames_dir = out_root.join(format!("_f_{label}"));
+        std::fs::create_dir_all(&frames_dir).unwrap();
+        let mut seg_frame = 0u32;
+        let mut tail = 0u32; // frames recorded after the run-ending phase began
+
+        for f in 0..frames {
+            // Once the run is over, stop sending input so the auto-player doesn't
+            // immediately start a fresh game from the title during the end tail.
+            let run_over = phase == RecordPhase::Ended || (phase == RecordPhase::Menu && entered_stage);
+            let input = if run_over { Input::default() } else { auto_play_input(&game, f) };
+            let frame = game.update(&input);
+            let new_phase = game.record_phase();
+            if matches!(new_phase, RecordPhase::Stage(_)) {
+                entered_stage = true;
+            }
+            if new_phase != phase {
+                println!("frame {f}: {label} done ({seg_frame} frames) -> encoding");
+                encode_segment(&frames_dir, &out_root.join(format!("{label}.mp4")));
+                idx += 1;
+                phase = new_phase;
+                seg_frame = 0;
+                label = phase_label(phase, idx, entered_stage);
+                frames_dir = out_root.join(format!("_f_{label}"));
+                std::fs::create_dir_all(&frames_dir).unwrap();
+            }
+            let pixels = engine.render_to_image(&frame.cmds, &textures_ref, frame.bg.as_ref());
+            image::save_buffer(
+                frames_dir.join(format!("f_{seg_frame:06}.png")),
+                &pixels,
+                th06_engine::SCREEN_W,
+                th06_engine::SCREEN_H,
+                image::ColorType::Rgba8,
+            )
+            .expect("save frame");
+            seg_frame += 1;
+
+            // The run is over once we hit the post-game screens or return to the
+            // title after having played a stage; grab a short tail then stop.
+            let run_over = phase == RecordPhase::Ended || (phase == RecordPhase::Menu && entered_stage);
+            if run_over {
+                tail += 1;
+                if tail >= 240 {
+                    break;
+                }
+            }
+        }
+        println!("frame end: {label} done ({seg_frame} frames) -> encoding");
+        encode_segment(&frames_dir, &out_root.join(format!("{label}.mp4")));
+        println!("split recording written to {}", out_root.display());
+        return;
     }
 
     if let Some(dir) = record.clone() {
