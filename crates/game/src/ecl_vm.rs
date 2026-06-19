@@ -1364,16 +1364,14 @@ impl Enemy {
         }
     }
 
-    /// Port of Enemy::Despawn: free the slot and, critically, clear the boss
-    /// flag when a boss/midboss leaves without being killed (timeout or
-    /// flying off-screen). Without this the timeline's "wait for boss" /
-    /// trash-spawn gate (`boss_present`) never reopens and the stage softlocks.
+    /// Free the slot when an enemy goes off-screen or its ECL ends. The decomp
+    /// callers (EnemyManager.cpp:553,567) set `isSlotOccupied = 0` regardless of
+    /// death_mode before calling Enemy::Despawn, so the slot is always freed —
+    /// without this a `death_mode != 0` enemy (e.g. the midboss after its
+    /// death-callback ECL) stays occupied forever and the stage softlocks.
     pub fn despawn(&mut self, world: &mut World) {
-        if self.death_mode == 0 {
-            self.occupied = false;
-        } else {
-            self.interactable = false;
-        }
+        self.occupied = false;
+        self.interactable = false;
         if self.is_boss {
             world.boss_present = false;
             world.time_stopped = false;
