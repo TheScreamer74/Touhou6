@@ -47,7 +47,7 @@ fn normalize_angle(mut a: f32) -> f32 {
 }
 
 /// One ECL execution context (EnemyEclContext).
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy)]
 struct Ctx {
     pc: u32,
     time: i32,
@@ -55,6 +55,24 @@ struct Ctx {
     ivars: [i32; 8],
     fvars: [f32; 4],
     cmp: i32,
+    /// `currentContext.funcSetFunc`: index into the ex-instruction table that
+    /// EXINSREPEAT runs every frame (while life > 0). -1 = none. Saved/restored
+    /// with the call stack because it lives in EnemyEclContext.
+    func_set_func: i32,
+}
+
+impl Default for Ctx {
+    fn default() -> Self {
+        Self {
+            pc: 0,
+            time: 0,
+            sub: 0,
+            ivars: [0; 8],
+            fvars: [0.0; 4],
+            cmp: 0,
+            func_set_func: -1,
+        }
+    }
 }
 
 pub struct BulletProps {
@@ -190,7 +208,7 @@ pub struct Enemy {
     invert_x: bool,
     clamp_pos: bool,
     disable_call_stack: bool,
-    death_mode: u8,
+    pub death_mode: u8,
     timeout_spell: bool,
     has_been_in_bounds: bool,
     pub item_drop: i16,
@@ -202,6 +220,12 @@ pub struct Enemy {
     pub boss_id: u8,
     /// Boss remaining-attack count shown by the HUD (ECL BOSSSETLIFECOUNT).
     pub spell_count: i32,
+    /// Persistent state for ExInsShootStarPattern (g_StarAngleTable +
+    /// g_EnemyPosVector/g_PlayerPosVector snapshots, which carry across the
+    /// per-frame repeat calls).
+    star_angle: [f32; 6],
+    star_enemy_pos: [f32; 2],
+    star_player_pos: [f32; 2],
 }
 
 impl Default for Enemy {
@@ -268,6 +292,9 @@ impl Default for Enemy {
             anm_dirty: false,
             boss_id: 0,
             spell_count: 0,
+            star_angle: [0.0; 6],
+            star_enemy_pos: [0.0; 2],
+            star_player_pos: [0.0; 2],
         }
     }
 }
@@ -277,6 +304,9 @@ pub enum WorldEvent {
     /// Spell card declared: (spell id, raw Shift-JIS name bytes).
     SpellcardStart(i32, i32, Vec<u8>),
     SpellcardEnd,
+    /// A non-timeout boss spell ran out its timer: capture is forfeit and the
+    /// field is cleared (EnemyManager.cpp:408 — isCapturing=0, RemoveAllBullets).
+    SpellTimeout,
     BulletCancel,
     BossSet(bool),
     EnemyDeath([f32; 2]),
@@ -547,13 +577,22 @@ impl Enemy {
                 }
                 _ => {}
             }
-            if self.life > 0 && self.shoot_interval > 0 {
-                self.shoot_timer += 1;
-                if self.shoot_timer >= self.shoot_interval {
-                    self.bullet_props.pos =
-                        [self.pos[0] + self.shoot_offset[0], self.pos[1] + self.shoot_offset[1]];
-                    spawn_bullet_pattern(world, &self.bullet_props, self.invert_x);
-                    self.shoot_timer = 0;
+            if self.life > 0 {
+                if self.shoot_interval > 0 {
+                    self.shoot_timer += 1;
+                    if self.shoot_timer >= self.shoot_interval {
+                        self.bullet_props.pos = [
+                            self.pos[0] + self.shoot_offset[0],
+                            self.pos[1] + self.shoot_offset[1],
+                        ];
+                        spawn_bullet_pattern(world, &self.bullet_props);
+                        self.shoot_timer = 0;
+                    }
+                }
+                // EXINSREPEAT's per-frame callback (EclManager.cpp:1034).
+                if self.ctx.func_set_func >= 0 {
+                    let idx = self.ctx.func_set_func;
+                    self.exec_ex(idx, 0, world);
                 }
             }
             self.ctx.time += 1;
@@ -627,11 +666,13 @@ impl Enemy {
             }
             20..=24 => self.alu_float(instr, world), // float add/sub/mul/div/mod
             25 => {
-                // MATHATAN2
-                let y1 = self.get_f32(instr.arg_f32(1), world);
-                let y2 = self.get_f32(instr.arg_f32(2), world);
-                let x1 = self.get_f32(instr.arg_f32(3), world);
-                let x2 = self.get_f32(instr.arg_f32(4), world);
+                // MATHATAN2: angle from point (arg1,arg2) to point (arg3,arg4).
+                // Decomp result = atan2f(arg4 - arg2, arg3 - arg1)
+                // (EnemyEclInstr.cpp:396, after the var_order shuffle).
+                let x1 = self.get_f32(instr.arg_f32(1), world);
+                let y1 = self.get_f32(instr.arg_f32(2), world);
+                let x2 = self.get_f32(instr.arg_f32(3), world);
+                let y2 = self.get_f32(instr.arg_f32(4), world);
                 let v = (y2 - y1).atan2(x2 - x1);
                 self.set_var(instr.arg_i32(0), v as i32, v);
             }
@@ -682,9 +723,10 @@ impl Enemy {
                 }
             }
             43 => {
-                // MOVEPOSITION
+                // MOVEPOSITION (EclManager.cpp:316): set x,y,z then clamp.
                 self.pos[0] = self.get_f32(instr.arg_f32(0), world);
                 self.pos[1] = self.get_f32(instr.arg_f32(1), world);
+                self.pos[2] = self.get_f32(instr.arg_f32(2), world);
                 self.clamp();
             }
             44 => {
@@ -838,7 +880,7 @@ impl Enemy {
                 self.bullet_props.pos = pos;
                 if !self.shooting_disabled {
                     let props = std::mem::take(&mut self.bullet_props);
-                    spawn_bullet_pattern(world, &props, self.invert_x);
+                    spawn_bullet_pattern(world, &props);
                     self.bullet_props = props;
                 }
             }
@@ -861,7 +903,7 @@ impl Enemy {
                 self.bullet_props.pos =
                     [self.pos[0] + self.shoot_offset[0], self.pos[1] + self.shoot_offset[1]];
                 let props = std::mem::take(&mut self.bullet_props);
-                spawn_bullet_pattern(world, &props, self.invert_x);
+                spawn_bullet_pattern(world, &props);
                 self.bullet_props = props;
             }
             81 => {
@@ -1095,74 +1137,14 @@ impl Enemy {
                 }
             }
             120 => {} // ANMFLAGROTATION
-            121 | 122 => {
-                // EXINSCALL / EXINSREPEAT: per-boss "ex-instructions"
-                // (g_EclExInsn). arg0 selects the handler. Most are still
-                // unimplemented (the boss falls back to its base behaviour);
-                // implemented ones are ported from EnemyEclInstr.cpp.
+            121 => {
+                // EXINSCALL: run g_EclExInsn[arg0] once, with arg1 as i32Param.
+                self.exec_ex(instr.arg_i32(0), instr.arg_i32(1), world);
+            }
+            122 => {
+                // EXINSREPEAT: arg0 >= 0 arms the per-frame callback; < 0 clears.
                 let idx = instr.arg_i32(0);
-                if std::env::var_os("TH06_TRACE_EX").is_some() {
-                    eprintln!("EXINS op{} idx={} args={:?}", instr.opcode, idx, instr.args);
-                }
-                if instr.opcode == 121 {
-                    match idx {
-                        0 => {
-                            // ExInsCirnoRainbowBallJank (Perfect Freeze): param 0
-                            // freezes every live bullet in place; param 1 releases
-                            // them with a small random acceleration over 220
-                            // frames (ex flag 0x10).
-                            let effect = instr.arg_i32(1);
-                            for b in world.bullets.iter_mut() {
-                                match effect {
-                                    0 => b.speed = 0.0,
-                                    1 => {
-                                        b.ex_flags |= 0x10;
-                                        b.ex_int0 = 220;
-                                        b.timer = 0;
-                                        let a = world.rng.f32_zero_to_one() * std::f32::consts::TAU
-                                            - std::f32::consts::PI;
-                                        b.ex_accel = [a.cos() * 0.01, a.sin() * 0.01];
-                                    }
-                                    _ => {}
-                                }
-                            }
-                        }
-                        1 => {
-                            // ExInsShootAtRandomArea: fire the configured pattern
-                            // from a random point in a box (w=param, h=0.75w)
-                            // around the enemy.
-                            let speed = instr.arg_i32(1) as f32;
-                            let bx = world.rng.f32_in_range(speed) + self.pos[0] - speed / 2.0;
-                            let sy = speed * 0.75;
-                            let by = world.rng.f32_in_range(sy) + self.pos[1] - sy / 2.0;
-                            self.bullet_props.pos = [bx, by];
-                            spawn_bullet_pattern(world, &self.bullet_props, self.invert_x);
-                        }
-                        3 => {
-                            // ExInsPatchouliShottypeSetVars: pick the boss's
-                            // pattern vars by the player's character + shot type,
-                            // so Patchouli's spellcards vary correctly per shot.
-                            const T: [[[i32; 3]; 2]; 2] =
-                                [[[0, 3, 1], [2, 3, 4]], [[1, 4, 0], [4, 2, 3]]];
-                            let v = T[world.character.min(1) as usize][world.shot_type.min(1) as usize];
-                            self.ctx.ivars[0] = v[0];
-                            self.ctx.ivars[1] = v[1];
-                            self.ctx.ivars[2] = v[2];
-                        }
-                        4 => {
-                            // ExInsStage56Func4: param < 2 toggles Sakuya's
-                            // time-stop (isTimeStopped = param). The param >= 2
-                            // bullet-redirect branch needs per-bullet sprite-height
-                            // tests our simplified bullets lack, so it is skipped.
-                            let param = instr.arg_i32(1);
-                            if param < 2 {
-                                world.time_stopped = param != 0;
-                            }
-                            self.ctx.ivars[1] = 0; // currentContext.var2 = 0
-                        }
-                        _ => {}
-                    }
-                }
+                self.ctx.func_set_func = if idx >= 0 { idx } else { -1 };
             }
             123 => {
                 // TIMESET
@@ -1200,6 +1182,160 @@ impl Enemy {
             _ => {}
         }
         Flow::Next
+    }
+
+    /// Dispatch a per-boss ex-instruction (`g_EclExInsn[idx]`, EnemyEclInstr.cpp).
+    /// `param` is `instr->args.exInstr.i32Param`; for EXINSREPEAT's per-frame
+    /// calls the decomp passes a NULL instr, so the repeat-style handlers ignore
+    /// it and `param` is 0.
+    fn exec_ex(&mut self, idx: i32, param: i32, world: &mut World) {
+        use std::f32::consts::{PI, TAU};
+        if std::env::var_os("TH06_TRACE_EX").is_some() {
+            eprintln!("EXINS idx={idx} param={param}");
+        }
+        match idx {
+            0 => {
+                // ExInsCirnoRainbowBallJank (Perfect Freeze): param 0 freezes
+                // every live bullet, param 1 releases them with a small random
+                // acceleration over 220 frames (ex flag 0x10).
+                for b in world.bullets.iter_mut() {
+                    match param {
+                        0 => b.speed = 0.0,
+                        1 => {
+                            b.ex_flags |= 0x10;
+                            b.ex_int0 = 220;
+                            b.timer = 0;
+                            let a = world.rng.f32_zero_to_one() * TAU - PI;
+                            b.ex_accel = [a.cos() * 0.01, a.sin() * 0.01];
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            1 => {
+                // ExInsShootAtRandomArea: fire the configured pattern from a
+                // random point in a box (w=param, h=0.75w) around the enemy.
+                let s = param as f32;
+                let bx = world.rng.f32_in_range(s) + self.pos[0] - s / 2.0;
+                let sy = s * 0.75;
+                let by = world.rng.f32_in_range(sy) + self.pos[1] - sy / 2.0;
+                self.bullet_props.pos = [bx, by];
+                let props = std::mem::take(&mut self.bullet_props);
+                spawn_bullet_pattern(world, &props);
+                self.bullet_props = props;
+            }
+            2 => {
+                // ExInsShootStarPattern: a moving five-pointed star, fired in
+                // bursts. Driven by EXINSREPEAT (var2 = frame counter, var3 =
+                // total frames, float3 = star radius).
+                let var2 = self.ctx.ivars[2];
+                let var3 = self.ctx.ivars[3];
+                if var2 >= var3 {
+                    self.ctx.func_set_func = -1;
+                    return;
+                }
+                let step = 4.0 * PI / 5.0;
+                if var2 == 0 {
+                    self.star_enemy_pos = [self.pos[0], self.pos[1]];
+                    self.star_player_pos = world.player_pos;
+                    self.star_angle[0] = world.rng.f32_zero_to_one() * TAU - PI;
+                    self.star_angle[1] = normalize_angle(self.star_angle[0] + step);
+                }
+                if var2 % 30 == 0 {
+                    self.star_angle[0] = self.star_angle[1];
+                    for i in 1..6 {
+                        self.star_angle[i] = normalize_angle(self.star_angle[i - 1] + step);
+                    }
+                }
+                if var2 % 6 == 0 {
+                    let pattern_pos = var2 as f32 / var3 as f32;
+                    let td0 = pattern_pos * 0.1;
+                    let base = [
+                        (self.star_player_pos[0] - self.star_enemy_pos[0]) * td0 + self.star_enemy_pos[0],
+                        (self.star_player_pos[1] - self.star_enemy_pos[1]) * td0 + self.star_enemy_pos[1],
+                    ];
+                    let pp = pattern_pos + 0.5;
+                    self.bullet_props.angle1 = (PI / 3.0) * pp;
+                    let r = self.ctx.fvars[3];
+                    for i in 0..5 {
+                        let td = (var2 % 30) as f32 / 30.0;
+                        let a0 = self.star_angle[i];
+                        let a1 = self.star_angle[i + 1];
+                        let t0 = [a0.cos() * r, a0.sin() * r];
+                        let t1 = [a1.cos() * r, a1.sin() * r];
+                        let tt = [(t1[0] - t0[0]) * td + t0[0], (t1[1] - t0[1]) * td + t0[1]];
+                        self.bullet_props.pos = [base[0] + tt[0], base[1] + tt[1]];
+                        let backup = self.bullet_props.speed1;
+                        self.bullet_props.speed1 =
+                            world.rng.f32_in_range(self.bullet_props.speed2) + self.bullet_props.speed1;
+                        let props = std::mem::take(&mut self.bullet_props);
+                        spawn_bullet_pattern(world, &props);
+                        self.bullet_props = props;
+                        self.bullet_props.speed1 = backup;
+                        self.bullet_props.angle1 -= (PI / 6.0) * pp;
+                    }
+                    world.events.push(WorldEvent::Sfx(22)); // SOUND_16
+                }
+                self.ctx.ivars[2] += 1;
+            }
+            3 => {
+                // ExInsPatchouliShottypeSetVars: pick the boss's pattern vars by
+                // the player's character + shot type.
+                const T: [[[i32; 3]; 2]; 2] = [[[0, 3, 1], [2, 3, 4]], [[1, 4, 0], [4, 2, 3]]];
+                let v = T[world.character.min(1) as usize][world.shot_type.min(1) as usize];
+                self.ctx.ivars[1] = v[0]; // var1
+                self.ctx.ivars[2] = v[1]; // var2
+                self.ctx.ivars[3] = v[2]; // var3
+            }
+            4 => {
+                // ExInsStage56Func4: param < 2 toggles Sakuya's time-stop
+                // (isTimeStopped = u8Param). The param >= 2 bullet-redirect branch
+                // needs per-bullet sprite-height tests our bullets lack — skipped.
+                if param < 2 {
+                    world.time_stopped = (param & 0xff) != 0;
+                }
+                self.ctx.ivars[2] = 0; // var2 = 0
+            }
+            13 => {
+                // ExInsStageXFunc13: a radial burst of `param` arms from the
+                // playfield centre every 6 frames (float1 angle offset, float2
+                // base angle, float3 radius; var3 = frame counter).
+                let n = param;
+                if n > 0 && self.ctx.ivars[3] % 6 == 0 {
+                    let mut base_angle = self.ctx.fvars[2];
+                    let r = self.ctx.fvars[3];
+                    let off = self.ctx.fvars[1];
+                    for _ in 0..n {
+                        self.bullet_props.pos =
+                            [base_angle.cos() * r + 192.0, base_angle.sin() * r + 224.0];
+                        self.bullet_props.angle1 = base_angle + off;
+                        let props = std::mem::take(&mut self.bullet_props);
+                        spawn_bullet_pattern(world, &props);
+                        self.bullet_props = props;
+                        base_angle += TAU / n as f32;
+                    }
+                }
+                self.ctx.ivars[3] += 1;
+            }
+            16 => {
+                // ExInsFlandreFinalContextUpdate: derive pattern vars from
+                // remaining life (clamped to 0 past the 7200-frame rage timer).
+                let remaining = if self.boss_timer >= 7200 { 0 } else { self.life };
+                if param == 0 {
+                    self.ctx.fvars[3] = 2.0 - (remaining as f32) / 6000.0; // float3
+                    self.ctx.ivars[5] = remaining * 240 / 6000 + 40; // var5
+                } else {
+                    let m = 320.0 - (remaining as f32) * 160.0 / 6000.0;
+                    self.ctx.fvars[2] = world.rng.f32_in_range(m) + (192.0 - m / 2.0); // float2
+                    let m = 128.0 - (remaining as f32) * 64.0 / 6000.0;
+                    self.ctx.fvars[3] = world.rng.f32_in_range(m) + (96.0 - m / 2.0); // float3
+                }
+            }
+            // idx 5,6,7,8,9,10,11,12,14,15 need subsystems this port lacks
+            // (effects, anm-interrupts, per-bullet sprite-height tests,
+            // laser-segment spawning); left unimplemented per the no-approx rule.
+            _ => {}
+        }
     }
 
     fn jump(&mut self, instr: &Instr) -> Flow {
@@ -1340,27 +1476,26 @@ impl Enemy {
             self.stack_depth = 0;
             world.kill_trash = true;
         }
-        if self.timer_cb_threshold >= 0 {
-            if self.is_boss || self.timer_cb_threshold > 0 {
-                self.boss_timer += 1;
+        // HandleTimerCallback (EnemyManager.cpp:386). The boss timer is ticked
+        // once per frame by the enemy loop (Enemy::Move's sibling at line 737),
+        // not here — this only tests and acts on it.
+        if self.timer_cb_threshold >= 0 && self.boss_timer >= self.timer_cb_threshold {
+            if self.life_cb_threshold > 0 {
+                self.life = self.life_cb_threshold;
+                self.life_cb_threshold = -1;
             }
-            if self.boss_timer >= self.timer_cb_threshold {
-                if self.life_cb_threshold > 0 {
-                    self.life = self.life_cb_threshold;
-                    self.life_cb_threshold = -1;
-                }
-                let sub = self.timer_cb_sub;
-                self.call_sub(ecl, sub);
-                self.timer_cb_threshold = -1;
-                self.timer_cb_sub = self.death_callback;
-                self.boss_timer = 0;
-                if !self.timeout_spell {
-                    world.events.push(WorldEvent::BulletCancel);
-                }
-                self.reset_rank_influence();
-                self.stack_depth = 0;
-                world.kill_trash = true;
+            let sub = self.timer_cb_sub;
+            self.call_sub(ecl, sub);
+            self.timer_cb_threshold = -1;
+            self.timer_cb_sub = self.death_callback;
+            self.boss_timer = 0;
+            if !self.timeout_spell {
+                // Timed out a damageable spell: forfeit capture + clear bullets.
+                world.events.push(WorldEvent::SpellTimeout);
             }
+            self.reset_rank_influence();
+            self.stack_depth = 0;
+            world.kill_trash = true;
         }
     }
 
@@ -1415,6 +1550,25 @@ impl Enemy {
         self.run_interrupt = id;
     }
 
+    /// Advance the boss timer one frame (EnemyManager.cpp:737 — every occupied
+    /// enemy each frame, unless time is stopped). It drives the spell time
+    /// limit, the `-10022` ECL var, and rage timers (e.g. Flandre's 7200).
+    pub fn tick_boss_timer(&mut self) {
+        self.boss_timer += 1;
+    }
+
+    /// ENEMYKILLALL / phase-transition trash kill (EnemyManager.cpp:360-378):
+    /// drop life to 0 (the normal death pass finishes interactable enemies) and
+    /// directly run the death callback for non-interactable ones.
+    pub fn kill_as_trash(&mut self, ecl: &Ecl) {
+        self.life = 0;
+        if !self.interactable && self.death_callback >= 0 {
+            let sub = self.death_callback;
+            self.call_sub(ecl, sub);
+            self.death_callback = -1;
+        }
+    }
+
     /// Remaining seconds of the current boss attack, for the HUD timer.
     pub fn spell_seconds_left(&self) -> Option<i32> {
         if self.is_boss && self.timer_cb_threshold > 0 {
@@ -1444,7 +1598,7 @@ enum Flow {
 const BULLET_BASE_SPRITE: [u32; 10] = [14, 30, 46, 62, 78, 94, 110, 110, 122, 146];
 
 /// Faithful port of BulletManager::SpawnSingleBullet's aim-mode math.
-pub fn spawn_bullet_pattern(world: &mut World, props: &BulletProps, mirror: bool) {
+pub fn spawn_bullet_pattern(world: &mut World, props: &BulletProps) {
     let aim_angle = (world.player_pos[1] - props.pos[1]).atan2(world.player_pos[0] - props.pos[0]);
     let tau = std::f32::consts::TAU;
     let pi = std::f32::consts::PI;
@@ -1502,9 +1656,9 @@ pub fn spawn_bullet_pattern(world: &mut World, props: &BulletProps, mirror: bool
                     speed = world.rng.f32_in_range(props.speed1 - props.speed2) + props.speed2;
                 }
             }
-            if mirror {
-                angle = pi - angle;
-            }
+            // No bullet mirroring: SpawnSingleBullet (BulletManager.cpp:118)
+            // never flips the angle. `invertX` only negates the enemy's X
+            // movement (Enemy::Move), not its fire pattern.
             angle = normalize_angle(angle);
             let base = BULLET_BASE_SPRITE
                 .get(props.sprite.max(0) as usize)
