@@ -1239,6 +1239,11 @@ impl Stage {
             }
             e.handle_callbacks(&self.ecl, &mut self.world);
             e.run_ecl(&self.ecl, &mut self.world);
+            // Boss timer ticks once per frame per enemy, unless time is stopped
+            // (EnemyManager.cpp:735).
+            if !self.world.time_stopped {
+                e.tick_boss_timer();
+            }
 
             // Refresh the ANM runner when the script changed.
             if e.anm_dirty {
@@ -1256,11 +1261,9 @@ impl Stage {
 
         if self.world.kill_trash {
             self.world.kill_trash = false;
-            for i in 0..self.enemies.len() {
-                let e = &mut self.enemies[i];
+            for e in &mut self.enemies {
                 if e.occupied && !e.is_boss {
-                    e.life = 0;
-                    e.on_death(&self.ecl, &mut self.world);
+                    e.kill_as_trash(&self.ecl);
                 }
             }
         }
@@ -1816,13 +1819,21 @@ impl Stage {
         for i in 0..self.enemies.len() {
             let e = &mut self.enemies[i];
             if e.occupied && e.interactable && e.life <= 0 {
-                drops.push(([e.pos[0], e.pos[1]], e.item_drop));
+                // Per EnemyManager.cpp:645 death switch: modes 0/1 award score,
+                // modes 0/1/2 drop items, mode 3 (survived final spell) does
+                // neither and leaves the boss alive.
+                let dm = e.death_mode;
+                if dm != 3 {
+                    drops.push(([e.pos[0], e.pos[1]], e.item_drop));
+                }
+                if dm == 0 || dm == 1 {
+                    self.score += e.score as i64;
+                }
                 if !e.is_boss {
                     death_fx.push([e.pos[0], e.pos[1]]);
-                } else {
+                } else if dm != 3 {
                     boss_died = true;
                 }
-                self.score += e.score as i64;
                 e.on_death(&self.ecl, &mut self.world);
                 self.events.push(Event::Sfx("enep00"));
             }
@@ -2260,6 +2271,13 @@ impl Stage {
                         self.spell_bonus_amount = bonus;
                         self.spell_bonus_timer = 280;
                     }
+                }
+                WorldEvent::SpellTimeout => {
+                    // Ran the timer out on a damageable spell: no capture bonus,
+                    // and the field is wiped (EnemyManager.cpp:410-415).
+                    self.spell_capturing = false;
+                    self.world.bullets.clear();
+                    self.cancel_lasers();
                 }
                 WorldEvent::BulletCancel => {
                     self.world.bullets.clear();
