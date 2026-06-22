@@ -1594,8 +1594,10 @@ enum Flow {
     Kill,
 }
 
-/// Bullet type -> etama3 base sprite index (from etama3.anm scripts).
-const BULLET_BASE_SPRITE: [u32; 10] = [14, 30, 46, 62, 78, 94, 110, 110, 122, 146];
+/// Bullet type -> etama3 base sprite index (AnmIdx.hpp ANM_SPRITE_BULLET3_*:
+/// pellet, ring-ball, rice, ball, kunai, shard, big-ball, fireball, dagger,
+/// laser). Fireball is 118, not 110 — it is its own sprite group after big-ball.
+pub const BULLET_BASE_SPRITE: [u32; 10] = [14, 30, 46, 62, 78, 94, 110, 118, 122, 146];
 
 /// Faithful port of BulletManager::SpawnSingleBullet's aim-mode math.
 pub fn spawn_bullet_pattern(world: &mut World, props: &BulletProps) {

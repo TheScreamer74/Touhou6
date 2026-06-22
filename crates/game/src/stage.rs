@@ -14,7 +14,7 @@ use crate::anm_vm::AnmRunner;
 use crate::hud::Hud;
 use crate::background::Background;
 use th06_engine::BgScene;
-use crate::ecl_vm::{Bullet, Enemy, Rng, SpawnReq, World, WorldEvent};
+use crate::ecl_vm::{Bullet, Enemy, Rng, SpawnReq, World, WorldEvent, BULLET_BASE_SPRITE};
 
 pub const FIELD_W: f32 = 384.0;
 pub const FIELD_H: f32 = 448.0;
@@ -653,6 +653,10 @@ pub struct Stage {
     enemy_scripts: HashMap<i32, ScriptRef>,
     bullet_sprites: HashMap<u32, Sprite>,
     bullet_tex_size: [f32; 2],
+    /// Per bullet-type (etama3.anm scripts 0..9) "auto-rotate" flag (anm op 26):
+    /// directional bullets (rice/kunai/shard/dagger) face their travel angle,
+    /// round ones don't. Read from etama3.anm, not hard-coded.
+    bullet_autorotate: [bool; 10],
     // player
     character: Character,
     /// Texture slot for the player body sprite (player00 Reimu / player01 Marisa).
@@ -756,6 +760,16 @@ impl Stage {
         let player_scripts: HashMap<i32, Vec<AnmInstr>> =
             player.scripts.iter().map(|(id, instrs)| (*id as i32, instrs.clone())).collect();
         let idle = player_scripts.get(&0).cloned().unwrap_or_default();
+        // Bullet-type auto-rotate flags from etama3.anm (scripts 0..9): a type
+        // rotates with its travel angle iff its script runs SetAutoRotate (op 26)
+        // with a non-zero arg.
+        let mut bullet_autorotate = [false; 10];
+        for (id, instrs) in &etama.scripts {
+            if (*id as usize) < bullet_autorotate.len() {
+                bullet_autorotate[*id as usize] =
+                    instrs.iter().any(|i| i.opcode == 26 && i.arg_u32(0) != 0);
+            }
+        }
         Self {
             tick: 0,
             anim: 0,
@@ -783,6 +797,7 @@ impl Stage {
             enemy_scripts,
             bullet_sprites: etama.sprites.iter().map(|s| (s.index, s.clone())).collect(),
             bullet_tex_size: [etama.width as f32, etama.height as f32],
+            bullet_autorotate,
             character,
             player_tex,
             beam_dmg: 0,
@@ -2565,10 +2580,16 @@ impl Stage {
             });
         }
 
-        // Bullets from the original scripts.
+        // Bullets from the original scripts. Directional types (auto-rotate
+        // flag in etama3.anm) face their travel angle; round types stay upright.
         let [tw, th] = self.bullet_tex_size;
         for b in &self.world.bullets {
             let Some(sp) = self.bullet_sprites.get(&b.sprite) else { continue };
+            let rot = if self.bullet_autorotate[bullet_type_of(b.sprite)] {
+                b.angle + std::f32::consts::FRAC_PI_2
+            } else {
+                0.0
+            };
             cmds.push(DrawCmd {
                 tex: TEX_BULLET,
                 dst: [
@@ -2579,11 +2600,13 @@ impl Stage {
                 ],
                 src: [sp.x / tw, sp.y / th, (sp.x + sp.width) / tw, (sp.y + sp.height) / th],
                 tint: [1.0, 1.0, 1.0, 1.0],
-                rot: 0.0,
+                rot,
             });
         }
 
-        // Lasers: a rotated quad over the lit segment, tinted by color.
+        // Lasers: the real etama3 laser sprite (ANM_SPRITE_BULLET3_LASER = 146,
+        // + colour offset) stretched along the lit segment, plus the glowing
+        // base ball (SPAWN_BIG_BALL = 140) at the origin — like SpawnLaserPattern.
         for l in &self.world.lasers {
             if !l.in_use {
                 continue;
@@ -2601,22 +2624,42 @@ impl Stage {
             let mid = l.start_offset + len / 2.0;
             let cx = FIELD_X + l.pos[0] + l.angle.cos() * mid;
             let cy = FIELD_Y + l.pos[1] + l.angle.sin() * mid;
-            let tint = LASER_COLORS[(l.color as usize) % LASER_COLORS.len()];
-            cmds.push(DrawCmd {
-                tex: TEX_WHITE,
-                dst: [cx - len / 2.0, cy - width / 2.0, len, width],
-                src: [0.25, 0.25, 0.75, 0.75],
-                tint,
-                rot: l.angle,
-            });
-            // Bright core.
-            cmds.push(DrawCmd {
-                tex: TEX_WHITE,
-                dst: [cx - len / 2.0, cy - width / 6.0, len, width / 3.0],
-                src: [0.25, 0.25, 0.75, 0.75],
-                tint: [1.0, 1.0, 1.0, 0.9],
-                rot: l.angle,
-            });
+            let color = l.color.max(0) as u32;
+            if let Some(sp) = self.bullet_sprites.get(&(146 + color)) {
+                // Beam: the laser sprite stretched to the lit length x width.
+                cmds.push(DrawCmd {
+                    tex: TEX_BULLET,
+                    dst: [cx - len / 2.0, cy - width / 2.0, len, width],
+                    src: [sp.x / tw, sp.y / th, (sp.x + sp.width) / tw, (sp.y + sp.height) / th],
+                    tint: [1.0, 1.0, 1.0, 1.0],
+                    rot: l.angle,
+                });
+            } else {
+                // Fallback (sprite missing): a tinted rect.
+                let tint = LASER_COLORS[(l.color as usize) % LASER_COLORS.len()];
+                cmds.push(DrawCmd {
+                    tex: TEX_WHITE,
+                    dst: [cx - len / 2.0, cy - width / 2.0, len, width],
+                    src: [0.25, 0.25, 0.75, 0.75],
+                    tint,
+                    rot: l.angle,
+                });
+            }
+            // Glowing ball at the laser base, while it is warming up or active.
+            if l.state < 2 {
+                if let Some(sp) = self.bullet_sprites.get(&(140 + color)) {
+                    let ox = FIELD_X + l.pos[0] + l.angle.cos() * l.start_offset;
+                    let oy = FIELD_Y + l.pos[1] + l.angle.sin() * l.start_offset;
+                    let s = (width * 2.0).max(sp.width);
+                    cmds.push(DrawCmd {
+                        tex: TEX_BULLET,
+                        dst: [ox - s / 2.0, oy - s / 2.0, s, s],
+                        src: [sp.x / tw, sp.y / th, (sp.x + sp.width) / tw, (sp.y + sp.height) / th],
+                        tint: [1.0, 1.0, 1.0, 1.0],
+                        rot: 0.0,
+                    });
+                }
+            }
         }
 
         // Boss attack timer at the field top-right, "%.2d" coloured by seconds
@@ -2994,6 +3037,20 @@ impl Stage {
             }
         }
     }
+}
+
+/// etama3 bullet type (0..9) for a final sprite index, via the per-type base
+/// sprite ranges (`BULLET_BASE_SPRITE` is ascending).
+fn bullet_type_of(sprite: u32) -> usize {
+    let mut t = 0;
+    for (i, &base) in BULLET_BASE_SPRITE.iter().enumerate() {
+        if sprite >= base {
+            t = i;
+        } else {
+            break;
+        }
+    }
+    t
 }
 
 /// th06 bullet color palette, approximated (index = color offset).
