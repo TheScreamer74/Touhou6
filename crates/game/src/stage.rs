@@ -2595,8 +2595,11 @@ impl Stage {
         for b in &self.world.bullets {
             let Some(sp) = self.bullet_sprites.get(&b.sprite) else { continue };
             let rot = if self.bullet_autorotate[bullet_type_of(b.sprite)] {
-                // BulletManager::OnDraw: rotation.z = pi/2 - angle.
-                std::f32::consts::FRAC_PI_2 - b.angle
+                // Decomp: rotation.z = pi/2 - angle, applied with the matrix
+                // [cos sin; -sin cos] (TranslateRotation). Our engine rotates with
+                // the opposite-handed [cos -sin; sin cos], so the equivalent angle
+                // is the negation: angle - pi/2.
+                b.angle - std::f32::consts::FRAC_PI_2
             } else {
                 0.0
             };
