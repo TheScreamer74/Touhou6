@@ -2595,7 +2595,8 @@ impl Stage {
         for b in &self.world.bullets {
             let Some(sp) = self.bullet_sprites.get(&b.sprite) else { continue };
             let rot = if self.bullet_autorotate[bullet_type_of(b.sprite)] {
-                b.angle + std::f32::consts::FRAC_PI_2
+                // BulletManager::OnDraw: rotation.z = pi/2 - angle.
+                std::f32::consts::FRAC_PI_2 - b.angle
             } else {
                 0.0
             };

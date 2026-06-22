@@ -1335,6 +1335,54 @@ impl Enemy {
                 }
                 self.ctx.ivars[2] = 0; // var2 = 0
             }
+            5 => {
+                // ExInsStage5Func5: Sakuya's knife fan (sprite 8 = dagger), fired
+                // every 9 frames in a player-relative rotated arc. Driven by
+                // EXINSREPEAT (var2 = frame counter). EnemyEclInstr.cpp:655.
+                let var2 = self.ctx.ivars[2];
+                if var2 % 9 == 0 {
+                    let pp = var2 / 9;
+                    let normal = world.difficulty <= 1;
+                    let mut props = BulletProps {
+                        sprite: 8,
+                        aim_mode: 0,
+                        count1: if normal { 1 } else { 3 },
+                        count2: 1,
+                        angle2: PI / 6.0,
+                        flags: 0,
+                        speed1: 2.0,
+                        sprite_offset: 3,
+                        ..Default::default()
+                    };
+                    let mut mo = [world.player_pos[0] - self.pos[0], world.player_pos[1] - self.pos[1]];
+                    let len = (mo[0] * mo[0] + mo[1] * mo[1]).sqrt();
+                    let mut mi = if len > 0.0 { [mo[0] / len, mo[1] / len] } else { [0.0, 0.0] };
+                    let mat_in_seed = if pp & 1 != 0 { -256.0 } else { 256.0 };
+                    mi = [mi[0] * mat_in_seed, mi[1] * mat_in_seed];
+                    let mat_out_seed = 0.5 - pp as f32 * 0.5 / 9.0;
+                    mo = [mo[0] * mat_out_seed, mo[1] * mat_out_seed];
+                    let bp_offset = [mo[0] + mi[0], mo[1] + mi[1]];
+                    mi = [-mi[0], -mi[1]];
+                    // Rotate by +pi/4, then by -pi/18 each of the 9 bullets.
+                    let (c, s) = ((PI / 4.0).cos(), (PI / 4.0).sin());
+                    mi = [mi[0] * c + mi[1] * s, -mi[0] * s + mi[1] * c];
+                    let (co, so) = ((-PI / 18.0).cos(), (-PI / 18.0).sin());
+                    let mut bullet_angle = -PI / 4.0;
+                    for _ in 0..9 {
+                        mi = [mi[0] * co + mi[1] * so, -mi[0] * so + mi[1] * co];
+                        props.pos = [mi[0] + self.pos[0] + bp_offset[0], mi[1] + self.pos[1] + bp_offset[1]];
+                        props.speed1 = 2.0;
+                        if (pp & 1) != 0 && normal {
+                            props.angle1 = bullet_angle;
+                        }
+                        props.sprite_offset = 3;
+                        spawn_bullet_pattern(world, &props);
+                        bullet_angle += PI / 18.0;
+                    }
+                    world.events.push(WorldEvent::Sfx(7)); // SOUND_7
+                }
+                self.ctx.ivars[2] += 1;
+            }
             13 => {
                 // ExInsStageXFunc13: a radial burst of `param` arms from the
                 // playfield centre every 6 frames (float1 angle offset, float2
