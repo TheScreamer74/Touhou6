@@ -120,6 +120,7 @@ int main(int argc, char** argv) {
     for (int fr = 0; fr < frames; fr++) {
         g_Player.positionCenter = D3DXVECTOR3(192.0f, 408.0f, 0.0f);
         EnemyManager::OnUpdate(&g_EnemyManager);
+        EffectManager::OnUpdate(&g_EffectManager); // chain prio 10 (between enemy 9 and bullet 11)
         BulletManager::OnUpdate(&g_BulletManager);
 
         std::vector<std::string> lines;

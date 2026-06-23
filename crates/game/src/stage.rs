@@ -696,6 +696,9 @@ pub struct Stage {
     bomb_orbs: Vec<BombOrb>,
     items: Vec<Item>,
     particles: Vec<Particle>,
+    /// Cosmetic-only RNG for visual particle bursts (`spawn_burst`), kept
+    /// separate from the gameplay `world.rng` so effects never desync it (#26).
+    fx_rng: Rng,
     score: i64,
     /// Displayed score, rolled toward `score` each frame (Gui guiScore).
     gui_score: i64,
@@ -801,6 +804,9 @@ impl Stage {
                 time_stopped: false,
                 bullet_heights,
                 bullet_widths,
+                effect_rng_queue: Vec::new(),
+                random_item_spawn_index: 0,
+                random_item_table_index: 0,
             },
             enemies: Vec::new(),
             anims: Vec::new(),
@@ -837,6 +843,7 @@ impl Stage {
             bomb_orbs: Vec::new(),
             items: Vec::new(),
             particles: Vec::new(),
+            fx_rng: Rng::new(0x4321),
             score: 0,
             gui_score: 0,
             next_score_inc: 0,
@@ -1074,6 +1081,9 @@ impl Stage {
             self.run_timeline();
         }
         self.update_enemies();
+        // EffectManager::OnUpdate (chain prio 10, between enemy 9 and bullet 11):
+        // draw the RNG for effects spawned this frame (enemy deaths, etc.). (#26)
+        self.world.update_effects();
         self.update_shots();
         self.update_bullets();
         self.update_items();
@@ -1313,6 +1323,17 @@ impl Stage {
                 if e.occupied && !e.is_boss {
                     e.kill_as_trash(&self.ecl);
                 }
+            }
+        }
+
+        // Death-effect particles (EnemyManager.cpp:641-706): a dead interactable
+        // enemy queues its splash/bubble effects here, in EnemyManager::OnUpdate
+        // (before the bullet update), so their RNG draws land at the faithful
+        // point. The drop/score/removal stay in collide(); this only spawns the
+        // effects (and fires once via death_fx_done). (#26)
+        for e in &mut self.enemies {
+            if e.occupied && e.interactable && e.life <= 0 && !e.death_fx_done {
+                e.spawn_death_effects(&mut self.world);
             }
         }
 
@@ -2120,12 +2141,15 @@ impl Stage {
         self.items.push(Item::fall(pos, kind));
     }
 
-    /// Burst of fading puffs, used for enemy deaths and pickups.
+    /// Burst of fading puffs, used for enemy deaths and pickups. Purely cosmetic:
+    /// it draws from a SEPARATE `fx_rng`, never the gameplay `world.rng`, so the
+    /// visual particle jitter can't desync the decomp-faithful RNG stream (#26).
+    /// The faithful gameplay effect RNG is handled by World::spawn_particles.
     fn spawn_burst(&mut self, pos: [f32; 2], count: u32, speed: f32, color: [f32; 3], size: f32) {
         for i in 0..count {
             let a = i as f32 / count as f32 * std::f32::consts::TAU
-                + self.world.rng.f32_in_range(0.5);
-            let s = speed * (0.5 + self.world.rng.f32_zero_to_one());
+                + self.fx_rng.f32_in_range(0.5);
+            let s = speed * (0.5 + self.fx_rng.f32_zero_to_one());
             self.particles.push(Particle {
                 pos,
                 vel: [a.cos() * s, a.sin() * s],

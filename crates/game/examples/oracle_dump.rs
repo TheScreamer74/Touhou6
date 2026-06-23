@@ -24,6 +24,9 @@ fn make_world() -> World {
         time_stopped: false,
         bullet_heights: [0.0; 10],
         bullet_widths: [0.0; 10],
+        effect_rng_queue: Vec::new(),
+        random_item_spawn_index: 0,
+        random_item_table_index: 0,
     }
 }
 

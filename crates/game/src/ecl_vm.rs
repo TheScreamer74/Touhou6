@@ -226,6 +226,14 @@ pub struct Enemy {
     timeout_spell: bool,
     has_been_in_bounds: bool,
     pub item_drop: i16,
+    /// ANMSETDEATH (op 100): death-effect anm indices. `death_anm1` is the
+    /// bubble pop (no RNG); `death_anm2 + 4` is the splash particle index into
+    /// g_Effects (RandomSplash → 2 RNG draws each). Used by the faithful death
+    /// EffectManager spawns (#26).
+    death_anm1: u8,
+    death_anm2: u8,
+    /// True once this enemy's death effects have been spawned (fire once).
+    pub death_fx_done: bool,
     // ANM presentation
     pub anm_script: i32,
     pub anm_poses: [i16; 5], // default, far left, far right, left, right
@@ -300,6 +308,9 @@ impl Default for Enemy {
             timeout_spell: false,
             has_been_in_bounds: false,
             item_drop: -1,
+            death_anm1: 0,
+            death_anm2: 0,
+            death_fx_done: false,
             anm_script: -1,
             anm_poses: [-1; 5],
             anm_pose_state: 0xff,
@@ -353,9 +364,54 @@ pub struct World {
     /// Sprite width (px) per bullet type 0..9, from etama3.anm. Used (with
     /// height) by the off-screen IsInBounds cull.
     pub bullet_widths: [f32; 10],
+    /// EffectManager (#26): particle effects spawned this frame, each holding
+    /// the number of `GetRandomF32ZeroToOne` draws its update callback makes on
+    /// its first tick (EffectManager.cpp). Drained by `update_effects`, which
+    /// runs between the enemy and bullet updates (chain prio 10) so the gameplay
+    /// RNG advances exactly as the decomp's. The real `g_Effects` callback table:
+    /// idx 3 / 4-11 = RandomSplash(Big) → 2 draws; 17-18 = Attract → 1; else 0.
+    pub effect_rng_queue: Vec<u32>,
+    /// EnemyManager::randomItemSpawnIndex / randomItemTableIndex (drive the
+    /// every-3rd random-item drop + its bigger death splash).
+    pub random_item_spawn_index: i32,
+    pub random_item_table_index: i32,
+}
+
+/// Number of `GetRandomF32ZeroToOne` draws each `g_Effects` entry's update
+/// callback makes on its first tick (EffectManager.cpp:18 table): indices 3 and
+/// 4..=11 are RandomSplash(Big) → 2; 17/18 are Attract(Slow) → 1; all others
+/// (bubbles 0-2, 12, cb4 13-15, spellcard bg 16, still 19) → 0.
+fn effect_rng_draws(effect_idx: i32) -> u32 {
+    match effect_idx {
+        3..=11 => 2,
+        17 | 18 => 1,
+        _ => 0,
+    }
 }
 
 impl World {
+    /// EffectManager::SpawnParticles — queues `count` effects of `effect_idx`.
+    /// No RNG here; the draws happen in `update_effects` (the callbacks' first
+    /// tick), exactly as the decomp splits spawn vs. update.
+    pub fn spawn_particles(&mut self, effect_idx: i32, count: i32) {
+        let draws = effect_rng_draws(effect_idx);
+        for _ in 0..count.max(0) {
+            self.effect_rng_queue.push(draws);
+        }
+    }
+
+    /// EffectManager::OnUpdate (chain prio 10) — each effect spawned this frame
+    /// draws its callback's RNG on its first tick. The pool never fills in
+    /// practice, so every queued effect spawns and draws here, in spawn order.
+    pub fn update_effects(&mut self) {
+        let queue = std::mem::take(&mut self.effect_rng_queue);
+        for draws in queue {
+            for _ in 0..draws {
+                self.rng.f32_zero_to_one();
+            }
+        }
+    }
+
     fn alloc_laser(&mut self, laser: Laser) -> usize {
         if let Some(i) = self.lasers.iter().position(|l| !l.in_use) {
             self.lasers[i] = laser;
@@ -1090,7 +1146,12 @@ impl Enemy {
                 ];
                 self.anm_pose_state = 0xff;
             }
-            99 | 100 => {} // sub-slot anm, death anm
+            99 => {} // sub-slot anm
+            100 => {
+                // ANMSETDEATH (EclManager.cpp:422): 3 i8 death-effect anm indices.
+                self.death_anm1 = instr.args.first().copied().unwrap_or(0);
+                self.death_anm2 = instr.args.get(1).copied().unwrap_or(0);
+            }
             101 => {
                 // BOSSSET
                 let v = instr.arg_i32(0);
@@ -1547,6 +1608,40 @@ impl Enemy {
             self.pos[0] = self.pos[0].clamp(self.lower_bound[0], self.upper_bound[0]);
             self.pos[1] = self.pos[1].clamp(self.lower_bound[1], self.upper_bound[1]);
         }
+    }
+
+    /// Queue this enemy's death particle effects (EnemyManager.cpp:641-706 —
+    /// the `SpawnParticles` calls only; drops/score/removal stay in collide()).
+    /// `death_anm1` is the bubble pop (no RNG), `death_anm2 + 4` the splash
+    /// (RandomSplash → 2 RNG each). Every death mode runs the after-switch pair;
+    /// mode 3 also pops three bubbles first, modes 0/1/2 add the item splash.
+    pub fn spawn_death_effects(&mut self, world: &mut World) {
+        if self.death_fx_done {
+            return;
+        }
+        self.death_fx_done = true;
+        let a1 = self.death_anm1 as i32;
+        let a2 = self.death_anm2 as i32 + 4;
+        if self.death_mode == 3 {
+            world.spawn_particles(a1, 1);
+            world.spawn_particles(a1, 1);
+            world.spawn_particles(a1, 1);
+        } else if self.item_drop >= 0 {
+            world.spawn_particles(a2, 3);
+        } else if self.item_drop == -1 {
+            // ITEM_RANDOM_ITEM: every 3rd drop gets the bigger splash.
+            if world.random_item_spawn_index % 3 == 0 {
+                world.spawn_particles(a2, 6);
+                world.random_item_table_index += 1;
+                if world.random_item_table_index >= 16 {
+                    world.random_item_table_index = 0;
+                }
+            }
+            world.random_item_spawn_index += 1;
+        }
+        // After the switch, for every death mode (EnemyManager.cpp:699-700).
+        world.spawn_particles(a1, 1);
+        world.spawn_particles(a2, 4);
     }
 
     /// Bounds bookkeeping; returns false when the enemy should despawn.
