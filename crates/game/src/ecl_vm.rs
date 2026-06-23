@@ -127,6 +127,11 @@ pub struct Bullet {
     /// only affect "big" bullets (>= 30px).
     pub height: f32,
     pub spawn_delay: u32,
+    /// Speed multiplier while `spawn_delay > 0` (the spawn-in slow-down).
+    pub spawn_factor: f32,
+    /// Frames spent out of bounds (BulletManager `unk_5c0`): normal bullets are
+    /// culled on the first OOB frame; dir-change/bounce bullets get 256 frames.
+    pub oob_count: i32,
     pub timer: i32,
     pub ex_flags: u32,
     /// flag 0x10: acceleration vector; 0x20: (speed delta, angle delta);
@@ -1753,9 +1758,22 @@ pub fn spawn_bullet_pattern(world: &mut World, props: &BulletProps) {
                 .get(props.sprite.max(0) as usize)
                 .copied()
                 .unwrap_or(30);
-            // Spawn-effect flags delay the live bullet slightly in the
-            // original; approximated as a fixed delay.
-            let spawn_delay = if props.flags & (2 | 4 | 8) != 0 { 8 } else { 0 };
+            // Spawn-in effect (BulletManager.cpp:683-708): while spawning, the
+            // bullet moves at velocity/2 (FAST flag 2), /2.5 (NORMAL flag 4) or
+            // /3 (SLOW flag 8) for the spawn anm-script's length, then snaps to
+            // full speed. Durations from etama3.anm: FAST 10 / NORMAL 16 / SLOW 32
+            // frames; the big types (>=6, which use SPAWN_BIG_BALL_HUGE) are 32
+            // for every state.
+            let big = props.sprite >= 6;
+            let (spawn_delay, spawn_factor) = if props.flags & 2 != 0 {
+                (if big { 32 } else { 10 }, 0.5)
+            } else if props.flags & 4 != 0 {
+                (if big { 32 } else { 16 }, 1.0 / 2.5)
+            } else if props.flags & 8 != 0 {
+                (32u32, 1.0 / 3.0)
+            } else {
+                (0u32, 1.0)
+            };
             // Ex-behavior setup, ported from SpawnSingleBullet.
             let mut ex_accel = [0.0f32; 2];
             let mut ex_f = [0.0f32; 2];
@@ -1785,6 +1803,8 @@ pub fn spawn_bullet_pattern(world: &mut World, props: &BulletProps) {
                 angle,
                 speed,
                 sprite: base + props.sprite_offset.max(0) as u32,
+                spawn_factor,
+                oob_count: 0,
                 sprite_offset: props.sprite_offset.max(0),
                 height: world.bullet_heights[bullet_type],
                 spawn_delay,

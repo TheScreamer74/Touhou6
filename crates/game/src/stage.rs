@@ -1738,16 +1738,40 @@ impl Stage {
             }
             let factor = if b.spawn_delay > 0 {
                 b.spawn_delay -= 1;
-                1.0 / 2.5
+                b.spawn_factor
             } else {
                 1.0
             };
             b.pos[0] += b.angle.cos() * move_speed * factor;
             b.pos[1] += b.angle.sin() * move_speed * factor;
+            // On the spawn->fired transition frame the decomp falls through into
+            // the FIRED case and applies a second, full-velocity move
+            // (BulletManager.cpp:698 then :895).
+            if factor != 1.0 && b.spawn_delay == 0 {
+                b.pos[0] += b.angle.cos() * move_speed;
+                b.pos[1] += b.angle.sin() * move_speed;
+            }
+            // Off-screen cull (BulletManager.cpp:896, only for FIRED bullets):
+            // GameManager::IsInBounds — the sprite (w x h, ~square) must overlap
+            // [0,FIELD_W] x [0,FIELD_H]. Normal bullets die on the first OOB frame;
+            // dir-change/bounce bullets (0x40/0x80/0x100/0x400/0x800) get 256.
+            if b.spawn_delay == 0 {
+                let hw = b.height / 2.0;
+                let in_bounds = b.pos[0] + hw >= 0.0
+                    && b.pos[0] - hw <= FIELD_W
+                    && b.pos[1] + hw >= 0.0
+                    && b.pos[1] - hw <= FIELD_H;
+                let roamer = b.ex_flags & 0xdc0 != 0;
+                if in_bounds {
+                    b.oob_count = 0;
+                } else if !roamer && b.oob_count == 0 {
+                    b.oob_count = i32::MAX;
+                } else {
+                    b.oob_count += 1;
+                }
+            }
         }
-        self.world.bullets.retain(|b| {
-            b.pos[0] > -20.0 && b.pos[0] < FIELD_W + 20.0 && b.pos[1] > -20.0 && b.pos[1] < FIELD_H + 20.0
-        });
+        self.world.bullets.retain(|b| b.oob_count < 256);
 
         // Lasers (state machine from BulletManager::OnUpdate).
         for l in &mut self.world.lasers {

@@ -12,8 +12,16 @@ struct GameManager {
     bool isInReplay=false;
     Catk catk[64];
     D3DXVECTOR3 arcadeRegionTopLeftPos{32,16,0};
+    D3DXVECTOR3 arcadeRegionSize{384,448,0};
     i32 CharacterShotType(){ return character*2+shotType; }
-    bool IsInBounds(f32,f32,f32,f32){ return true; }
+    // GameManager::IsInBounds: the (w x h) sprite must overlap [0,384]x[0,448].
+    i32 IsInBounds(f32 x, f32 y, f32 width, f32 height){
+        if (width/2.0f + x < 0.0f) return 0;
+        if (x - width/2.0f > arcadeRegionSize.x) return 0;
+        if (height/2.0f + y < 0.0f) return 0;
+        if (y - height/2.0f > arcadeRegionSize.y) return 0;
+        return 1;
+    }
     void AddScore(i32 s){ score+=s; }
     D3DXVECTOR3 playerMovementAreaSize{384,448,0};
     i32 livesRemaining=0, currentStage=0;
