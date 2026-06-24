@@ -1274,41 +1274,65 @@ impl Stage {
         }
     }
 
+    /// ENEMYKILLALL (op 96) / boss-timer / life callbacks set kill_trash. The
+    /// decomp applies it INLINE the instant it's set — HandleTimerCallback
+    /// (EnemyManager.cpp:418) before the killer's RunEcl, the ECL opcode during
+    /// it — setting life=0 on every non-boss enemy using its CURRENT isBoss flag.
+    /// Enemies later in the slot order that are still bosses this frame are
+    /// skipped, then their own ECL runs (e.g. BOSSSET(-1) + ENEMYLIFESET) and can
+    /// revive — which is how Sakuya's dolls survive the midboss timeout. Applying
+    /// it post-loop would kill an already-un-bossed doll.
+    fn apply_kill_trash(&mut self) {
+        if !self.world.kill_trash {
+            return;
+        }
+        self.world.kill_trash = false;
+        for j in 0..self.enemies.len() {
+            if self.enemies[j].occupied && !self.enemies[j].is_boss {
+                self.enemies[j].kill_as_trash(&self.ecl);
+            }
+        }
+    }
+
     fn update_enemies(&mut self) {
         for i in 0..self.enemies.len() {
-            let e = &mut self.enemies[i];
-            if !e.occupied {
+            if !self.enemies[i].occupied {
                 continue;
             }
-            e.frame_move();
+            self.enemies[i].frame_move();
             // Current primaryVm sprite size (px) for the off-screen despawn test
             // (EnemyManager.cpp:549). (0,0) until the first ANMSETMAIN runs.
-            let (sw, sh) = self
-                .anims
-                .get(i)
-                .and_then(|a| a.as_ref())
-                .and_then(|r| r.sprite)
-                .and_then(|idx| self.enemy_scripts.get(&e.anm_script).and_then(|s| s.sprites.get(&idx)))
-                .map(|sp| (sp.width, sp.height))
-                .unwrap_or((0.0, 0.0));
-            if !e.update_bounds(sw, sh) {
-                e.despawn(&mut self.world);
+            let (sw, sh) = {
+                let anm_script = self.enemies[i].anm_script;
+                self.anims
+                    .get(i)
+                    .and_then(|a| a.as_ref())
+                    .and_then(|r| r.sprite)
+                    .and_then(|idx| self.enemy_scripts.get(&anm_script).and_then(|s| s.sprites.get(&idx)))
+                    .map(|sp| (sp.width, sp.height))
+                    .unwrap_or((0.0, 0.0))
+            };
+            if !self.enemies[i].update_bounds(sw, sh) {
+                self.enemies[i].despawn(&mut self.world);
                 continue;
             }
-            e.handle_callbacks(&self.ecl, &mut self.world);
-            e.run_ecl(&self.ecl, &mut self.world);
+            self.enemies[i].handle_callbacks(&self.ecl, &mut self.world);
+            self.apply_kill_trash(); // timeout/life-callback kill, before this enemy's RunEcl
+            self.enemies[i].run_ecl(&self.ecl, &mut self.world);
+            self.apply_kill_trash(); // ENEMYKILLALL during RunEcl
             // Boss timer ticks once per frame per enemy, unless time is stopped
             // (EnemyManager.cpp:735).
             if !self.world.time_stopped {
-                e.tick_boss_timer();
+                self.enemies[i].tick_boss_timer();
             }
 
             // Refresh the ANM runner when the script changed.
-            if e.anm_dirty {
-                e.anm_dirty = false;
+            if self.enemies[i].anm_dirty {
+                self.enemies[i].anm_dirty = false;
+                let anm_script = self.enemies[i].anm_script;
                 self.anims[i] = self
                     .enemy_scripts
-                    .get(&e.anm_script)
+                    .get(&anm_script)
                     .map(|s| AnmRunner::new(s.instrs.clone()));
             }
             if let Some(anim) = &mut self.anims[i] {
@@ -1316,15 +1340,6 @@ impl Stage {
             }
         }
         self.flush_spawns();
-
-        if self.world.kill_trash {
-            self.world.kill_trash = false;
-            for e in &mut self.enemies {
-                if e.occupied && !e.is_boss {
-                    e.kill_as_trash(&self.ecl);
-                }
-            }
-        }
 
         // Death-effect particles (EnemyManager.cpp:641-706): a dead interactable
         // enemy queues its splash/bubble effects here, in EnemyManager::OnUpdate
