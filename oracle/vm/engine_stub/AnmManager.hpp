@@ -52,6 +52,7 @@ struct AnmManager {
     // etama3 spawn-in script durations (ANM_SCRIPT_BULLET3_SPAWN_* rel 14..20).
     static i32 spawnDur(i32 anmFileIndex){
         switch (anmFileIndex - 0x200) {
+        case 11: case 12: case 13: return 12;   // SPAWN_DONUT small/medium/big (despawn fade)
         case 14: case 17: return 10;            // FAST
         case 15: case 18: return 16;            // NORMAL
         case 16: case 19: case 20: return 32;   // SLOW / HUGE

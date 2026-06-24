@@ -146,6 +146,11 @@ pub struct Bullet {
     pub ex_count: i32,
     /// Set once the bullet has been grazed, so it scores graze only once.
     pub grazed: bool,
+    /// BULLET_STATE_DESPAWNING (BulletManager.cpp:947): when > 0, the bullet is
+    /// fading out — it drifts at half velocity and is removed when this reaches
+    /// 0, running over the 12-frame donut anm. Set by a non-timeout-spell spell
+    /// timeout (RemoveAllBullets(0)); 0 means a normal live bullet. (#14)
+    pub despawn_timer: i32,
 }
 
 /// A laser beam (Laser in the original). The lit segment runs from
@@ -397,6 +402,18 @@ impl World {
         let draws = effect_rng_draws(effect_idx);
         for _ in 0..count.max(0) {
             self.effect_rng_queue.push(draws);
+        }
+    }
+
+    /// BulletManager::RemoveAllBullets(turnIntoItem=false): every live bullet
+    /// enters the DESPAWNING fade (drifts at half velocity over the 12-frame
+    /// donut anm) rather than vanishing instantly. Used by a non-timeout-spell
+    /// spell timeout (EnemyManager.cpp:421). Already-fading bullets are skipped.
+    pub fn despawn_all_bullets(&mut self) {
+        for b in &mut self.bullets {
+            if b.despawn_timer == 0 {
+                b.despawn_timer = 12;
+            }
         }
     }
 
@@ -1687,7 +1704,12 @@ impl Enemy {
             self.timer_cb_sub = self.death_callback;
             self.boss_timer = 0;
             if !self.timeout_spell {
-                // Timed out a damageable spell: forfeit capture + clear bullets.
+                // Timed out a non-timeout spell (EnemyManager.cpp:416-421): fade
+                // the field via RemoveAllBullets(0) inline — same frame as the
+                // timeout, before the bullet update runs, so the half-velocity
+                // drift starts on the right frame. The event carries the Stage-
+                // side state (capture flag, lasers); its despawn is then a no-op.
+                world.despawn_all_bullets();
                 world.events.push(WorldEvent::SpellTimeout);
             }
             self.reset_rank_influence();
@@ -1922,6 +1944,7 @@ pub fn spawn_bullet_pattern(world: &mut World, props: &BulletProps) {
                 ex_int1,
                 ex_count: 0,
                 grazed: false,
+                despawn_timer: 0,
             });
         }
     }

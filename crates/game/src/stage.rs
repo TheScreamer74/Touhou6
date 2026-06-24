@@ -1706,6 +1706,18 @@ impl Stage {
         }
         let player = self.world.player_pos;
         for b in &mut self.world.bullets {
+            // BULLET_STATE_DESPAWNING (BulletManager.cpp:947): a fading bullet
+            // drifts at half velocity over the 12-frame donut anm, then is
+            // removed (no ex-behaviour, no cull). (#14)
+            if b.despawn_timer > 0 {
+                b.pos[0] += b.angle.cos() * b.speed * 0.5;
+                b.pos[1] += b.angle.sin() * b.speed * 0.5;
+                b.despawn_timer -= 1;
+                if b.despawn_timer == 0 {
+                    b.oob_count = i32::MAX; // swept by the retain below
+                }
+                continue;
+            }
             b.timer += 1;
             // Ex behaviors, ported from BulletManager::OnUpdate.
             if b.ex_flags & 1 != 0 {
@@ -2349,37 +2361,40 @@ impl Stage {
                     self.events.push(Event::Sfx("cat00"));
                 }
                 WorldEvent::SpellcardEnd => {
+                    // SPELLCARDEND (EclManager.cpp): a no-op unless a spellcard is
+                    // active (isActive != 0). Only then does it run the bullet-
+                    // cancel DespawnBullets (+ capture bonus). Non-spell attacks —
+                    // e.g. the midboss opener — never set spell_active, so they
+                    // don't clear here; their timeout fades the field instead. (#14)
                     let captured = self.spell_active && self.spell_capturing;
                     if self.spell_active {
                         self.spell_result = 120;
                         self.spell_captured = self.spell_capturing;
+                        // Fly the name banner off (interrupt label 1, text.anm:130).
+                        if let Some(r) = &mut self.spell_name_runner {
+                            r.interrupt(1);
+                        }
+                        self.despawn_bullets(true);
+                        if captured {
+                            let base = SPELLCARD_SCORE
+                                .get(self.spell_id.max(0) as usize)
+                                .copied()
+                                .unwrap_or(0);
+                            let bonus = base + base * self.spell_secs.max(0) as i64 / 10;
+                            self.score += bonus;
+                            self.spell_bonus_amount = bonus;
+                            self.spell_bonus_timer = 280;
+                        }
                     }
                     self.spell_active = false;
-                    // Fly the name banner off (interrupt label 1, text.anm:130).
-                    if let Some(r) = &mut self.spell_name_runner {
-                        r.interrupt(1);
-                    }
-                    // Any spellcard end despawns the field for the bullet-cancel
-                    // bonus + BONUS popup (EclManager.cpp:755 DespawnBullets).
-                    self.despawn_bullets(true);
-                    // A captured card additionally awards score*(1 + secs/10)
-                    // (EclManager.cpp:759-766) with the "Spell Card Bonus!" popup.
-                    if captured {
-                        let base = SPELLCARD_SCORE
-                            .get(self.spell_id.max(0) as usize)
-                            .copied()
-                            .unwrap_or(0);
-                        let bonus = base + base * self.spell_secs.max(0) as i64 / 10;
-                        self.score += bonus;
-                        self.spell_bonus_amount = bonus;
-                        self.spell_bonus_timer = 280;
-                    }
                 }
                 WorldEvent::SpellTimeout => {
-                    // Ran the timer out on a damageable spell: no capture bonus,
-                    // and the field is wiped (EnemyManager.cpp:410-415).
+                    // Ran the timer out on a non-timeout spell: no capture bonus,
+                    // and the field fades via RemoveAllBullets(0) — the bullets
+                    // drift out over the donut anm rather than vanishing
+                    // (EnemyManager.cpp:421). (#14)
                     self.spell_capturing = false;
-                    self.world.bullets.clear();
+                    self.world.despawn_all_bullets();
                     self.cancel_lasers();
                 }
                 WorldEvent::BulletCancel => {
