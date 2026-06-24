@@ -152,6 +152,7 @@ fn main() {
     let mut debug_score: Option<i64> = None;
     let mut god = false;
     let mut probe_run = false;
+    let mut ecl_dump = false;
     let mut warp: Option<bool> = None; // Some(false) = midboss, Some(true) = boss
     let mut game_dir = String::from("../TH06 ~ The Embodiment of Scarlet Devil/kouma");
     while let Some(arg) = args.next() {
@@ -170,6 +171,7 @@ fn main() {
             "--score" => debug_score = Some(args.next().expect("--score <n>").parse().expect("score")),
             "--god" => god = true,
             "--probe-run" => probe_run = true,
+            "--ecl-dump" => ecl_dump = true,
             "--midboss" => warp = Some(false),
             "--boss" => warp = Some(true),
             "--game-dir" => game_dir = args.next().expect("--game-dir <path>"),
@@ -189,8 +191,12 @@ fn main() {
 
     let engine = Engine::new();
     // Headless dumps (screenshot / record / demo) run silent.
-    let with_audio =
-        screenshot.is_none() && record.is_none() && record_split.is_none() && demo.is_none() && !probe_run;
+    let with_audio = screenshot.is_none()
+        && record.is_none()
+        && record_split.is_none()
+        && demo.is_none()
+        && !probe_run
+        && !ecl_dump;
     let (textures, mut game) = build_game(&engine, &files, with_audio);
 
     let hiscore_path = game_dir.join("th06_hiscore.txt");
@@ -205,6 +211,42 @@ fn main() {
     // Safe: still single-threaded here, before the game/run loop starts.
     if god {
         unsafe { std::env::set_var("TH06_GOD", "1") };
+    }
+
+    // Full-VM oracle: run a stage's ECL from frame 0 with NO input (player fixed
+    // at spawn, no shots = no damage), dumping every live bullet per frame in the
+    // same format as oracle/vm/oracle_main.cpp. Diff to find any execution-layer
+    // divergence from the decomp.
+    if ecl_dump {
+        // The oracle's player is invincible (no collision); match that so the
+        // fixed player doesn't die and clear the field.
+        unsafe { std::env::set_var("TH06_GOD", "1") };
+        // The full-VM oracle stubs the Gui dialogue (Gui::MsgWait returns false),
+        // so its timeline never freezes for boss/midboss conversations. Match that
+        // here so the bullet comparison continues through the dialogue points
+        // instead of stalling on the real (faithful) text — dialogue timing is a
+        // Gui concern the oracle can't model, not an ECL/bullet concern.
+        unsafe { std::env::set_var("TH06_NO_DIALOGUE", "1") };
+        let ch = [Character::ReimuA, Character::ReimuB, Character::MarisaA, Character::MarisaB][debug_char.min(3)];
+        game.debug_start_stage(ch, debug_lives, debug_stage.saturating_sub(1), debug_power, debug_score);
+        let dump_enemies = std::env::var_os("DUMP_ENEMIES").is_some();
+        for fr in 0..frames {
+            game.update(&Input::default());
+            let mut lines: Vec<String> = if dump_enemies {
+                game.stage_enemies().iter().map(|e| format!("{:.4} {:.4}", e[0], e[1])).collect()
+            } else {
+                game.stage_bullets()
+                    .iter()
+                    .map(|b| format!("{:.4} {:.4} {:.4} {:.4}", b[0], b[1], b[2], b[3]))
+                    .collect()
+            };
+            lines.sort();
+            println!("F{fr} {}", lines.len());
+            for l in &lines {
+                println!(" {l}");
+            }
+        }
+        return;
     }
 
     // Drive a full god-mode run from the title and print the frame at every

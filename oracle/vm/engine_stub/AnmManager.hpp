@@ -1,0 +1,77 @@
+#include "AnmVm.hpp"
+#include "AnmIdx.hpp"
+#include "inttypes.hpp"
+namespace th06 {
+#pragma once
+
+
+// Sets a bullet/laser sprite. heightPx follows etama3: big-ball/fireball/dagger
+// sprite indices (110..129) are 32px (>=30 test), everything else 16px.
+struct AnmManager {
+    AnmLoadedSprite spritePool[1024];
+    // Real etama3 bullet sprite sizes (per type base range): w,h in px.
+    static void sizeFor(i32 s, f32* w, f32* h){
+        if (s>=14 && s<=29)       { *w=8;  *h=8;  }  // pellet
+        else if (s>=46 && s<=61)  { *w=14; *h=16; }  // rice
+        else if (s>=78 && s<=93)  { *w=14; *h=16; }  // kunai
+        else if (s>=94 && s<=109) { *w=14; *h=16; }  // shard
+        else if (s>=110 && s<=117){ *w=32; *h=32; }  // big-ball
+        else if (s>=118 && s<=121){ *w=30; *h=30; }  // fireball
+        else if (s>=122 && s<=129){ *w=32; *h=32; }  // dagger
+        else                      { *w=16; *h=16; }  // ring/ball/laser/etc
+    }
+    void setSprite(AnmVm* vm, i32 spriteIdx){
+        i32 i = spriteIdx & 1023;
+        sizeFor(spriteIdx, &spritePool[i].widthPx, &spritePool[i].heightPx);
+        vm->sprite = &spritePool[i];
+        vm->activeSpriteIndex = (i16)spriteIdx;
+    }
+    void SetActiveSprite(AnmVm* vm, i32 idx){ setSprite(vm, idx); }
+    static i32 baseForScript(i32 scriptIdx){
+        static const i32 BASE[10]={14,30,46,62,78,94,110,118,122,146};
+        i32 t=scriptIdx-0x200; return (t>=0&&t<10)?BASE[t]:0;
+    }
+    void SetAndExecuteScriptIdx(AnmVm* vm, i32 scriptIdx){
+        vm->anmFileIndex=(i16)scriptIdx;
+        // Enemy main-anm scripts (ANM_SCRIPT_ENEMY_START 0x100 .. 0x1a5): the real
+        // stgNenm fairy sprites in stage 5 are all 30x32 px (verified against the
+        // loaded enemy anm). The despawn (EnemyManager.cpp:549) reads this size, so
+        // it must be real, not the 16px fallback. Bosses never leave the field, so
+        // their (larger) size doesn't affect the despawn verified here.
+        if (scriptIdx >= 0x100 && scriptIdx <= 0x1a5) {
+            i32 i = scriptIdx & 1023;
+            spritePool[i].widthPx = 30; spritePool[i].heightPx = 32;
+            vm->sprite = &spritePool[i];
+            vm->activeSpriteIndex = (i16)scriptIdx;
+            vm->baseSpriteIndex = (i16)scriptIdx;
+            return;
+        }
+        vm->baseSpriteIndex=(i16)baseForScript(scriptIdx); setSprite(vm, vm->baseSpriteIndex);
+    }
+    void InitializeAndSetSprite(AnmVm* vm, i32 idx){ setSprite(vm, idx); }
+    // etama3 spawn-in script durations (ANM_SCRIPT_BULLET3_SPAWN_* rel 14..20).
+    static i32 spawnDur(i32 anmFileIndex){
+        switch (anmFileIndex - 0x200) {
+        case 11: case 12: case 13: return 12;   // SPAWN_DONUT small/medium/big (despawn fade)
+        case 14: case 17: return 10;            // FAST
+        case 15: case 18: return 16;            // NORMAL
+        case 16: case 19: case 20: return 32;   // SLOW / HUGE
+        default: return 1000000;                // non-spawn scripts never "end"
+        }
+    }
+    // Advance the vm's script clock; return nonzero once a spawn-in script ends
+    // (so BulletManager::OnUpdate transitions the bullet to FIRED) — matching the
+    // real anm timing. Other (looping) scripts return 0.
+    i32 ExecuteScript(AnmVm* vm){
+        vm->currentTimeInScript.Tick();
+        return vm->currentTimeInScript.current >= spawnDur(vm->anmFileIndex) ? 1 : 0;
+    }
+    template<class...A> i32 ExecuteScript(A...){ return 0; }
+    template<class...A> i32 Draw2(A...){ return 0; }
+    template<class...A> i32 Draw3(A...){ return 0; }
+    template<class...A> i32 Draw(A...){ return 0; }
+    template<class...A> i32 LoadAnm(A...){ return 0; }
+    template<class...A> void ReleaseAnm(A...){}
+};
+extern AnmManager* g_AnmManager;
+}

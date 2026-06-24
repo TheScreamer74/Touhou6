@@ -696,6 +696,9 @@ pub struct Stage {
     bomb_orbs: Vec<BombOrb>,
     items: Vec<Item>,
     particles: Vec<Particle>,
+    /// Cosmetic-only RNG for visual particle bursts (`spawn_burst`), kept
+    /// separate from the gameplay `world.rng` so effects never desync it (#26).
+    fx_rng: Rng,
     score: i64,
     /// Displayed score, rolled toward `score` each frame (Gui guiScore).
     gui_score: i64,
@@ -770,6 +773,16 @@ impl Stage {
                     instrs.iter().any(|i| i.opcode == 26 && i.arg_u32(0) != 0);
             }
         }
+        // Sprite height (px) per bullet type, from each type's base sprite — used
+        // by ex-instructions that only touch big bullets (e.g. Sakuya's redirect).
+        let mut bullet_heights = [0.0f32; 10];
+        let mut bullet_widths = [0.0f32; 10];
+        for (t, &base) in BULLET_BASE_SPRITE.iter().enumerate() {
+            if let Some(sp) = etama.sprites.iter().find(|s| s.index == base) {
+                bullet_heights[t] = sp.height;
+                bullet_widths[t] = sp.width;
+            }
+        }
         Self {
             tick: 0,
             anim: 0,
@@ -789,6 +802,11 @@ impl Stage {
                 character: character.is_marisa() as u8,
                 shot_type: matches!(character, Character::ReimuB | Character::MarisaB) as u8,
                 time_stopped: false,
+                bullet_heights,
+                bullet_widths,
+                effect_rng_queue: Vec::new(),
+                random_item_spawn_index: 0,
+                random_item_table_index: 0,
             },
             enemies: Vec::new(),
             anims: Vec::new(),
@@ -825,6 +843,7 @@ impl Stage {
             bomb_orbs: Vec::new(),
             items: Vec::new(),
             particles: Vec::new(),
+            fx_rng: Rng::new(0x4321),
             score: 0,
             gui_score: 0,
             next_score_inc: 0,
@@ -921,6 +940,17 @@ impl Stage {
     /// Current player x (headless auto-play harness).
     pub fn player_x(&self) -> f32 {
         self.pos[0]
+    }
+
+    /// Every live bullet as [pos.x, pos.y, angle, speed] — for the full-VM
+    /// oracle diff against the decomp.
+    pub fn bullets_dump(&self) -> Vec<[f32; 4]> {
+        self.world.bullets.iter().map(|b| [b.pos[0], b.pos[1], b.angle, b.speed]).collect()
+    }
+
+    /// Occupied enemy positions [x, y] — oracle diff (isolates movement).
+    pub fn enemies_dump(&self) -> Vec<[f32; 2]> {
+        self.enemies.iter().filter(|e| e.occupied).map(|e| [e.pos[0], e.pos[1]]).collect()
     }
 
     /// X of the boss if present, else the lowest (closest) live enemy — the
@@ -1051,6 +1081,9 @@ impl Stage {
             self.run_timeline();
         }
         self.update_enemies();
+        // EffectManager::OnUpdate (chain prio 10, between enemy 9 and bullet 11):
+        // draw the RNG for effects spawned this frame (enemy deaths, etc.). (#26)
+        self.world.update_effects();
         self.update_shots();
         self.update_bullets();
         self.update_items();
@@ -1248,7 +1281,17 @@ impl Stage {
                 continue;
             }
             e.frame_move();
-            if !e.update_bounds() {
+            // Current primaryVm sprite size (px) for the off-screen despawn test
+            // (EnemyManager.cpp:549). (0,0) until the first ANMSETMAIN runs.
+            let (sw, sh) = self
+                .anims
+                .get(i)
+                .and_then(|a| a.as_ref())
+                .and_then(|r| r.sprite)
+                .and_then(|idx| self.enemy_scripts.get(&e.anm_script).and_then(|s| s.sprites.get(&idx)))
+                .map(|sp| (sp.width, sp.height))
+                .unwrap_or((0.0, 0.0));
+            if !e.update_bounds(sw, sh) {
                 e.despawn(&mut self.world);
                 continue;
             }
@@ -1280,6 +1323,17 @@ impl Stage {
                 if e.occupied && !e.is_boss {
                     e.kill_as_trash(&self.ecl);
                 }
+            }
+        }
+
+        // Death-effect particles (EnemyManager.cpp:641-706): a dead interactable
+        // enemy queues its splash/bubble effects here, in EnemyManager::OnUpdate
+        // (before the bullet update), so their RNG draws land at the faithful
+        // point. The drop/score/removal stay in collide(); this only spawns the
+        // effects (and fires once via death_fx_done). (#26)
+        for e in &mut self.enemies {
+            if e.occupied && e.interactable && e.life <= 0 && !e.death_fx_done {
+                e.spawn_death_effects(&mut self.world);
             }
         }
 
@@ -1652,6 +1706,18 @@ impl Stage {
         }
         let player = self.world.player_pos;
         for b in &mut self.world.bullets {
+            // BULLET_STATE_DESPAWNING (BulletManager.cpp:947): a fading bullet
+            // drifts at half velocity over the 12-frame donut anm, then is
+            // removed (no ex-behaviour, no cull). (#14)
+            if b.despawn_timer > 0 {
+                b.pos[0] += b.angle.cos() * b.speed * 0.5;
+                b.pos[1] += b.angle.sin() * b.speed * 0.5;
+                b.despawn_timer -= 1;
+                if b.despawn_timer == 0 {
+                    b.oob_count = i32::MAX; // swept by the retain below
+                }
+                continue;
+            }
             b.timer += 1;
             // Ex behaviors, ported from BulletManager::OnUpdate.
             if b.ex_flags & 1 != 0 {
@@ -1718,16 +1784,40 @@ impl Stage {
             }
             let factor = if b.spawn_delay > 0 {
                 b.spawn_delay -= 1;
-                1.0 / 2.5
+                b.spawn_factor
             } else {
                 1.0
             };
             b.pos[0] += b.angle.cos() * move_speed * factor;
             b.pos[1] += b.angle.sin() * move_speed * factor;
+            // On the spawn->fired transition frame the decomp falls through into
+            // the FIRED case and applies a second, full-velocity move
+            // (BulletManager.cpp:698 then :895).
+            if factor != 1.0 && b.spawn_delay == 0 {
+                b.pos[0] += b.angle.cos() * move_speed;
+                b.pos[1] += b.angle.sin() * move_speed;
+            }
+            // Off-screen cull (BulletManager.cpp:896, only for FIRED bullets):
+            // GameManager::IsInBounds — the sprite (w x h, ~square) must overlap
+            // [0,FIELD_W] x [0,FIELD_H]. Normal bullets die on the first OOB frame;
+            // dir-change/bounce bullets (0x40/0x80/0x100/0x400/0x800) get 256.
+            if b.spawn_delay == 0 {
+                let (hw, hh) = (b.width / 2.0, b.height / 2.0);
+                let in_bounds = b.pos[0] + hw >= 0.0
+                    && b.pos[0] - hw <= FIELD_W
+                    && b.pos[1] + hh >= 0.0
+                    && b.pos[1] - hh <= FIELD_H;
+                let roamer = b.ex_flags & 0xdc0 != 0;
+                if in_bounds {
+                    b.oob_count = 0;
+                } else if !roamer && b.oob_count == 0 {
+                    b.oob_count = i32::MAX;
+                } else {
+                    b.oob_count += 1;
+                }
+            }
         }
-        self.world.bullets.retain(|b| {
-            b.pos[0] > -20.0 && b.pos[0] < FIELD_W + 20.0 && b.pos[1] > -20.0 && b.pos[1] < FIELD_H + 20.0
-        });
+        self.world.bullets.retain(|b| b.oob_count < 256);
 
         // Lasers (state machine from BulletManager::OnUpdate).
         for l in &mut self.world.lasers {
@@ -1952,6 +2042,13 @@ impl Stage {
     }
 
     fn start_dialogue(&mut self, idx: usize) {
+        // Oracle-comparison mode: skip dialogue so the timeline doesn't freeze
+        // (matches the full-VM oracle's stubbed Gui::MsgWait). The MsgWait
+        // timeline op then never holds, so the boss/midboss attack interrupts
+        // fire on schedule, exactly as in the stubbed decomp run.
+        if std::env::var_os("TH06_NO_DIALOGUE").is_some() {
+            return;
+        }
         let Some(&off) = self.msg.offsets.get(idx) else { return };
         self.dialogue = Dialogue { active: true, off, ..Default::default() };
         // Dialogue clears the field of bullets in practice.
@@ -2056,12 +2153,15 @@ impl Stage {
         self.items.push(Item::fall(pos, kind));
     }
 
-    /// Burst of fading puffs, used for enemy deaths and pickups.
+    /// Burst of fading puffs, used for enemy deaths and pickups. Purely cosmetic:
+    /// it draws from a SEPARATE `fx_rng`, never the gameplay `world.rng`, so the
+    /// visual particle jitter can't desync the decomp-faithful RNG stream (#26).
+    /// The faithful gameplay effect RNG is handled by World::spawn_particles.
     fn spawn_burst(&mut self, pos: [f32; 2], count: u32, speed: f32, color: [f32; 3], size: f32) {
         for i in 0..count {
             let a = i as f32 / count as f32 * std::f32::consts::TAU
-                + self.world.rng.f32_in_range(0.5);
-            let s = speed * (0.5 + self.world.rng.f32_zero_to_one());
+                + self.fx_rng.f32_in_range(0.5);
+            let s = speed * (0.5 + self.fx_rng.f32_zero_to_one());
             self.particles.push(Particle {
                 pos,
                 vel: [a.cos() * s, a.sin() * s],
@@ -2261,37 +2361,40 @@ impl Stage {
                     self.events.push(Event::Sfx("cat00"));
                 }
                 WorldEvent::SpellcardEnd => {
+                    // SPELLCARDEND (EclManager.cpp): a no-op unless a spellcard is
+                    // active (isActive != 0). Only then does it run the bullet-
+                    // cancel DespawnBullets (+ capture bonus). Non-spell attacks —
+                    // e.g. the midboss opener — never set spell_active, so they
+                    // don't clear here; their timeout fades the field instead. (#14)
                     let captured = self.spell_active && self.spell_capturing;
                     if self.spell_active {
                         self.spell_result = 120;
                         self.spell_captured = self.spell_capturing;
+                        // Fly the name banner off (interrupt label 1, text.anm:130).
+                        if let Some(r) = &mut self.spell_name_runner {
+                            r.interrupt(1);
+                        }
+                        self.despawn_bullets(true);
+                        if captured {
+                            let base = SPELLCARD_SCORE
+                                .get(self.spell_id.max(0) as usize)
+                                .copied()
+                                .unwrap_or(0);
+                            let bonus = base + base * self.spell_secs.max(0) as i64 / 10;
+                            self.score += bonus;
+                            self.spell_bonus_amount = bonus;
+                            self.spell_bonus_timer = 280;
+                        }
                     }
                     self.spell_active = false;
-                    // Fly the name banner off (interrupt label 1, text.anm:130).
-                    if let Some(r) = &mut self.spell_name_runner {
-                        r.interrupt(1);
-                    }
-                    // Any spellcard end despawns the field for the bullet-cancel
-                    // bonus + BONUS popup (EclManager.cpp:755 DespawnBullets).
-                    self.despawn_bullets(true);
-                    // A captured card additionally awards score*(1 + secs/10)
-                    // (EclManager.cpp:759-766) with the "Spell Card Bonus!" popup.
-                    if captured {
-                        let base = SPELLCARD_SCORE
-                            .get(self.spell_id.max(0) as usize)
-                            .copied()
-                            .unwrap_or(0);
-                        let bonus = base + base * self.spell_secs.max(0) as i64 / 10;
-                        self.score += bonus;
-                        self.spell_bonus_amount = bonus;
-                        self.spell_bonus_timer = 280;
-                    }
                 }
                 WorldEvent::SpellTimeout => {
-                    // Ran the timer out on a damageable spell: no capture bonus,
-                    // and the field is wiped (EnemyManager.cpp:410-415).
+                    // Ran the timer out on a non-timeout spell: no capture bonus,
+                    // and the field fades via RemoveAllBullets(0) — the bullets
+                    // drift out over the donut anm rather than vanishing
+                    // (EnemyManager.cpp:421). (#14)
                     self.spell_capturing = false;
-                    self.world.bullets.clear();
+                    self.world.despawn_all_bullets();
                     self.cancel_lasers();
                 }
                 WorldEvent::BulletCancel => {
@@ -2586,7 +2689,11 @@ impl Stage {
         for b in &self.world.bullets {
             let Some(sp) = self.bullet_sprites.get(&b.sprite) else { continue };
             let rot = if self.bullet_autorotate[bullet_type_of(b.sprite)] {
-                b.angle + std::f32::consts::FRAC_PI_2
+                // Decomp: rotation.z = pi/2 - angle, applied with the matrix
+                // [cos sin; -sin cos] (TranslateRotation). Our engine rotates with
+                // the opposite-handed [cos -sin; sin cos], so the equivalent angle
+                // is the negation: angle - pi/2.
+                b.angle - std::f32::consts::FRAC_PI_2
             } else {
                 0.0
             };

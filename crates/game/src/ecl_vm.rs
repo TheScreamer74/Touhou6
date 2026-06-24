@@ -119,7 +119,21 @@ pub struct Bullet {
     pub speed: f32,
     /// etama3 sprite index (type base + color offset).
     pub sprite: u32,
+    /// Colour offset within the bullet type's sprite group (the `spriteOffset`
+    /// the decomp tracks; ex-instructions test/overwrite it, e.g. Sakuya's
+    /// redirect sets it to 5).
+    pub sprite_offset: i32,
+    /// Sprite height in px (the type's `heightPx`), used by ex-instructions that
+    /// only affect "big" bullets (>= 30px).
+    pub height: f32,
+    /// Sprite width (px), for the off-screen IsInBounds cull (x axis).
+    pub width: f32,
     pub spawn_delay: u32,
+    /// Speed multiplier while `spawn_delay > 0` (the spawn-in slow-down).
+    pub spawn_factor: f32,
+    /// Frames spent out of bounds (BulletManager `unk_5c0`): normal bullets are
+    /// culled on the first OOB frame; dir-change/bounce bullets get 256 frames.
+    pub oob_count: i32,
     pub timer: i32,
     pub ex_flags: u32,
     /// flag 0x10: acceleration vector; 0x20: (speed delta, angle delta);
@@ -132,6 +146,11 @@ pub struct Bullet {
     pub ex_count: i32,
     /// Set once the bullet has been grazed, so it scores graze only once.
     pub grazed: bool,
+    /// BULLET_STATE_DESPAWNING (BulletManager.cpp:947): when > 0, the bullet is
+    /// fading out — it drifts at half velocity and is removed when this reaches
+    /// 0, running over the 12-frame donut anm. Set by a non-timeout-spell spell
+    /// timeout (RemoveAllBullets(0)); 0 means a normal live bullet. (#14)
+    pub despawn_timer: i32,
 }
 
 /// A laser beam (Laser in the original). The lit segment runs from
@@ -212,6 +231,14 @@ pub struct Enemy {
     timeout_spell: bool,
     has_been_in_bounds: bool,
     pub item_drop: i16,
+    /// ANMSETDEATH (op 100): death-effect anm indices. `death_anm1` is the
+    /// bubble pop (no RNG); `death_anm2 + 4` is the splash particle index into
+    /// g_Effects (RandomSplash → 2 RNG draws each). Used by the faithful death
+    /// EffectManager spawns (#26).
+    death_anm1: u8,
+    death_anm2: u8,
+    /// True once this enemy's death effects have been spawned (fire once).
+    pub death_fx_done: bool,
     // ANM presentation
     pub anm_script: i32,
     pub anm_poses: [i16; 5], // default, far left, far right, left, right
@@ -286,6 +313,9 @@ impl Default for Enemy {
             timeout_spell: false,
             has_been_in_bounds: false,
             item_drop: -1,
+            death_anm1: 0,
+            death_anm2: 0,
+            death_fx_done: false,
             anm_script: -1,
             anm_poses: [-1; 5],
             anm_pose_state: 0xff,
@@ -333,9 +363,72 @@ pub struct World {
     /// bullets freeze in place; toggled by EXINSCALL #4. The boss keeps moving
     /// and firing, so new bullets are laid down over the frozen field.
     pub time_stopped: bool,
+    /// Sprite height (px) per bullet type 0..9, from etama3.anm. Used by
+    /// ex-instructions that only touch "big" bullets (>= 30px).
+    pub bullet_heights: [f32; 10],
+    /// Sprite width (px) per bullet type 0..9, from etama3.anm. Used (with
+    /// height) by the off-screen IsInBounds cull.
+    pub bullet_widths: [f32; 10],
+    /// EffectManager (#26): particle effects spawned this frame, each holding
+    /// the number of `GetRandomF32ZeroToOne` draws its update callback makes on
+    /// its first tick (EffectManager.cpp). Drained by `update_effects`, which
+    /// runs between the enemy and bullet updates (chain prio 10) so the gameplay
+    /// RNG advances exactly as the decomp's. The real `g_Effects` callback table:
+    /// idx 3 / 4-11 = RandomSplash(Big) → 2 draws; 17-18 = Attract → 1; else 0.
+    pub effect_rng_queue: Vec<u32>,
+    /// EnemyManager::randomItemSpawnIndex / randomItemTableIndex (drive the
+    /// every-3rd random-item drop + its bigger death splash).
+    pub random_item_spawn_index: i32,
+    pub random_item_table_index: i32,
+}
+
+/// Number of `GetRandomF32ZeroToOne` draws each `g_Effects` entry's update
+/// callback makes on its first tick (EffectManager.cpp:18 table): indices 3 and
+/// 4..=11 are RandomSplash(Big) → 2; 17/18 are Attract(Slow) → 1; all others
+/// (bubbles 0-2, 12, cb4 13-15, spellcard bg 16, still 19) → 0.
+fn effect_rng_draws(effect_idx: i32) -> u32 {
+    match effect_idx {
+        3..=11 => 2,
+        17 | 18 => 1,
+        _ => 0,
+    }
 }
 
 impl World {
+    /// EffectManager::SpawnParticles — queues `count` effects of `effect_idx`.
+    /// No RNG here; the draws happen in `update_effects` (the callbacks' first
+    /// tick), exactly as the decomp splits spawn vs. update.
+    pub fn spawn_particles(&mut self, effect_idx: i32, count: i32) {
+        let draws = effect_rng_draws(effect_idx);
+        for _ in 0..count.max(0) {
+            self.effect_rng_queue.push(draws);
+        }
+    }
+
+    /// BulletManager::RemoveAllBullets(turnIntoItem=false): every live bullet
+    /// enters the DESPAWNING fade (drifts at half velocity over the 12-frame
+    /// donut anm) rather than vanishing instantly. Used by a non-timeout-spell
+    /// spell timeout (EnemyManager.cpp:421). Already-fading bullets are skipped.
+    pub fn despawn_all_bullets(&mut self) {
+        for b in &mut self.bullets {
+            if b.despawn_timer == 0 {
+                b.despawn_timer = 12;
+            }
+        }
+    }
+
+    /// EffectManager::OnUpdate (chain prio 10) — each effect spawned this frame
+    /// draws its callback's RNG on its first tick. The pool never fills in
+    /// practice, so every queued effect spawns and draws here, in spawn order.
+    pub fn update_effects(&mut self) {
+        let queue = std::mem::take(&mut self.effect_rng_queue);
+        for draws in queue {
+            for _ in 0..draws {
+                self.rng.f32_zero_to_one();
+            }
+        }
+    }
+
     fn alloc_laser(&mut self, laser: Laser) -> usize {
         if let Some(i) = self.lasers.iter().position(|l| !l.in_use) {
             self.lasers[i] = laser;
@@ -885,13 +978,17 @@ impl Enemy {
                 }
             }
             76 => {
-                // SHOOTINTERVAL
-                self.shoot_interval = instr.arg_i32(0) + self.shoot_interval_rank(world.rank);
+                // SHOOTINTERVAL (EclManager.cpp:429): set to the arg, THEN add the
+                // rank scaling computed from that new interval (not the old one).
+                self.shoot_interval = instr.arg_i32(0);
+                self.shoot_interval += self.shoot_interval_rank(world.rank);
                 self.shoot_timer = 0;
             }
             77 => {
-                // SHOOTINTERVALDELAYED
-                self.shoot_interval = instr.arg_i32(0) + self.shoot_interval_rank(world.rank);
+                // SHOOTINTERVALDELAYED (EclManager.cpp:434): same, plus a random
+                // initial timer in [0, interval).
+                self.shoot_interval = instr.arg_i32(0);
+                self.shoot_interval += self.shoot_interval_rank(world.rank);
                 if self.shoot_interval != 0 {
                     self.shoot_timer = world.rng.u32_in_range(self.shoot_interval as u32) as i32;
                 }
@@ -1070,7 +1167,12 @@ impl Enemy {
                 ];
                 self.anm_pose_state = 0xff;
             }
-            99 | 100 => {} // sub-slot anm, death anm
+            99 => {} // sub-slot anm
+            100 => {
+                // ANMSETDEATH (EclManager.cpp:422): 3 i8 death-effect anm indices.
+                self.death_anm1 = instr.args.first().copied().unwrap_or(0);
+                self.death_anm2 = instr.args.get(1).copied().unwrap_or(0);
+            }
             101 => {
                 // BOSSSET
                 let v = instr.arg_i32(0);
@@ -1289,12 +1391,89 @@ impl Enemy {
             }
             4 => {
                 // ExInsStage56Func4: param < 2 toggles Sakuya's time-stop
-                // (isTimeStopped = u8Param). The param >= 2 bullet-redirect branch
-                // needs per-bullet sprite-height tests our bullets lack — skipped.
+                // (isTimeStopped = u8Param). param >= 2 is the "misdirection"
+                // redirect: re-aim a capped number of big (>=30px) bullets and
+                // swap them to colour offset 5.
                 if param < 2 {
                     world.time_stopped = (param & 0xff) != 0;
+                } else {
+                    let normal = world.difficulty <= 1; // <= NORMAL
+                    let mut left: i32 = if normal { 14 } else { 52 };
+                    let player = world.player_pos;
+                    let rng = &mut world.rng;
+                    for b in world.bullets.iter_mut() {
+                        if b.height >= 30.0 && b.sprite_offset != 5 && rng.u16() % 4 == 0 {
+                            let base = (b.sprite as i32 - b.sprite_offset).max(0) as u32;
+                            b.sprite_offset = 5;
+                            b.sprite = base + 5;
+                            let dx = b.pos[0] - player[0];
+                            let dy = b.pos[1] - player[1];
+                            b.angle = if (dx * dx + dy * dy).sqrt() > 128.0 {
+                                if normal {
+                                    rng.f32_zero_to_one() * (3.0 * PI / 4.0) + PI / 4.0
+                                } else {
+                                    rng.f32_zero_to_one() * TAU
+                                }
+                            } else {
+                                // AngleFromPlayer (player -> bullet) + π/2 + rand(2π).
+                                dy.atan2(dx) + PI / 2.0 + rng.f32_in_range(TAU)
+                            };
+                            left -= 1;
+                            if left == 0 {
+                                break;
+                            }
+                        }
+                    }
                 }
                 self.ctx.ivars[2] = 0; // var2 = 0
+            }
+            5 => {
+                // ExInsStage5Func5: Sakuya's knife fan (sprite 8 = dagger), fired
+                // every 9 frames in a player-relative rotated arc. Driven by
+                // EXINSREPEAT (var2 = frame counter). EnemyEclInstr.cpp:655.
+                let var2 = self.ctx.ivars[2];
+                if var2 % 9 == 0 {
+                    let pp = var2 / 9;
+                    let normal = world.difficulty <= 1;
+                    let mut props = BulletProps {
+                        sprite: 8,
+                        aim_mode: 0,
+                        count1: if normal { 1 } else { 3 },
+                        count2: 1,
+                        angle2: PI / 6.0,
+                        flags: 0,
+                        speed1: 2.0,
+                        sprite_offset: 3,
+                        ..Default::default()
+                    };
+                    let mut mo = [world.player_pos[0] - self.pos[0], world.player_pos[1] - self.pos[1]];
+                    let len = (mo[0] * mo[0] + mo[1] * mo[1]).sqrt();
+                    let mut mi = if len > 0.0 { [mo[0] / len, mo[1] / len] } else { [0.0, 0.0] };
+                    let mat_in_seed = if pp & 1 != 0 { -256.0 } else { 256.0 };
+                    mi = [mi[0] * mat_in_seed, mi[1] * mat_in_seed];
+                    let mat_out_seed = 0.5 - pp as f32 * 0.5 / 9.0;
+                    mo = [mo[0] * mat_out_seed, mo[1] * mat_out_seed];
+                    let bp_offset = [mo[0] + mi[0], mo[1] + mi[1]];
+                    mi = [-mi[0], -mi[1]];
+                    // Rotate by +pi/4, then by -pi/18 each of the 9 bullets.
+                    let (c, s) = ((PI / 4.0).cos(), (PI / 4.0).sin());
+                    mi = [mi[0] * c + mi[1] * s, -mi[0] * s + mi[1] * c];
+                    let (co, so) = ((-PI / 18.0).cos(), (-PI / 18.0).sin());
+                    let mut bullet_angle = -PI / 4.0;
+                    for _ in 0..9 {
+                        mi = [mi[0] * co + mi[1] * so, -mi[0] * so + mi[1] * co];
+                        props.pos = [mi[0] + self.pos[0] + bp_offset[0], mi[1] + self.pos[1] + bp_offset[1]];
+                        props.speed1 = 2.0;
+                        if (pp & 1) != 0 && normal {
+                            props.angle1 = bullet_angle;
+                        }
+                        props.sprite_offset = 3;
+                        spawn_bullet_pattern(world, &props);
+                        bullet_angle += PI / 18.0;
+                    }
+                    world.events.push(WorldEvent::Sfx(7)); // SOUND_7
+                }
+                self.ctx.ivars[2] += 1;
             }
             13 => {
                 // ExInsStageXFunc13: a radial burst of `param` arms from the
@@ -1452,13 +1631,52 @@ impl Enemy {
         }
     }
 
+    /// Queue this enemy's death particle effects (EnemyManager.cpp:641-706 —
+    /// the `SpawnParticles` calls only; drops/score/removal stay in collide()).
+    /// `death_anm1` is the bubble pop (no RNG), `death_anm2 + 4` the splash
+    /// (RandomSplash → 2 RNG each). Every death mode runs the after-switch pair;
+    /// mode 3 also pops three bubbles first, modes 0/1/2 add the item splash.
+    pub fn spawn_death_effects(&mut self, world: &mut World) {
+        if self.death_fx_done {
+            return;
+        }
+        self.death_fx_done = true;
+        let a1 = self.death_anm1 as i32;
+        let a2 = self.death_anm2 as i32 + 4;
+        if self.death_mode == 3 {
+            world.spawn_particles(a1, 1);
+            world.spawn_particles(a1, 1);
+            world.spawn_particles(a1, 1);
+        } else if self.item_drop >= 0 {
+            world.spawn_particles(a2, 3);
+        } else if self.item_drop == -1 {
+            // ITEM_RANDOM_ITEM: every 3rd drop gets the bigger splash.
+            if world.random_item_spawn_index % 3 == 0 {
+                world.spawn_particles(a2, 6);
+                world.random_item_table_index += 1;
+                if world.random_item_table_index >= 16 {
+                    world.random_item_table_index = 0;
+                }
+            }
+            world.random_item_spawn_index += 1;
+        }
+        // After the switch, for every death mode (EnemyManager.cpp:699-700).
+        world.spawn_particles(a1, 1);
+        world.spawn_particles(a2, 4);
+    }
+
     /// Bounds bookkeeping; returns false when the enemy should despawn.
-    pub fn update_bounds(&mut self) -> bool {
-        let margin = 32.0;
-        let inside = self.pos[0] + margin >= 0.0
-            && self.pos[0] - margin <= FIELD_W
-            && self.pos[1] + margin >= 0.0
-            && self.pos[1] - margin <= FIELD_H;
+    /// `(w, h)` is the enemy's current `primaryVm.sprite` size in px — the decomp
+    /// (EnemyManager.cpp:549) tests `GameManager::IsInBounds(pos, sprite->widthPx,
+    /// heightPx)`: the sprite rect must overlap [0,FIELD_W]x[0,FIELD_H]. `(0,0)`
+    /// before the first ANMSETMAIN sets a sprite — then the enemy is still off
+    /// screen at spawn, so `has_been_in_bounds` is never set and it can't despawn.
+    pub fn update_bounds(&mut self, w: f32, h: f32) -> bool {
+        let (hw, hh) = (w / 2.0, h / 2.0);
+        let inside = self.pos[0] + hw >= 0.0
+            && self.pos[0] - hw <= FIELD_W
+            && self.pos[1] + hh >= 0.0
+            && self.pos[1] - hh <= FIELD_H;
         if !self.has_been_in_bounds && inside {
             self.has_been_in_bounds = true;
         }
@@ -1490,7 +1708,12 @@ impl Enemy {
             self.timer_cb_sub = self.death_callback;
             self.boss_timer = 0;
             if !self.timeout_spell {
-                // Timed out a damageable spell: forfeit capture + clear bullets.
+                // Timed out a non-timeout spell (EnemyManager.cpp:416-421): fade
+                // the field via RemoveAllBullets(0) inline — same frame as the
+                // timeout, before the bullet update runs, so the half-velocity
+                // drift starts on the right frame. The event carries the Stage-
+                // side state (capture flag, lasers); its despawn is then a no-op.
+                world.despawn_all_bullets();
                 world.events.push(WorldEvent::SpellTimeout);
             }
             self.reset_rank_influence();
@@ -1666,9 +1889,22 @@ pub fn spawn_bullet_pattern(world: &mut World, props: &BulletProps) {
                 .get(props.sprite.max(0) as usize)
                 .copied()
                 .unwrap_or(30);
-            // Spawn-effect flags delay the live bullet slightly in the
-            // original; approximated as a fixed delay.
-            let spawn_delay = if props.flags & (2 | 4 | 8) != 0 { 8 } else { 0 };
+            // Spawn-in effect (BulletManager.cpp:683-708): while spawning, the
+            // bullet moves at velocity/2 (FAST flag 2), /2.5 (NORMAL flag 4) or
+            // /3 (SLOW flag 8) for the spawn anm-script's length, then snaps to
+            // full speed. Durations from etama3.anm: FAST 10 / NORMAL 16 / SLOW 32
+            // frames; the big types (>=6, which use SPAWN_BIG_BALL_HUGE) are 32
+            // for every state.
+            let big = props.sprite >= 6;
+            let (spawn_delay, spawn_factor) = if props.flags & 2 != 0 {
+                (if big { 32 } else { 10 }, 0.5)
+            } else if props.flags & 4 != 0 {
+                (if big { 32 } else { 16 }, 1.0 / 2.5)
+            } else if props.flags & 8 != 0 {
+                (32u32, 1.0 / 3.0)
+            } else {
+                (0u32, 1.0)
+            };
             // Ex-behavior setup, ported from SpawnSingleBullet.
             let mut ex_accel = [0.0f32; 2];
             let mut ex_f = [0.0f32; 2];
@@ -1692,11 +1928,17 @@ pub fn spawn_bullet_pattern(world: &mut World, props: &BulletProps) {
                 ex_int0 = props.ex_ints[0];
                 ex_int1 = props.ex_ints[1];
             }
+            let bullet_type = props.sprite.clamp(0, 9) as usize;
             world.bullets.push(Bullet {
                 pos: props.pos,
                 angle,
                 speed,
                 sprite: base + props.sprite_offset.max(0) as u32,
+                spawn_factor,
+                oob_count: 0,
+                sprite_offset: props.sprite_offset.max(0),
+                height: world.bullet_heights[bullet_type],
+                width: world.bullet_widths[bullet_type],
                 spawn_delay,
                 timer: 0,
                 ex_flags: props.flags,
@@ -1706,6 +1948,7 @@ pub fn spawn_bullet_pattern(world: &mut World, props: &BulletProps) {
                 ex_int1,
                 ex_count: 0,
                 grazed: false,
+                despawn_timer: 0,
             });
         }
     }

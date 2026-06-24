@@ -483,6 +483,24 @@ impl Game {
     }
 
     /// Headless auto-play aim: (player_x, target_x) while in a stage.
+    /// Live bullets [x,y,angle,speed] of the current stage (full-VM oracle diff).
+    pub fn stage_bullets(&self) -> Vec<[f32; 4]> {
+        if let Scene::Stage(s) = &self.scene {
+            s.bullets_dump()
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Occupied enemy positions [x,y] of the current stage (oracle diff).
+    pub fn stage_enemies(&self) -> Vec<[f32; 2]> {
+        if let Scene::Stage(s) = &self.scene {
+            s.enemies_dump()
+        } else {
+            Vec::new()
+        }
+    }
+
     pub fn stage_aim(&self) -> Option<(f32, Option<f32>)> {
         if let Scene::Stage(s) = &self.scene {
             Some((s.player_x(), s.target_x()))
