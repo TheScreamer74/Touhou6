@@ -1221,7 +1221,14 @@ impl Enemy {
             }
             116 => self.timer_cb_sub = instr.arg_i32(0),
             117 => self.interactable = instr.arg_i32(0) != 0,
-            118 => {} // EFFECTPARTICLE — effect system pending
+            118 => {
+                // EFFECTPARTICLE (EclManager.cpp): spawn numParticles effects of
+                // effectId at the enemy. Their RNG draws (RandomSplash etc.) land
+                // in update_effects, like death effects. (#23/#30)
+                let effect_id = instr.arg_i32(0);
+                let count = instr.arg_i32(1);
+                world.spawn_particles(effect_id, count);
+            }
             119 => {
                 // DROPITEMS (exact port: big power first unless maxed)
                 let n = instr.arg_i32(0);
