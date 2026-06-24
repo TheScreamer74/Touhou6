@@ -1094,7 +1094,7 @@ impl Stage {
         // Stage clear: timeline exhausted and field empty.
         if matches!(self.state, PlayerState::Alive)
             && self.timeline_done()
-            && self.enemies.is_empty()
+            && !self.enemies.iter().any(|e| e.occupied)
             && !self.world.boss_present
         {
             let bonus = stage_clear_bonus(
@@ -1259,17 +1259,33 @@ impl Stage {
             );
         }
         if let Some(e) = Enemy::spawn(&self.ecl, &mut self.world, &req) {
-            self.enemies.push(e);
-            self.anims.push(None);
+            self.insert_enemy(e);
         }
         self.flush_spawns();
     }
 
+    /// EnemyManager::SpawnEnemy (EnemyManager.cpp:92): place the enemy in the
+    /// first free slot (lowest index with `!occupied`), reusing slots freed by
+    /// dead enemies, exactly like the decomp's fixed `enemies[]` pool. Slots are
+    /// never compacted/reordered, so the processing (and bullet-firing) order
+    /// stays decomp-faithful. (#30)
+    fn insert_enemy(&mut self, e: Enemy) {
+        if let Some(slot) = self.enemies.iter().position(|x| !x.occupied) {
+            self.enemies[slot] = e;
+            self.anims[slot] = None;
+        } else {
+            self.enemies.push(e);
+            self.anims.push(None);
+        }
+    }
+
     fn flush_spawns(&mut self) {
-        while let Some(req) = self.world.pending_spawns.pop() {
+        // FIFO: the decomp spawns sequentially in creation order, each taking the
+        // next free slot. Draining front-to-back preserves that order.
+        while !self.world.pending_spawns.is_empty() {
+            let req = self.world.pending_spawns.remove(0);
             if let Some(e) = Enemy::spawn(&self.ecl, &mut self.world, &req) {
-                self.enemies.push(e);
-                self.anims.push(None);
+                self.insert_enemy(e);
             }
         }
     }
@@ -1351,19 +1367,8 @@ impl Stage {
                 e.spawn_death_effects(&mut self.world);
             }
         }
-
-        // Compact dead slots.
-        let mut kept_anims = Vec::with_capacity(self.anims.len());
-        let mut idx = 0;
-        self.enemies.retain(|e| {
-            let keep = e.occupied;
-            if keep {
-                kept_anims.push(self.anims[idx].take());
-            }
-            idx += 1;
-            keep
-        });
-        self.anims = kept_anims;
+        // No compaction: dead slots (occupied=false) stay in place and are reused
+        // by insert_enemy, keeping the slot pool decomp-faithful. (#30)
     }
 
     fn update_player(&mut self, input: &Input) {
