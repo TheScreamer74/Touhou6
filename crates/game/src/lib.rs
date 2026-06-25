@@ -545,6 +545,7 @@ impl Game {
             src: [0.0, 0.0, 1.0, 1.0],
             tint: [c, c, c, 1.0],
             rot: 0.0,
+            additive: false,
         };
         let mut cmds = vec![full(bg, 1.0)];
 
@@ -555,6 +556,7 @@ impl Game {
             src: [0.0, 0.0, 1.0, 1.0],
             tint: [1.0, 1.0, 1.0, 1.0],
             rot: 0.0,
+            additive: false,
         });
 
         // "Select your player" prompt banner (select03 sprite 0), top.
@@ -564,6 +566,7 @@ impl Game {
             src: [0.0, 0.0, 1.0, 64.0 / 256.0],
             tint: [1.0, 1.0, 1.0, 1.0],
             rot: 0.0,
+            additive: false,
         });
 
         // The four shot-name banners (select04, 256x48 each), stacked right;
@@ -578,6 +581,7 @@ impl Game {
                 src: [0.0, v0, 1.0, v1],
                 tint: [c, c, c, 1.0],
                 rot: 0.0,
+                additive: false,
             });
         }
 
@@ -593,6 +597,7 @@ impl Game {
             src: [0.25, 0.25, 0.75, 0.75],
             tint: [0.02, 0.0, 0.05, 1.0],
             rot: 0.0,
+            additive: false,
         }
     }
 
@@ -623,6 +628,7 @@ impl Game {
                     src: [0.25, 0.25, 0.75, 0.75],
                     tint: [0.4, 0.4, 0.1, 0.8],
                     rot: 0.0,
+                    additive: false,
                 });
             }
             stage::draw_text(&mut cmds, [x, y], 18.0, tint, &ch.to_string());

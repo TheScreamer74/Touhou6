@@ -118,6 +118,7 @@ impl Title {
             src: [0.0, 0.0, 1.0, 1.0],
             tint: [1.0, 1.0, 1.0, 1.0],
             rot: 0.0,
+            additive: false,
         }];
         let [tw, th] = self.tex_size;
         for (i, r) in self.runners.iter().enumerate() {
@@ -144,6 +145,7 @@ impl Title {
                 src: [sp.x / tw, sp.y / th, (sp.x + sp.width) / tw, (sp.y + sp.height) / th],
                 tint: [c, c, c, r.alpha],
                 rot: 0.0,
+                additive: false,
             });
         }
         cmds

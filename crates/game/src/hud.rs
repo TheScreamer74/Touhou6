@@ -76,6 +76,7 @@ impl Hud {
                 src: [sx / ts, sy / ts, (sx + sw) / ts, (sy + sh) / ts],
                 tint: [1.0, 1.0, 1.0, alpha],
                 rot: 0.0,
+                additive: false,
             });
         }
     }
@@ -109,6 +110,7 @@ impl Hud {
                 src: [x / ts, y / ts, (x + w) / ts, (y + h) / ts],
                 tint: [1.0, 1.0, 1.0, r.alpha],
                 rot: r.rotation,
+                additive: false,
             });
         }
     }

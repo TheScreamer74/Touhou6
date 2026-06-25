@@ -138,6 +138,8 @@ pub struct DrawCmd {
     pub src: [f32; 4],
     pub tint: [f32; 4],
     pub rot: f32,
+    /// Additive (One) blend instead of alpha — glows/particles. Defaults false.
+    pub additive: bool,
 }
 
 pub struct Texture {
@@ -439,11 +441,29 @@ impl Engine {
     }
 
     fn make_pipeline(&self, format: wgpu::TextureFormat) -> wgpu::RenderPipeline {
+        self.make_pipeline_mode(format, false)
+    }
+
+    /// `additive` = SrcAlpha/One blend (glow particles, laser balls), matching
+    /// the original's AnmVmBlendMode_One; otherwise standard alpha.
+    fn make_pipeline_mode(&self, format: wgpu::TextureFormat, additive: bool) -> wgpu::RenderPipeline {
         let layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
             bind_group_layouts: &[&self.bind_layout],
             push_constant_ranges: &[],
         });
+        let blend = if additive {
+            wgpu::BlendState {
+                color: wgpu::BlendComponent {
+                    src_factor: wgpu::BlendFactor::SrcAlpha,
+                    dst_factor: wgpu::BlendFactor::One,
+                    operation: wgpu::BlendOperation::Add,
+                },
+                alpha: wgpu::BlendComponent::OVER,
+            }
+        } else {
+            wgpu::BlendState::ALPHA_BLENDING
+        };
         self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("sprite"),
             layout: Some(&layout),
@@ -463,7 +483,7 @@ impl Engine {
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    blend: Some(blend),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
@@ -570,11 +590,13 @@ impl Engine {
         verts
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn encode_pass(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         target: &wgpu::TextureView,
         pipeline: &wgpu::RenderPipeline,
+        pipeline_add: &wgpu::RenderPipeline,
         vbuf: &wgpu::Buffer,
         cmds: &[DrawCmd],
         textures: &[&Texture],
@@ -596,16 +618,18 @@ impl Engine {
             timestamp_writes: None,
             occlusion_query_set: None,
         });
-        pass.set_pipeline(pipeline);
         pass.set_vertex_buffer(0, vbuf.slice(..));
-        // One draw per run of consecutive commands sharing a texture.
+        // One draw per run of consecutive commands sharing a texture AND blend
+        // mode; the pipeline (alpha vs additive) is switched per run.
         let mut start = 0usize;
         while start < cmds.len() {
             let tex = cmds[start].tex;
+            let add = cmds[start].additive;
             let mut end = start;
-            while end < cmds.len() && cmds[end].tex == tex {
+            while end < cmds.len() && cmds[end].tex == tex && cmds[end].additive == add {
                 end += 1;
             }
+            pass.set_pipeline(if add { pipeline_add } else { pipeline });
             pass.set_bind_group(0, &textures[tex].bind_group, &[]);
             pass.draw(start as u32 * 6..end as u32 * 6, 0..1);
             start = end;
@@ -649,6 +673,7 @@ impl Engine {
         });
         let view = target.create_view(&Default::default());
         let pipeline = self.make_pipeline(format);
+        let pipeline_add = self.make_pipeline_mode(format, true);
         let vbuf = self.vertex_buffer(cmds);
 
         let mut encoder = self.device.create_command_encoder(&Default::default());
@@ -658,7 +683,7 @@ impl Engine {
             let depth = self.depth_texture(SCREEN_W, SCREEN_H);
             self.encode_bg(&mut encoder, &view, &depth, &bg_pipeline, &bg_pipeline_add, scene, textures, (SCREEN_W, SCREEN_H));
         }
-        self.encode_pass(&mut encoder, &view, &pipeline, &vbuf, cmds, textures, bg.is_some());
+        self.encode_pass(&mut encoder, &view, &pipeline, &pipeline_add, &vbuf, cmds, textures, bg.is_some());
 
         let bytes_per_row = SCREEN_W * 4; // 2560, already 256-aligned
         let readback = self.device.create_buffer(&wgpu::BufferDescriptor {
@@ -716,6 +741,7 @@ impl Engine {
             window: None,
             surface: None,
             pipeline: None,
+            pipeline_add: None,
             autoshot: std::env::var("TH06_AUTOSHOT").ok().filter(|s| !s.is_empty()),
             tick_count: 0,
             #[cfg(target_arch = "wasm32")]
@@ -843,6 +869,7 @@ struct App {
     window: Option<Arc<Window>>,
     surface: Option<wgpu::Surface<'static>>,
     pipeline: Option<wgpu::RenderPipeline>,
+    pipeline_add: Option<wgpu::RenderPipeline>,
     /// TH06_AUTOSHOT=<dir>: dump an offscreen PNG every 60 ticks during live
     /// play so playtests can be reviewed after the fact.
     autoshot: Option<String>,
@@ -918,6 +945,7 @@ impl ApplicationHandler for App {
             },
         );
         self.pipeline = Some(self.engine.make_pipeline(format));
+        self.pipeline_add = Some(self.engine.make_pipeline_mode(format, true));
         self.bg_pipeline = Some(self.engine.make_bg_pipeline(format));
         self.bg_pipeline_add = Some(self.engine.make_bg_pipeline_mode(format, true));
         self.surface_size = (size.width.max(1), size.height.max(1));
@@ -982,9 +1010,10 @@ impl ApplicationHandler for App {
                     }
                 }
 
-                let (Some(surface), Some(pipeline), Some(bg_pipeline), Some(bg_pipeline_add), Some(depth)) = (
+                let (Some(surface), Some(pipeline), Some(pipeline_add), Some(bg_pipeline), Some(bg_pipeline_add), Some(depth)) = (
                     &self.surface,
                     &self.pipeline,
+                    &self.pipeline_add,
                     &self.bg_pipeline,
                     &self.bg_pipeline_add,
                     &self.depth,
@@ -1009,7 +1038,7 @@ impl ApplicationHandler for App {
                     );
                 }
                 self.engine
-                    .encode_pass(&mut encoder, &view, pipeline, &vbuf, &self.cmds, &tex_refs, self.bg.is_some());
+                    .encode_pass(&mut encoder, &view, pipeline, pipeline_add, &vbuf, &self.cmds, &tex_refs, self.bg.is_some());
                 self.engine.queue.submit([encoder.finish()]);
                 frame.present();
                 if let Some(w) = &self.window {

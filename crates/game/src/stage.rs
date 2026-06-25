@@ -2514,6 +2514,7 @@ impl Stage {
                         src: [gx / 256.0, gy / 256.0, (gx + gw) / 256.0, (gy + gh) / 256.0],
                         tint: [0.95, 0.35, 0.6, a.max(0.0)],
                         rot: t * 0.015 * (i as f32 + 1.0),
+                        additive: false,
                     });
                 }
             }
@@ -2549,6 +2550,7 @@ impl Stage {
                 src: [u0, sy / th, u1, (sy + sp.height) / th],
                 tint: [1.0, 1.0, 1.0, anim.alpha],
                 rot: 0.0,
+                additive: false,
             });
         }
 
@@ -2578,6 +2580,7 @@ impl Stage {
                 src: [sp.x / btw, sp.y / bth, (sp.x + sp.width) / btw, (sp.y + sp.height) / bth],
                 tint: [1.0, 1.0, 1.0, 1.0],
                 rot: 0.0,
+                additive: false,
             });
         }
 
@@ -2603,6 +2606,7 @@ impl Stage {
                     src: [0.25, 0.25, 0.75, 0.75],
                     tint: [0.7, 0.5, 1.0, 0.55 + 0.2 * (self.anim as f32 * 0.5).sin()],
                     rot: 0.0,
+                    additive: false,
                 });
             }
         }
@@ -2632,6 +2636,7 @@ impl Stage {
                     src: [u0, sp.y / pth, u1, (sp.y + sp.height) / pth],
                     tint: [1.0, 1.0, 1.0, 1.0],
                     rot: 0.0,
+                    additive: false,
                 });
             }
             // Floating option orbs (appear at power >= 8).
@@ -2695,6 +2700,7 @@ impl Stage {
                 src: [0.25, 0.25, 0.75, 0.75],
                 tint: [1.0, 0.6, 0.7, a],
                 rot: 0.0,
+                additive: false,
             });
             cmds.push(DrawCmd {
                 tex: TEX_WHITE,
@@ -2702,6 +2708,7 @@ impl Stage {
                 src: [0.25, 0.25, 0.75, 0.75],
                 tint: [1.0, 0.6, 0.7, a],
                 rot: 0.0,
+                additive: false,
             });
         }
 
@@ -2729,6 +2736,7 @@ impl Stage {
                 src: [0.25, 0.25, 0.75, 0.75],
                 tint: [p.color[0], p.color[1], p.color[2], a * 0.8],
                 rot: 0.0,
+                additive: false,
             });
         }
 
@@ -2748,6 +2756,7 @@ impl Stage {
                 src: [sp.x / etw, sp.y / eth, (sp.x + sp.width) / etw, (sp.y + sp.height) / eth],
                 tint: [e.color[0], e.color[1], e.color[2], e.runner.alpha * e.color[3]],
                 rot: e.runner.rotation,
+                additive: e.runner.additive,
             });
         }
 
@@ -2776,6 +2785,7 @@ impl Stage {
                 src: [sp.x / tw, sp.y / th, (sp.x + sp.width) / tw, (sp.y + sp.height) / th],
                 tint: [1.0, 1.0, 1.0, 1.0],
                 rot,
+                additive: false,
             });
         }
 
@@ -2808,6 +2818,7 @@ impl Stage {
                     src: [sp.x / tw, sp.y / th, (sp.x + sp.width) / tw, (sp.y + sp.height) / th],
                     tint: [1.0, 1.0, 1.0, 1.0],
                     rot: l.angle,
+                    additive: false,
                 });
             } else {
                 // Fallback (sprite missing): a tinted rect.
@@ -2818,6 +2829,7 @@ impl Stage {
                     src: [0.25, 0.25, 0.75, 0.75],
                     tint,
                     rot: l.angle,
+                    additive: false,
                 });
             }
             // Glowing ball at the laser base, while it is warming up or active.
@@ -2832,6 +2844,7 @@ impl Stage {
                         src: [sp.x / tw, sp.y / th, (sp.x + sp.width) / tw, (sp.y + sp.height) / th],
                         tint: [1.0, 1.0, 1.0, 1.0],
                         rot: 0.0,
+                        additive: false,
                     });
                 }
             }
@@ -2872,6 +2885,7 @@ impl Stage {
                     src: [psx / 256.0, 0.0, (psx + 128.0) / 256.0, 1.0],
                     tint: [1.0, 1.0, 1.0, r.alpha],
                     rot: 0.0,
+                    additive: false,
                 });
             }
         }
@@ -2898,6 +2912,7 @@ impl Stage {
                         src: [sx / ts, sy / ts, (sx + sw) / ts, (sy + sh) / ts],
                         tint: [1.0, 1.0, 1.0, r.alpha],
                         rot: 0.0,
+                        additive: false,
                     });
                 }
                 // Name text: 15px glyphs scaled by the VM, centred at `cx`.
@@ -2940,6 +2955,7 @@ impl Stage {
                     src: [flip_u0, 0.0, flip_u1, 1.0],
                     tint: [c, c, c, 1.0],
                     rot: 0.0,
+                    additive: false,
                 });
             }
 
@@ -3035,6 +3051,7 @@ impl Stage {
                 src: [sx / ts, sy / ts, (sx + sw) / ts, (sy + sh) / ts],
                 tint: [1.0, 1.0, 1.0, alpha],
                 rot: 0.0,
+                additive: false,
             });
         }
 
@@ -3048,6 +3065,7 @@ impl Stage {
                 src: [sx / ts, sy / ts, (sx + sw) / ts, (sy + sh) / ts],
                 tint: [1.0, 1.0, 1.0, alpha],
                 rot: 0.0,
+                additive: false,
             });
         }
 
@@ -3126,6 +3144,7 @@ impl Stage {
                 src: [0.25, 0.5, 0.75, 0.5],
                 tint: [1.0, 1.0, 1.0, 1.0],
                 rot: 0.0,
+                additive: false,
             });
         }
         if power >= 128 {
@@ -3307,6 +3326,7 @@ fn draw_num_scaled(cmds: &mut Vec<DrawCmd>, pos: [f32; 2], scale: f32, tint: [f3
                 ],
                 tint,
                 rot: 0.0,
+                additive: false,
             });
         }
         x += 14.0 * scale;
@@ -3337,6 +3357,7 @@ pub fn draw_text(cmds: &mut Vec<DrawCmd>, pos: [f32; 2], size: f32, tint: [f32; 
                 ],
                 tint,
                 rot: 0.0,
+                additive: false,
             });
         }
         x += size * 0.75;
@@ -3344,7 +3365,7 @@ pub fn draw_text(cmds: &mut Vec<DrawCmd>, pos: [f32; 2], size: f32, tint: [f32; 
 }
 
 fn rect(dst: [f32; 4], tint: [f32; 4]) -> DrawCmd {
-    DrawCmd { tex: TEX_WHITE, dst, src: [0.25, 0.25, 0.75, 0.75], tint, rot: 0.0 }
+    DrawCmd { tex: TEX_WHITE, dst, src: [0.25, 0.25, 0.75, 0.75], tint, rot: 0.0, additive: false }
 }
 
 fn sprite_at(s: SpriteRef, field_pos: [f32; 2], alpha: f32) -> DrawCmd {
@@ -3355,6 +3376,7 @@ fn sprite_at(s: SpriteRef, field_pos: [f32; 2], alpha: f32) -> DrawCmd {
         src: [x / 256.0, y / 256.0, (x + w) / 256.0, (y + h) / 256.0],
         tint: [1.0, 1.0, 1.0, alpha],
         rot: 0.0,
+        additive: false,
     }
 }
 

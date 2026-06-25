@@ -44,6 +44,9 @@ pub struct AnmRunner {
     pub corner: bool,
     /// Horizontal mirror (opcode 7).
     pub flip_x: bool,
+    /// op13/14 blend mode: true = additive (One) glow, e.g. the etama4 particle
+    /// glows and laser base balls. Drawn with SrcAlpha/One instead of alpha.
+    pub additive: bool,
     /// True once the script set its own position (opcode 17) — distinguishes
     /// self-placing HUD labels from elements the game positions each frame.
     pub positioned: bool,
@@ -68,6 +71,7 @@ impl AnmRunner {
             fade: None,
             corner: false,
             flip_x: false,
+            additive: false,
             positioned: false,
         };
         runner.exec_ready();
@@ -205,6 +209,8 @@ impl AnmRunner {
                     return;
                 }
                 23 => self.corner = true,
+                13 => self.additive = true,
+                14 => self.additive = false,
                 _ => {}
             }
             self.pc += 1;
