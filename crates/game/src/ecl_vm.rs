@@ -34,6 +34,9 @@ impl Rng {
     pub fn u32_in_range(&mut self, range: u32) -> u32 {
         if range != 0 { self.u32() % range } else { 0 }
     }
+    pub fn u16_in_range(&mut self, range: u16) -> u16 {
+        if range != 0 { self.u16() % range } else { 0 }
+    }
     pub fn f32_in_range(&mut self, range: f32) -> f32 {
         self.f32_zero_to_one() * range
     }
@@ -208,6 +211,10 @@ pub struct Enemy {
     pub bullet_props: BulletProps,
     shoot_interval: i32,
     shoot_timer: i32,
+    /// Remilia bat-wing EXINS (idx 6) state: the wing-flap timer (ramps the
+    /// spawn rate) and the slowly-oscillating base wing angle.
+    exins_func6_timer: i32,
+    exins_func6_angle: f32,
     interrupts: [i32; 8],
     run_interrupt: i32,
     lasers: [Option<usize>; 32],
@@ -291,6 +298,8 @@ impl Default for Enemy {
             bullet_props: BulletProps::default(),
             shoot_interval: 0,
             shoot_timer: 0,
+            exins_func6_timer: 0,
+            exins_func6_angle: 0.0,
             interrupts: [-1; 8],
             run_interrupt: -1,
             lasers: [None; 32],
@@ -468,6 +477,37 @@ impl World {
             } else {
                 self.effects.push(Some(eff));
             }
+        }
+    }
+
+    /// Spawn one effect and seed its `unk_11c`/`unk_128` motion, as the bat-wing
+    /// EXINS does (EnemyEclInstr.cpp:774). The Still callback then drifts it.
+    pub fn spawn_particle_moving(
+        &mut self,
+        effect_idx: i32,
+        pos: [f32; 3],
+        color: [f32; 4],
+        vel: [f32; 3],
+        accel: [f32; 3],
+    ) {
+        let (script, cb) = g_effects(effect_idx);
+        let Some(instrs) = self.eff_scripts.get(&script).cloned() else { return };
+        let eff = Effect {
+            in_use: true,
+            pos,
+            vel,
+            accel,
+            anchor: pos,
+            dir: [0.0; 3],
+            timer: 0,
+            cb,
+            color,
+            runner: AnmRunner::new(instrs),
+        };
+        if let Some(slot) = self.effects.iter_mut().find(|e| e.is_none()) {
+            *slot = Some(eff);
+        } else {
+            self.effects.push(Some(eff));
         }
     }
 
@@ -1632,6 +1672,45 @@ impl Enemy {
                     self.ctx.fvars[3] = world.rng.f32_in_range(m) + (96.0 - m / 2.0); // float3
                 }
             }
+            6 => {
+                // ExInsBatWingEffect (EnemyEclInstr.cpp:737) — Remilia's bat
+                // wings: a deep-blue glow-particle (effect 19) spray along an
+                // oscillating wing angle, ramping faster the longer it runs.
+                // Suppressed while she is invisible (mid-transition).
+                if self.invisible {
+                    return; // ResetEffectArray: the port has no per-enemy effect list
+                }
+                let deg = PI / 180.0;
+                self.exins_func6_angle += deg;
+                if self.exins_func6_angle >= 45.0 * deg {
+                    self.exins_func6_angle -= 90.0 * deg;
+                }
+                let t = self.exins_func6_timer;
+                let fire = t > 120
+                    || (t > 60 && t % 2 == 0)
+                    || (t > 30 && t % 4 == 0)
+                    || t % 8 == 0;
+                if fire {
+                    let bam = t % 16;
+                    let bam = world.rng.u16_in_range((bam / 2) as u16) as i32 + bam / 2;
+                    let dist = (bam as f32 * 160.0) / 16.0 + 32.0;
+                    let final_angle = self.exins_func6_angle - (bam as f32 * PI) / 40.0;
+                    let dvy = (8.0 * bam as f32) / 60.0 - 4.0 / 15.0;
+                    let color = [0.188, 0.188, 1.0, 1.0]; // COLOR_DEEPBLUE 0xff3030ff
+                    for side in [1.0f32, -1.0] {
+                        let p = [
+                            self.pos[0] + side * final_angle.cos() * dist,
+                            self.pos[1] + final_angle.sin() * dist,
+                            self.pos[2],
+                        ];
+                        let vx = (world.rng.f32_zero_to_one() * 40.0 - 20.0) / 60.0;
+                        let vel = [vx, dvy, 0.0];
+                        let accel = [-vel[0] / 120.0, -vel[1] / 120.0, 0.0];
+                        world.spawn_particle_moving(19, p, color, vel, accel);
+                    }
+                }
+                self.exins_func6_timer += 1;
+            }
             7 => {
                 // ExInsStage6Func7 (EnemyEclInstr.cpp:795) — Remilia's laser-star
                 // card: two counter-rotating rings of 8 arms, each arm laying 3
@@ -1777,9 +1856,9 @@ impl Enemy {
                     b.ex_accel = [a.cos() * 0.01, a.sin() * 0.01];
                 }
             }
-            // idx 6,10 need the bat-wing particle subsystem (the port has no
-            // renderable EffectManager); idx 12,14,15 are other stages. Left
-            // unimplemented per the no-approx rule.
+            // idx 10 (bat transformation) needs player-bomb state threaded into
+            // the ECL world; idx 12,14,15 are other stages. Left unimplemented
+            // per the no-approx rule.
             _ => {}
         }
     }
