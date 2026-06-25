@@ -3,6 +3,9 @@
 //! BulletManager.cpp) opcode by opcode. Coordinates are playfield-local
 //! (384x448, origin top-left), matching the original.
 
+use crate::anm_vm::AnmRunner;
+use std::collections::HashMap;
+use th06_formats::anm0::Instr as AnmInstr;
 use th06_formats::ecl::{Ecl, Instr};
 
 pub const FIELD_W: f32 = 384.0;
@@ -369,39 +372,102 @@ pub struct World {
     /// Sprite width (px) per bullet type 0..9, from etama3.anm. Used (with
     /// height) by the off-screen IsInBounds cull.
     pub bullet_widths: [f32; 10],
-    /// EffectManager (#26): particle effects spawned this frame, each holding
-    /// the number of `GetRandomF32ZeroToOne` draws its update callback makes on
-    /// its first tick (EffectManager.cpp). Drained by `update_effects`, which
-    /// runs between the enemy and bullet updates (chain prio 10) so the gameplay
-    /// RNG advances exactly as the decomp's. The real `g_Effects` callback table:
-    /// idx 3 / 4-11 = RandomSplash(Big) → 2 draws; 17-18 = Attract → 1; else 0.
-    pub effect_rng_queue: Vec<u32>,
+    /// EffectManager (#26, #17): live particle effects. Each runs its g_Effects
+    /// update callback (which draws the gameplay RNG on its first tick) and an
+    /// etama4 ANM script for the visual. `update_effects` runs them between the
+    /// enemy and bullet updates (chain prio 10) so the RNG advances exactly as
+    /// the decomp's. `eff_scripts` are the etama4 per-script ANM instructions
+    /// used to build each effect's runner.
+    pub effects: Vec<Option<Effect>>,
+    pub eff_scripts: HashMap<u32, Vec<AnmInstr>>,
     /// EnemyManager::randomItemSpawnIndex / randomItemTableIndex (drive the
     /// every-3rd random-item drop + its bigger death splash).
     pub random_item_spawn_index: i32,
     pub random_item_table_index: i32,
 }
 
-/// Number of `GetRandomF32ZeroToOne` draws each `g_Effects` entry's update
-/// callback makes on its first tick (EffectManager.cpp:18 table): indices 3 and
-/// 4..=11 are RandomSplash(Big) → 2; 17/18 are Attract(Slow) → 1; all others
-/// (bubbles 0-2, 12, cb4 13-15, spellcard bg 16, still 19) → 0.
-fn effect_rng_draws(effect_idx: i32) -> u32 {
+/// A live particle effect (EffectManager.cpp). `pos` is the drawn position
+/// (`pos1`); `vel`/`accel` the splash motion (`unk_11c`/`unk_128`); `anchor`/
+/// `dir` the Attract pivot (`position`/`pos2`). The `runner` plays the etama4
+/// ANM script for the visual.
+pub struct Effect {
+    pub in_use: bool,
+    pub pos: [f32; 3],
+    vel: [f32; 3],
+    accel: [f32; 3],
+    anchor: [f32; 3],
+    dir: [f32; 3],
+    timer: i32,
+    cb: EffCb,
+    pub color: [f32; 4],
+    pub runner: AnmRunner,
+}
+
+/// The g_Effects update-callback column (EffectManager.cpp:18).
+#[derive(Clone, Copy, PartialEq)]
+enum EffCb {
+    None,
+    RandomSplash,
+    RandomSplashBig,
+    Still,
+    Attract,
+    AttractSlow,
+}
+
+/// g_Effects[effect_idx] -> (etama4 local script id, update callback).
+/// Scripts are etama4's local ids (ANM_SCRIPT_BULLET4_START + N). Effect 16 is
+/// the spellcard background (a different anm); mapped to script 0 / None so it
+/// neither draws RNG nor renders a particle.
+fn g_effects(effect_idx: i32) -> (u32, EffCb) {
     match effect_idx {
-        3..=11 => 2,
-        17 | 18 => 1,
-        _ => 0,
+        0 => (3, EffCb::None),         // bubble explosion small
+        1 => (4, EffCb::None),         // bubble explosion spiral
+        2 => (5, EffCb::None),         // bubble explosion normal
+        3 => (6, EffCb::RandomSplashBig), // glow 1
+        4 => (9, EffCb::RandomSplash), // white particle
+        5 => (10, EffCb::RandomSplash),
+        6 => (11, EffCb::RandomSplash),
+        7 => (12, EffCb::RandomSplash),
+        8 => (13, EffCb::RandomSplash), // small particles
+        9 => (14, EffCb::RandomSplash),
+        10 => (15, EffCb::RandomSplash),
+        11 => (16, EffCb::RandomSplash),
+        12 => (17, EffCb::None),
+        13 | 14 | 15 => (18, EffCb::None), // bubble cb4 (3D, no RNG) — anm only
+        16 => (0, EffCb::None),            // spellcard bg (different anm); no particle
+        17 => (7, EffCb::Attract),         // glow 2
+        18 => (8, EffCb::AttractSlow),     // glow 3
+        19 => (19, EffCb::Still),
+        _ => (0, EffCb::None),
     }
 }
 
 impl World {
-    /// EffectManager::SpawnParticles — queues `count` effects of `effect_idx`.
-    /// No RNG here; the draws happen in `update_effects` (the callbacks' first
-    /// tick), exactly as the decomp splits spawn vs. update.
-    pub fn spawn_particles(&mut self, effect_idx: i32, count: i32) {
-        let draws = effect_rng_draws(effect_idx);
+    /// EffectManager::SpawnParticles (EffectManager.cpp:195) — allocate `count`
+    /// effects of `effect_idx` at `pos`, each cycling `next_effect_index` to the
+    /// next free slot. No RNG here; the callbacks draw on their first OnUpdate
+    /// tick. `color` tints the etama4 sprite (white = unchanged).
+    pub fn spawn_particles(&mut self, effect_idx: i32, pos: [f32; 3], count: i32, color: [f32; 4]) {
+        let (script, cb) = g_effects(effect_idx);
+        let Some(instrs) = self.eff_scripts.get(&script).cloned() else { return };
         for _ in 0..count.max(0) {
-            self.effect_rng_queue.push(draws);
+            let eff = Effect {
+                in_use: true,
+                pos,
+                vel: [0.0; 3],
+                accel: [0.0; 3],
+                anchor: pos,
+                dir: [0.0; 3],
+                timer: 0,
+                cb,
+                color,
+                runner: AnmRunner::new(instrs.clone()),
+            };
+            if let Some(slot) = self.effects.iter_mut().find(|e| e.is_none()) {
+                *slot = Some(eff);
+            } else {
+                self.effects.push(Some(eff));
+            }
         }
     }
 
@@ -417,14 +483,63 @@ impl World {
         }
     }
 
-    /// EffectManager::OnUpdate (chain prio 10) — each effect spawned this frame
-    /// draws its callback's RNG on its first tick. The pool never fills in
-    /// practice, so every queued effect spawns and draws here, in spawn order.
+    /// EffectManager::OnUpdate (chain prio 10, EffectManager.cpp:250) — run each
+    /// live effect's callback (which draws the gameplay RNG on its first tick),
+    /// then tick its ANM runner; free the slot when the script ends. Runs between
+    /// the enemy and bullet updates so the RNG advances exactly as the decomp's.
     pub fn update_effects(&mut self) {
-        let queue = std::mem::take(&mut self.effect_rng_queue);
-        for draws in queue {
-            for _ in 0..draws {
-                self.rng.f32_zero_to_one();
+        let pi = std::f32::consts::PI;
+        let tau = std::f32::consts::TAU;
+        for slot in &mut self.effects {
+            let Some(e) = slot else { continue };
+            let tick0 = e.timer == 0;
+            match e.cb {
+                EffCb::RandomSplash => {
+                    if tick0 {
+                        e.vel[0] = (self.rng.f32_zero_to_one() * 256.0 - 128.0) / 12.0;
+                        e.vel[1] = (self.rng.f32_zero_to_one() * 256.0 - 128.0) / 12.0;
+                        e.accel = [-e.vel[0] / 19.0, -e.vel[1] / 19.0, 0.0];
+                    }
+                    for k in 0..3 {
+                        e.pos[k] += e.vel[k];
+                        e.vel[k] += e.accel[k];
+                    }
+                }
+                EffCb::RandomSplashBig => {
+                    if tick0 {
+                        e.vel[0] = (self.rng.f32_zero_to_one() * 256.0 - 128.0) * 4.0 / 33.0;
+                        e.vel[1] = (self.rng.f32_zero_to_one() * 256.0 - 128.0) * 4.0 / 33.0;
+                        e.accel = [-e.vel[0] / 20.0, -e.vel[1] / 20.0, 0.0];
+                    }
+                    for k in 0..3 {
+                        e.pos[k] += e.vel[k];
+                        e.vel[k] += e.accel[k];
+                    }
+                }
+                EffCb::Still => {
+                    for k in 0..3 {
+                        e.pos[k] += e.vel[k];
+                        e.vel[k] += e.accel[k];
+                    }
+                }
+                EffCb::Attract | EffCb::AttractSlow => {
+                    let span = if e.cb == EffCb::Attract { 60.0 } else { 240.0 };
+                    if tick0 {
+                        e.anchor = e.pos;
+                        let a = self.rng.f32_zero_to_one() * tau - pi;
+                        e.dir = [a.cos(), a.sin(), 0.0];
+                    }
+                    let r = 256.0 - e.timer as f32 * 256.0 / span;
+                    for k in 0..3 {
+                        e.pos[k] = r * e.dir[k] + e.anchor[k];
+                    }
+                }
+                EffCb::None => {}
+            }
+            e.runner.tick();
+            e.timer += 1;
+            if e.runner.ended() {
+                *slot = None;
             }
         }
     }
@@ -1227,7 +1342,7 @@ impl Enemy {
                 // in update_effects, like death effects. (#23/#30)
                 let effect_id = instr.arg_i32(0);
                 let count = instr.arg_i32(1);
-                world.spawn_particles(effect_id, count);
+                world.spawn_particles(effect_id, self.pos, count, [1.0; 4]);
             }
             119 => {
                 // DROPITEMS (exact port: big power first unless maxed)
@@ -1621,7 +1736,7 @@ impl Enemy {
                 // its distance from the boss scaled by pi/256, plus a single
                 // shared random offset. One f32 draw total + a particle burst.
                 let rand_mod = world.rng.f32_in_range(TAU) - PI;
-                world.spawn_particles(12, 1);
+                world.spawn_particles(12, self.pos, 1, [1.0; 4]);
                 let (ex, ey) = (self.pos[0], self.pos[1]);
                 for b in world.bullets.iter_mut() {
                     if b.despawn_timer != 0 || b.height >= 30.0 || b.speed != 0.0 {
@@ -1646,7 +1761,7 @@ impl Enemy {
                 // f32 draw per bullet), plus one discarded draw up front and a
                 // particle burst.
                 let _ = world.rng.f32_in_range(TAU) - PI;
-                world.spawn_particles(12, 1);
+                world.spawn_particles(12, self.pos, 1, [1.0; 4]);
                 for b in world.bullets.iter_mut() {
                     if b.despawn_timer != 0 || b.height >= 30.0 || b.speed != 0.0 {
                         continue;
@@ -1796,15 +1911,15 @@ impl Enemy {
         let a1 = self.death_anm1 as i32;
         let a2 = self.death_anm2 as i32 + 4;
         if self.death_mode == 3 {
-            world.spawn_particles(a1, 1);
-            world.spawn_particles(a1, 1);
-            world.spawn_particles(a1, 1);
+            world.spawn_particles(a1, self.pos, 1, [1.0; 4]);
+            world.spawn_particles(a1, self.pos, 1, [1.0; 4]);
+            world.spawn_particles(a1, self.pos, 1, [1.0; 4]);
         } else if self.item_drop >= 0 {
-            world.spawn_particles(a2, 3);
+            world.spawn_particles(a2, self.pos, 3, [1.0; 4]);
         } else if self.item_drop == -1 {
             // ITEM_RANDOM_ITEM: every 3rd drop gets the bigger splash.
             if world.random_item_spawn_index % 3 == 0 {
-                world.spawn_particles(a2, 6);
+                world.spawn_particles(a2, self.pos, 6, [1.0; 4]);
                 world.random_item_table_index += 1;
                 if world.random_item_table_index >= 16 {
                     world.random_item_table_index = 0;
@@ -1813,8 +1928,8 @@ impl Enemy {
             world.random_item_spawn_index += 1;
         }
         // After the switch, for every death mode (EnemyManager.cpp:699-700).
-        world.spawn_particles(a1, 1);
-        world.spawn_particles(a2, 4);
+        world.spawn_particles(a1, self.pos, 1, [1.0; 4]);
+        world.spawn_particles(a2, self.pos, 4, [1.0; 4]);
     }
 
     /// Bounds bookkeeping; returns false when the enemy should despawn.

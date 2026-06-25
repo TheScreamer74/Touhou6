@@ -653,6 +653,10 @@ pub struct Stage {
     enemy_scripts: HashMap<i32, ScriptRef>,
     bullet_sprites: HashMap<u32, Sprite>,
     bullet_tex_size: [f32; 2],
+    /// etama4 (effect) sprite table + texture for rendering particles.
+    eff_sprites: HashMap<u32, Sprite>,
+    eff_tex: usize,
+    eff_tex_size: [f32; 2],
     /// Per bullet-type (etama3.anm scripts 0..9) "auto-rotate" flag (anm op 26):
     /// directional bullets (rice/kunai/shard/dagger) face their travel angle,
     /// round ones don't. Read from etama3.anm, not hard-coded.
@@ -758,8 +762,15 @@ pub struct Stage {
 }
 
 impl Stage {
-    pub fn new(ecl: Ecl, enemy_scripts: HashMap<i32, ScriptRef>, etama: &Entry, player: &Entry, player_tex: usize, character: Character, msg: Msg, background: Option<Background>, hud: Hud, cfg: StageConfig, spell_name_script: Vec<AnmInstr>, portrait_script: Vec<AnmInstr>) -> Self {
+    pub fn new(ecl: Ecl, enemy_scripts: HashMap<i32, ScriptRef>, etama: &Entry, eff: &Entry, eff_tex: usize, player: &Entry, player_tex: usize, character: Character, msg: Msg, background: Option<Background>, hud: Hud, cfg: StageConfig, spell_name_script: Vec<AnmInstr>, portrait_script: Vec<AnmInstr>) -> Self {
         let timeline_off = ecl.timeline_offset;
+        // etama4 (effect) ANM: per-script instructions for the runners, and the
+        // shared sprite table + texture for rendering particles.
+        let eff_scripts: HashMap<u32, Vec<AnmInstr>> =
+            eff.scripts.iter().map(|(id, instrs)| (*id, instrs.clone())).collect();
+        let eff_sprites: HashMap<u32, Sprite> =
+            eff.sprites.iter().map(|s| (s.index, s.clone())).collect();
+        let eff_tex_size = [eff.width as f32, eff.height as f32];
         let player_scripts: HashMap<i32, Vec<AnmInstr>> =
             player.scripts.iter().map(|(id, instrs)| (*id as i32, instrs.clone())).collect();
         let idle = player_scripts.get(&0).cloned().unwrap_or_default();
@@ -804,7 +815,8 @@ impl Stage {
                 time_stopped: false,
                 bullet_heights,
                 bullet_widths,
-                effect_rng_queue: Vec::new(),
+                effects: Vec::new(),
+                eff_scripts,
                 random_item_spawn_index: 0,
                 random_item_table_index: 0,
             },
@@ -815,6 +827,9 @@ impl Stage {
             enemy_scripts,
             bullet_sprites: etama.sprites.iter().map(|s| (s.index, s.clone())).collect(),
             bullet_tex_size: [etama.width as f32, etama.height as f32],
+            eff_sprites,
+            eff_tex,
+            eff_tex_size,
             bullet_autorotate,
             character,
             player_tex,
@@ -2714,6 +2729,25 @@ impl Stage {
                 src: [0.25, 0.25, 0.75, 0.75],
                 tint: [p.color[0], p.color[1], p.color[2], a * 0.8],
                 rot: 0.0,
+            });
+        }
+
+        // Particle effects (etama4) via each effect's ANM runner — death
+        // splashes, item-attract glows, etc. Drawn under the bullets. (NOTE: the
+        // glow sprites are additively blended in the original; the engine only
+        // does alpha tint, so glows read slightly dim — #17.)
+        let [etw, eth] = self.eff_tex_size;
+        for e in self.world.effects.iter().flatten() {
+            let Some(idx) = e.runner.sprite else { continue };
+            let Some(sp) = self.eff_sprites.get(&idx) else { continue };
+            let w = sp.width * e.runner.scale[0].abs();
+            let h = sp.height * e.runner.scale[1].abs();
+            cmds.push(DrawCmd {
+                tex: self.eff_tex,
+                dst: [FIELD_X + e.pos[0] - w / 2.0, FIELD_Y + e.pos[1] - h / 2.0, w, h],
+                src: [sp.x / etw, sp.y / eth, (sp.x + sp.width) / etw, (sp.y + sp.height) / eth],
+                tint: [e.color[0], e.color[1], e.color[2], e.runner.alpha * e.color[3]],
+                rot: e.runner.rotation,
             });
         }
 

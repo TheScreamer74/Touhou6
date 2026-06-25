@@ -95,6 +95,8 @@ struct Assets {
     player_marisa: Anm0,
     player_marisa_tex: usize,
     etama: Anm0,
+    etama4: Anm0,
+    etama4_tex: usize,
     front: Anm0,
     text: Anm0,
     face_chara: Anm0,
@@ -141,7 +143,8 @@ impl Assets {
             .map(|(_, i)| i.clone())
             .unwrap_or_default();
         Stage::new(
-            ecl, scripts, &self.etama.entries[0], player_anm, player_tex, character, msg,
+            ecl, scripts, &self.etama.entries[0], &self.etama4.entries[0], self.etama4_tex,
+            player_anm, player_tex, character, msg,
             background, hud, cfg, spell_name_script, portrait_script,
         )
     }
@@ -264,6 +267,9 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
     // HUD power bar is the decomp's exact per-vertex gradient (Gui.cpp:1162-1163).
     debug_assert_eq!(textures.len(), stage::TEX_POWER_GRAD);
     textures.push(engine.create_texture(&[224, 224, 224, 255, 128, 224, 224, 255], 2, 1));
+    // 14: etama4 (particle/effect sprite sheet). Fixed slot before the dynamic
+    // per-stage textures.
+    let etama4_tex = load(&files.cm, "etama4.png", Some("etama4_a.png"), &mut textures);
 
     // Per-stage sprite sheets + boss faces, appended after the fixed slots.
     let mut stages: Vec<StageData> = Vec::new();
@@ -330,6 +336,8 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
         player_marisa: Anm0::parse(&files.cm["player01.anm"]).expect("parse player01"),
         player_marisa_tex,
         etama: Anm0::parse(&files.cm["etama3.anm"]).expect("parse etama3"),
+        etama4: Anm0::parse(&files.cm["etama4.anm"]).expect("parse etama4"),
+        etama4_tex,
         front: Anm0::parse(&files.cm["front.anm"]).expect("parse front"),
         text: Anm0::parse(&files.inn["text.anm"]).expect("parse text"),
         face_chara: Anm0::parse(&files.cm["face00a.anm"]).expect("parse face00a"),

@@ -78,6 +78,12 @@ impl AnmRunner {
         !self.dead && self.sprite.is_some()
     }
 
+    /// The script reached its end opcode (0) — the decomp frees the owning
+    /// effect when `ExecuteScript` reports this.
+    pub fn ended(&self) -> bool {
+        self.dead
+    }
+
     /// Jump to the section after interrupt label `n` and resume.
     pub fn interrupt(&mut self, n: u32) {
         if self.dead {
