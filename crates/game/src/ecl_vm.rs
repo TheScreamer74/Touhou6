@@ -351,7 +351,6 @@ pub enum WorldEvent {
     SpellTimeout,
     BulletCancel,
     BossSet(bool),
-    EnemyDeath([f32; 2]),
     DropItem([f32; 2], i32),
 }
 
@@ -2086,7 +2085,6 @@ impl Enemy {
     pub fn on_death(&mut self, ecl: &Ecl, world: &mut World) {
         self.life_cb_threshold = -1;
         self.timer_cb_threshold = -1;
-        world.events.push(WorldEvent::EnemyDeath([self.pos[0], self.pos[1]]));
         match self.death_mode {
             3 => {
                 self.life = 1;

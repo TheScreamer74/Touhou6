@@ -2445,10 +2445,6 @@ impl Stage {
                     // BossSet also fires for the midboss, which keeps the stage
                     // theme.
                 }
-                WorldEvent::EnemyDeath(pos) => {
-                    self.spawn_burst(pos, 10, 3.0, [1.0, 0.95, 0.7], 10.0);
-                    self.events.push(Event::Sfx("enep00"));
-                }
                 WorldEvent::DropItem(pos, kind) => {
                     if kind >= 0 {
                         self.items.push(Item::fall(pos, kind));
