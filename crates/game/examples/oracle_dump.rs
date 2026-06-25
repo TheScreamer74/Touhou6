@@ -22,6 +22,7 @@ fn make_world() -> World {
         character: 0,
         shot_type: 0,
         time_stopped: false,
+        bomb_active: false,
         bullet_heights: [0.0; 10],
         bullet_widths: [0.0; 10],
         effects: Vec::new(),
