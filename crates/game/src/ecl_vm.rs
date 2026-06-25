@@ -1776,7 +1776,7 @@ impl Enemy {
         }
     }
 
-    fn clamp(&mut self) {
+    pub fn clamp(&mut self) {
         if self.clamp_pos {
             self.pos[0] = self.pos[0].clamp(self.lower_bound[0], self.upper_bound[0]);
             self.pos[1] = self.pos[1].clamp(self.lower_bound[1], self.upper_bound[1]);

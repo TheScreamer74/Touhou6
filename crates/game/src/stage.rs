@@ -1335,6 +1335,7 @@ impl Stage {
             self.enemies[i].handle_callbacks(&self.ecl, &mut self.world);
             self.apply_kill_trash(); // timeout/life-callback kill, before this enemy's RunEcl
             self.enemies[i].run_ecl(&self.ecl, &mut self.world);
+            self.enemies[i].clamp(); // ClampPos again after RunEcl (EnemyManager.cpp:571)
             self.apply_kill_trash(); // ENEMYKILLALL during RunEcl
             // Boss timer ticks once per frame per enemy, unless time is stopped
             // (EnemyManager.cpp:735).
