@@ -1311,8 +1311,14 @@ impl Stage {
     }
 
     fn update_enemies(&mut self) {
-        for i in 0..self.enemies.len() {
+        // Dynamic bound (the decomp loops over a fixed enemies[256]): a child
+        // created mid-loop by ENEMYCREATE lands in a free slot and, if that slot
+        // is ahead of the parent, must be processed THIS frame too — so we re-read
+        // the length each iteration rather than freezing it at loop start.
+        let mut i = 0;
+        while i < self.enemies.len() {
             if !self.enemies[i].occupied {
+                i += 1;
                 continue;
             }
             self.enemies[i].frame_move();
@@ -1330,6 +1336,7 @@ impl Stage {
             };
             if !self.enemies[i].update_bounds(sw, sh) {
                 self.enemies[i].despawn(&mut self.world);
+                i += 1;
                 continue;
             }
             self.enemies[i].handle_callbacks(&self.ecl, &mut self.world);
@@ -1337,6 +1344,11 @@ impl Stage {
             self.enemies[i].run_ecl(&self.ecl, &mut self.world);
             self.enemies[i].clamp(); // ClampPos again after RunEcl (EnemyManager.cpp:571)
             self.apply_kill_trash(); // ENEMYKILLALL during RunEcl
+            // Place ENEMYCREATE children into free slots immediately, as the
+            // decomp's SpawnEnemy does mid-loop (EnemyManager.cpp:856/110): a
+            // child in a slot ahead of its parent then gets its own RunEcl this
+            // same frame via the loop above, keeping its ECL clock in step.
+            self.flush_spawns();
             // Boss timer ticks once per frame per enemy, unless time is stopped
             // (EnemyManager.cpp:735).
             if !self.world.time_stopped {
@@ -1355,6 +1367,7 @@ impl Stage {
             if let Some(anim) = &mut self.anims[i] {
                 anim.tick();
             }
+            i += 1;
         }
         self.flush_spawns();
 
