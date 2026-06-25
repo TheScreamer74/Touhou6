@@ -2818,7 +2818,7 @@ impl Stage {
                     src: [sp.x / tw, sp.y / th, (sp.x + sp.width) / tw, (sp.y + sp.height) / th],
                     tint: [1.0, 1.0, 1.0, 1.0],
                     rot: l.angle,
-                    additive: false,
+                    additive: true, // laser beam glows (etama3 laser op13)
                 });
             } else {
                 // Fallback (sprite missing): a tinted rect.
@@ -2829,7 +2829,7 @@ impl Stage {
                     src: [0.25, 0.25, 0.75, 0.75],
                     tint,
                     rot: l.angle,
-                    additive: false,
+                    additive: true,
                 });
             }
             // Glowing ball at the laser base, while it is warming up or active.
@@ -2844,7 +2844,7 @@ impl Stage {
                         src: [sp.x / tw, sp.y / th, (sp.x + sp.width) / tw, (sp.y + sp.height) / th],
                         tint: [1.0, 1.0, 1.0, 1.0],
                         rot: 0.0,
-                        additive: false,
+                        additive: true, // SpawnLaserPattern sets vm1 blendMode = One
                     });
                 }
             }
