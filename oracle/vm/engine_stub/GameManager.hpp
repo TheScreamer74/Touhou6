@@ -23,7 +23,11 @@ struct GameManager {
         return 1;
     }
     void AddScore(i32 s){ score+=s; }
-    D3DXVECTOR3 playerMovementAreaSize{384,448,0};
+    // Real gameplay init (GameManager.cpp:293): the player movement area is the
+    // 384x448 playfield inset by 8/16px margins, NOT the full playfield. Enemy
+    // random spawns (RunEclTimeline case 4-7) draw against this, so the stub
+    // must match or every random-spawn x/y diverges from the port.
+    D3DXVECTOR3 playerMovementAreaSize{368,416,0};
     i32 livesRemaining=0, currentStage=0;
     void IncreaseSubrank(i32){}
 };
