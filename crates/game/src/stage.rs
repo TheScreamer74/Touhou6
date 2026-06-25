@@ -1968,7 +1968,6 @@ impl Stage {
 
         // Enemy deaths award the enemy's score value (default 100).
         let mut drops: Vec<([f32; 2], i16)> = Vec::new();
-        let mut death_fx: Vec<[f32; 2]> = Vec::new();
         let mut boss_died = false;
         for i in 0..self.enemies.len() {
             let e = &mut self.enemies[i];
@@ -1983,9 +1982,12 @@ impl Stage {
                 if dm == 0 || dm == 1 {
                     self.score += e.score as i64;
                 }
-                if !e.is_boss {
-                    death_fx.push([e.pos[0], e.pos[1]]);
-                } else if dm != 3 {
+                // Faithful death particles (EnemyManager.cpp:641-706): the etama4
+                // bubble + splash, drawn by the EffectManager. Idempotent via
+                // death_fx_done. Player kills reach here (life set in collide), so
+                // without this they only got the placeholder spawn_burst.
+                e.spawn_death_effects(&mut self.world);
+                if e.is_boss && dm != 3 {
                     boss_died = true;
                 }
                 e.on_death(&self.ecl, &mut self.world);
@@ -1996,18 +1998,6 @@ impl Stage {
         // DespawnBullets(12800, false)) — bonus only, no point items.
         if boss_died {
             self.despawn_bullets(false);
-        }
-        for pos in death_fx {
-            // Bright flash ring + a puff, like the original enemy pop.
-            self.spawn_burst(pos, 12, 3.0, [1.0, 0.95, 0.7], 7.0);
-            self.particles.push(Particle {
-                pos,
-                vel: [0.0, 0.0],
-                life: 12.0,
-                max_life: 12.0,
-                size: 10.0,
-                color: [1.0, 1.0, 0.9],
-            });
         }
         for (pos, drop) in drops {
             self.spawn_drop(pos, drop);
