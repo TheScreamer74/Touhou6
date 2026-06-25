@@ -367,7 +367,10 @@ impl Background {
         let at = Vec3::new(mid_w + self.facing.x, -mid_h + self.facing.y, 0.0);
         let up = Vec3::Y;
         let view = Mat4::look_at_lh(eye, at, up);
-        let proj = Mat4::perspective_lh(fov, FIELD_W / FIELD_H, 100.0, 20000.0);
+        // Far plane 10000 (GameManager::SetupCamera with extraRenderDistance 0),
+        // not 20000 — the original clips quads past 10000 (they are fully fogged
+        // by then anyway); rendering them produced an over-distant smear band.
+        let proj = Mat4::perspective_lh(fov, FIELD_W / FIELD_H, 100.0, 10000.0);
         proj * view
     }
 
