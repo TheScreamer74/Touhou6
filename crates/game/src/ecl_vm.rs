@@ -215,6 +215,9 @@ pub struct Enemy {
     /// spawn rate) and the slowly-oscillating base wing angle.
     exins_func6_timer: i32,
     exins_func6_angle: f32,
+    /// Remilia bat-transformation (idx 10) re-show delay: counts down 60 frames
+    /// after a player bomb ends before she swaps back to her damageable bat form.
+    exins_func10_timer: i32,
     interrupts: [i32; 8],
     run_interrupt: i32,
     lasers: [Option<usize>; 32],
@@ -300,6 +303,7 @@ impl Default for Enemy {
             shoot_timer: 0,
             exins_func6_timer: 0,
             exins_func6_angle: 0.0,
+            exins_func10_timer: 0,
             interrupts: [-1; 8],
             run_interrupt: -1,
             lasers: [None; 32],
@@ -374,6 +378,10 @@ pub struct World {
     /// bullets freeze in place; toggled by EXINSCALL #4. The boss keeps moving
     /// and firing, so new bullets are laid down over the frozen field.
     pub time_stopped: bool,
+    /// Player bomb in progress (g_Player.bombInfo.isInUse). Read by Remilia's
+    /// bat-transformation ex-instruction (idx 10): while a bomb is active she
+    /// becomes non-interactable and swaps to her dissipate animation.
+    pub bomb_active: bool,
     /// Sprite height (px) per bullet type 0..9, from etama3.anm. Used by
     /// ex-instructions that only touch "big" bullets (>= 30px).
     pub bullet_heights: [f32; 10],
@@ -1671,45 +1679,7 @@ impl Enemy {
                     self.ctx.fvars[3] = world.rng.f32_in_range(m) + (96.0 - m / 2.0); // float3
                 }
             }
-            6 => {
-                // ExInsBatWingEffect (EnemyEclInstr.cpp:737) — Remilia's bat
-                // wings: a deep-blue glow-particle (effect 19) spray along an
-                // oscillating wing angle, ramping faster the longer it runs.
-                // Suppressed while she is invisible (mid-transition).
-                if self.invisible {
-                    return; // ResetEffectArray: the port has no per-enemy effect list
-                }
-                let deg = PI / 180.0;
-                self.exins_func6_angle += deg;
-                if self.exins_func6_angle >= 45.0 * deg {
-                    self.exins_func6_angle -= 90.0 * deg;
-                }
-                let t = self.exins_func6_timer;
-                let fire = t > 120
-                    || (t > 60 && t % 2 == 0)
-                    || (t > 30 && t % 4 == 0)
-                    || t % 8 == 0;
-                if fire {
-                    let bam = t % 16;
-                    let bam = world.rng.u16_in_range((bam / 2) as u16) as i32 + bam / 2;
-                    let dist = (bam as f32 * 160.0) / 16.0 + 32.0;
-                    let final_angle = self.exins_func6_angle - (bam as f32 * PI) / 40.0;
-                    let dvy = (8.0 * bam as f32) / 60.0 - 4.0 / 15.0;
-                    let color = [0.188, 0.188, 1.0, 1.0]; // COLOR_DEEPBLUE 0xff3030ff
-                    for side in [1.0f32, -1.0] {
-                        let p = [
-                            self.pos[0] + side * final_angle.cos() * dist,
-                            self.pos[1] + final_angle.sin() * dist,
-                            self.pos[2],
-                        ];
-                        let vx = (world.rng.f32_zero_to_one() * 40.0 - 20.0) / 60.0;
-                        let vel = [vx, dvy, 0.0];
-                        let accel = [-vel[0] / 120.0, -vel[1] / 120.0, 0.0];
-                        world.spawn_particle_moving(19, p, color, vel, accel);
-                    }
-                }
-                self.exins_func6_timer += 1;
-            }
+            6 => self.ex_bat_wing(world),
             7 => {
                 // ExInsStage6Func7 (EnemyEclInstr.cpp:795) — Remilia's laser-star
                 // card: two counter-rotating rings of 8 arms, each arm laying 3
@@ -1855,10 +1825,123 @@ impl Enemy {
                     b.ex_accel = [a.cos() * 0.01, a.sin() * 0.01];
                 }
             }
-            // idx 10 (bat transformation) needs player-bomb state threaded into
-            // the ECL world; idx 12,14,15 are other stages. Left unimplemented
-            // per the no-approx rule.
+            10 => self.ex_bat_transform(world),
+            15 => {
+                // ExInsStageXFunc15 (EnemyEclInstr.cpp:1145) — for every live big
+                // (>=30px) bullet, every nearby (<64px) small (<30px) stationary
+                // bullet is bent away from the boss and sent accelerating: its new
+                // angle reflects its boss-relative angle about the big bullet's
+                // boss-relative angle (factor 2.2). Then the bat transform runs.
+                let mut total = 0;
+                let big: Vec<[f32; 2]> = world
+                    .bullets
+                    .iter()
+                    .filter(|b| b.despawn_timer == 0 && b.height >= 30.0)
+                    .map(|b| b.pos)
+                    .collect();
+                let (ex, ey) = (self.pos[0], self.pos[1]);
+                for bp in big {
+                    total += 1;
+                    let enemy_angle = (bp[1] - ey).atan2(bp[0] - ex);
+                    for b in world.bullets.iter_mut() {
+                        if b.despawn_timer != 0 || b.height >= 30.0 || b.speed != 0.0 {
+                            continue;
+                        }
+                        let dx = b.pos[0] - bp[0];
+                        let dy = b.pos[1] - bp[1];
+                        if (dx * dx + dy * dy).sqrt() >= 64.0 {
+                            continue;
+                        }
+                        b.ex_flags |= 0x10;
+                        b.speed = 0.01;
+                        b.timer = 0;
+                        b.ex_int0 = 120;
+                        let bullets_angle = (b.pos[1] - ey).atan2(b.pos[0] - ex);
+                        b.angle = (bullets_angle - enemy_angle) * 2.2 + enemy_angle;
+                        b.ex_accel = [b.angle.cos() * 0.01, b.angle.sin() * 0.01];
+                        let base = (b.sprite as i32 - b.sprite_offset).max(0) as u32;
+                        b.sprite_offset += 1;
+                        b.sprite = base + b.sprite_offset as u32;
+                    }
+                }
+                self.ex_bat_transform(world);
+                self.ctx.ivars[3] = total;
+            }
             _ => {}
+        }
+    }
+
+    /// ExInsBatWingEffect (EnemyEclInstr.cpp:737): Remilia's bat wings — a
+    /// deep-blue glow-particle (effect 19) spray along an oscillating wing angle,
+    /// ramping faster the longer it runs. Suppressed while she is invisible
+    /// (mid-transition). Shared by the standalone idx 6 and the bat transform.
+    fn ex_bat_wing(&mut self, world: &mut World) {
+        use std::f32::consts::PI;
+        if self.invisible {
+            return; // ResetEffectArray: the port has no per-enemy effect list
+        }
+        let deg = PI / 180.0;
+        self.exins_func6_angle += deg;
+        if self.exins_func6_angle >= 45.0 * deg {
+            self.exins_func6_angle -= 90.0 * deg;
+        }
+        let t = self.exins_func6_timer;
+        let fire = t > 120
+            || (t > 60 && t % 2 == 0)
+            || (t > 30 && t % 4 == 0)
+            || t % 8 == 0;
+        if fire {
+            let bam = t % 16;
+            let bam = world.rng.u16_in_range((bam / 2) as u16) as i32 + bam / 2;
+            let dist = (bam as f32 * 160.0) / 16.0 + 32.0;
+            let final_angle = self.exins_func6_angle - (bam as f32 * PI) / 40.0;
+            let dvy = (8.0 * bam as f32) / 60.0 - 4.0 / 15.0;
+            let color = [0.188, 0.188, 1.0, 1.0]; // COLOR_DEEPBLUE 0xff3030ff
+            for side in [1.0f32, -1.0] {
+                let p = [
+                    self.pos[0] + side * final_angle.cos() * dist,
+                    self.pos[1] + final_angle.sin() * dist,
+                    self.pos[2],
+                ];
+                let vx = (world.rng.f32_zero_to_one() * 40.0 - 20.0) / 60.0;
+                let vel = [vx, dvy, 0.0];
+                let accel = [-vel[0] / 120.0, -vel[1] / 120.0, 0.0];
+                world.spawn_particle_moving(19, p, color, vel, accel);
+            }
+        }
+        self.exins_func6_timer += 1;
+    }
+
+    /// ExInsHandleBatTransformation (EnemyEclInstr.cpp:1035): idx 10. Runs the
+    /// bat-wing spray, then keys off the player bomb. While a bomb is active she
+    /// swaps to her dissipate animation (ANM_SCRIPT_ENEMY_END, local 165),
+    /// disables the directional-pose left slot (anmExLeft = -1) so it can't
+    /// override that script, and becomes non-interactable; 60 frames after the
+    /// bomb ends she swaps back to the damageable bat form (local 160) and
+    /// restores the left pose (0xa1). No-ops once dead.
+    fn ex_bat_transform(&mut self, world: &mut World) {
+        if self.life <= 0 {
+            return;
+        }
+        self.ex_bat_wing(world);
+        if world.bomb_active {
+            if self.anm_poses[3] >= 0 {
+                self.anm_script = 165; // ANM_SCRIPT_ENEMY_END (0x1a5 - ANM_OFFSET_ENEMY)
+                self.anm_dirty = true;
+                self.anm_poses[3] = -1;
+            }
+            self.interactable = false;
+            self.exins_func10_timer = 60;
+        } else if self.exins_func10_timer > 0 {
+            self.exins_func10_timer -= 1;
+            if self.exins_func10_timer == 0 {
+                if self.anm_poses[3] < 0 {
+                    self.anm_script = 160; // ANM_OFFSET_ENEMY + 0xa0 (bat form)
+                    self.anm_dirty = true;
+                    self.anm_poses[3] = 0xa1;
+                }
+                self.interactable = true;
+            }
         }
     }
 

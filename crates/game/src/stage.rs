@@ -813,6 +813,7 @@ impl Stage {
                 character: character.is_marisa() as u8,
                 shot_type: matches!(character, Character::ReimuB | Character::MarisaB) as u8,
                 time_stopped: false,
+                bomb_active: false,
                 bullet_heights,
                 bullet_widths,
                 effects: Vec::new(),
@@ -1086,6 +1087,7 @@ impl Stage {
         self.invuln = self.invuln.saturating_sub(1);
         self.spell_result = self.spell_result.saturating_sub(1);
         self.world.player_pos = self.pos;
+        self.world.bomb_active = self.bombing > 0;
         self.player_runner.tick();
 
         // Only the timeline freezes during dialogue (EnemyManager gates it on
