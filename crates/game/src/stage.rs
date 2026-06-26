@@ -621,6 +621,38 @@ pub struct ScriptRef {
     pub tex_size: [f32; 2],
 }
 
+/// Build a sprite DrawCmd from an ANM runner + its script, centred at (cx, cy).
+/// Shared by the enemy primary vm and the op99 sub-vms.
+fn sprite_cmd_from(
+    anim: &AnmRunner,
+    script: &ScriptRef,
+    cx: f32,
+    cy: f32,
+    rot: f32,
+    additive: bool,
+) -> Option<DrawCmd> {
+    let idx = anim.sprite?;
+    let sp = script.sprites.get(&idx)?;
+    let [tw, th] = script.tex_size;
+    let w = sp.width * anim.scale[0].abs();
+    let h = sp.height * anim.scale[1].abs();
+    // Sprite coordinates can exceed the sheet edge (Rumia); wrap.
+    let sx = sp.x % tw;
+    let sy = sp.y % th;
+    let (mut u0, mut u1) = (sx / tw, (sx + sp.width) / tw);
+    if anim.flip_x {
+        std::mem::swap(&mut u0, &mut u1);
+    }
+    Some(DrawCmd {
+        tex: script.tex,
+        dst: [cx - w / 2.0, cy - h / 2.0, w, h],
+        src: [u0, sy / th, u1, (sy + sp.height) / th],
+        tint: [1.0, 1.0, 1.0, anim.alpha],
+        rot,
+        additive,
+    })
+}
+
 /// Build the enemy script table keyed by ANM script id (stg1enm uses ids
 /// 0..7, stg1enm2 the boss bank at 128+), matching ECL ANMSETMAIN indices.
 pub fn build_enemy_scripts(entries: &[(&Entry, usize)]) -> HashMap<i32, ScriptRef> {
@@ -648,6 +680,9 @@ pub struct Stage {
     world: World,
     enemies: Vec<Enemy>,
     anims: Vec<Option<AnmRunner>>,
+    /// Sub-vm anm runners per enemy (ECL op99 ANMSETSLOT, enemy->vms[8]). Parallel
+    /// to `enemies`/`anims`. Slots 0-3 draw behind the primary sprite, 4-7 in front.
+    sub_anims: Vec<[Option<AnmRunner>; 8]>,
     timeline_off: u32,
     timeline_time: i32,
     enemy_scripts: HashMap<i32, ScriptRef>,
@@ -823,6 +858,7 @@ impl Stage {
             },
             enemies: Vec::new(),
             anims: Vec::new(),
+            sub_anims: Vec::new(),
             timeline_off,
             timeline_time: 0,
             enemy_scripts,
@@ -1290,9 +1326,11 @@ impl Stage {
         if let Some(slot) = self.enemies.iter().position(|x| !x.occupied) {
             self.enemies[slot] = e;
             self.anims[slot] = None;
+            self.sub_anims[slot] = Default::default();
         } else {
             self.enemies.push(e);
             self.anims.push(None);
+            self.sub_anims.push(Default::default());
         }
     }
 
@@ -1392,6 +1430,20 @@ impl Stage {
             }
             if let Some(anim) = &mut self.anims[i] {
                 anim.tick();
+            }
+            // Sub-vm runners (op99 ANMSETSLOT): (re)build dirtied slots, then tick.
+            for s in 0..8 {
+                if self.enemies[i].sub_dirty[s] {
+                    self.enemies[i].sub_dirty[s] = false;
+                    let script = self.enemies[i].sub_scripts[s];
+                    self.sub_anims[i][s] = self
+                        .enemy_scripts
+                        .get(&script)
+                        .map(|sc| AnmRunner::new(sc.instrs.clone()));
+                }
+                if let Some(sv) = &mut self.sub_anims[i][s] {
+                    sv.tick();
+                }
             }
             i += 1;
         }
@@ -2543,40 +2595,41 @@ impl Stage {
             }
         }
 
-        // Enemies via their ANM state.
-        for (e, anim) in self.enemies.iter().zip(&self.anims) {
+        // Enemies via their ANM state. The decomp (EnemyManager::OnDraw) draws
+        // sub-vms 0-3, then the primary vm, then sub-vms 4-7, each at the enemy's
+        // position plus the runner's own position offset.
+        for (i, e) in self.enemies.iter().enumerate() {
             if !e.occupied || e.invisible {
                 continue;
             }
-            let Some(anim) = anim else { continue };
-            let Some(script) = self.enemy_scripts.get(&e.anm_script) else { continue };
-            let Some(idx) = anim.sprite else { continue };
-            let Some(sp) = script.sprites.get(&idx) else { continue };
-            let [tw, th] = script.tex_size;
-            let w = sp.width * anim.scale[0].abs();
-            let h = sp.height * anim.scale[1].abs();
-            // Sprite coordinates can exceed the sheet edge (Rumia); wrap.
-            let sx = sp.x % tw;
-            let sy = sp.y % th;
-            let (mut u0, mut u1) = (sx / tw, (sx + sp.width) / tw);
-            if anim.flip_x {
-                std::mem::swap(&mut u0, &mut u1);
+            let (ex, ey) = (FIELD_X + e.pos[0], FIELD_Y + e.pos[1]);
+            let draw_sub = |s: usize, cmds: &mut Vec<DrawCmd>| {
+                let Some(sv) = &self.sub_anims[i][s] else { return };
+                if !sv.visible() {
+                    return; // an ended/spriteless sub-vm is inactive (anmFileIndex < 0)
+                }
+                let Some(script) = self.enemy_scripts.get(&e.sub_scripts[s]) else { return };
+                if let Some(cmd) =
+                    sprite_cmd_from(sv, script, ex + sv.pos[0], ey + sv.pos[1], sv.rotation, sv.additive)
+                {
+                    cmds.push(cmd);
+                }
+            };
+            for s in 0..4 {
+                draw_sub(s, &mut cmds);
             }
-            cmds.push(DrawCmd {
-                tex: script.tex,
-                dst: [
-                    FIELD_X + e.pos[0] - w / 2.0,
-                    FIELD_Y + e.pos[1] - h / 2.0,
-                    w,
-                    h,
-                ],
-                src: [u0, sy / th, u1, (sy + sp.height) / th],
-                tint: [1.0, 1.0, 1.0, anim.alpha],
-                // op120 ANMFLAGROTATION: face the movement angle when flagged
-                // (EnemyManager.cpp:801); otherwise unrotated as before.
-                rot: if e.rotate_anm { e.angle } else { 0.0 },
-                additive: false,
-            });
+            if let Some(anim) = &self.anims[i] {
+                if let Some(script) = self.enemy_scripts.get(&e.anm_script) {
+                    // op120 ANMFLAGROTATION: face the movement angle when flagged.
+                    let rot = if e.rotate_anm { e.angle } else { 0.0 };
+                    if let Some(cmd) = sprite_cmd_from(anim, script, ex, ey, rot, false) {
+                        cmds.push(cmd);
+                    }
+                }
+            }
+            for s in 4..8 {
+                draw_sub(s, &mut cmds);
+            }
         }
 
         // (Boss health bar / timer / spell name are drawn in draw_hud, over the
