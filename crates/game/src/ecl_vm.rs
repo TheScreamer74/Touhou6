@@ -263,6 +263,11 @@ pub struct Enemy {
     /// ECL op128 ANMINTERRUPTMAIN: an interrupt label queued for the primary anm
     /// runner, applied before its next tick (primaryVm.pendingInterrupt).
     pub pending_interrupt: Option<i32>,
+    /// ECL op99 ANMSETSLOT: per-slot sub-vm anm scripts (enemy->vms[8]). -1 = the
+    /// slot is empty. `sub_dirty` marks a slot whose runner must be (re)built.
+    /// Slots 0-3 render behind the primary sprite, 4-7 in front.
+    pub sub_scripts: [i32; 8],
+    pub sub_dirty: [bool; 8],
     pub boss_id: u8,
     /// Boss remaining-attack count shown by the HUD (ECL BOSSSETLIFECOUNT).
     pub spell_count: i32,
@@ -344,6 +349,8 @@ impl Default for Enemy {
             anm_dirty: false,
             rotate_anm: false,
             pending_interrupt: None,
+            sub_scripts: [-1; 8],
+            sub_dirty: [false; 8],
             boss_id: 0,
             spell_count: 0,
             star_angle: [0.0; 6],
@@ -1337,7 +1344,15 @@ impl Enemy {
                 ];
                 self.anm_pose_state = 0xff;
             }
-            99 => {} // sub-slot anm
+            99 => {
+                // ANMSETSLOT: assign a sub-vm (enemy->vms[vmIdx]) an anm script.
+                let vm = instr.arg_i32(0);
+                let script = instr.arg_i32(1);
+                if (0..8).contains(&vm) {
+                    self.sub_scripts[vm as usize] = script;
+                    self.sub_dirty[vm as usize] = true;
+                }
+            }
             100 => {
                 // ANMSETDEATH (EclManager.cpp:422): 3 i8 death-effect anm indices.
                 self.death_anm1 = instr.args.first().copied().unwrap_or(0);
