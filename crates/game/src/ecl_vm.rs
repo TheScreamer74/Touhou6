@@ -52,6 +52,23 @@ pub fn normalize_angle(mut a: f32) -> f32 {
     a
 }
 
+fn cross3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+fn normalize3(v: [f32; 3]) -> [f32; 3] {
+    let len = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+    if len > 1e-6 {
+        [v[0] / len, v[1] / len, v[2] / len]
+    } else {
+        [0.0, 0.0, 0.0]
+    }
+}
+
 /// One ECL execution context (EnemyEclContext).
 #[derive(Clone, Copy)]
 struct Ctx {
@@ -268,6 +285,11 @@ pub struct Enemy {
     /// Slots 0-3 render behind the primary sprite, 4-7 in front.
     pub sub_scripts: [i32; 8],
     pub sub_dirty: [bool; 8],
+    /// ECL op102 SPELLCARDEFFECT: indices into world.effects of this enemy's live
+    /// spellcard bubbles (enemy->effectArray), plus their shared target radius
+    /// (enemy->effectDistance). Driven each frame by `update_effects`.
+    pub effect_slots: Vec<usize>,
+    pub effect_distance: f32,
     pub boss_id: u8,
     /// Boss remaining-attack count shown by the HUD (ECL BOSSSETLIFECOUNT).
     pub spell_count: i32,
@@ -351,6 +373,8 @@ impl Default for Enemy {
             pending_interrupt: None,
             sub_scripts: [-1; 8],
             sub_dirty: [false; 8],
+            effect_slots: Vec::new(),
+            effect_distance: 0.0,
             boss_id: 0,
             spell_count: 0,
             star_angle: [0.0; 6],
@@ -423,16 +447,39 @@ pub struct World {
 /// ANM script for the visual.
 pub struct Effect {
     pub in_use: bool,
+    /// Render position. For SpellBubble this is the Callback4 `pos1` (a 3D world
+    /// point); for the 2D splashes it is the screen position.
     pub pos: [f32; 3],
     vel: [f32; 3],
     accel: [f32; 3],
+    /// SpellBubble: the followed enemy position (`effect->position`).
     anchor: [f32; 3],
+    /// SpellBubble: the swirl axis (`effect->pos2`).
     dir: [f32; 3],
     timer: i32,
     cb: EffCb,
+    /// SpellBubble: radial sweep distance `unk_15c`, grows by 0.3/frame toward the
+    /// enemy's effectDistance.
+    sweep: f32,
+    /// SpellBubble: `angleRelated`, advances by pi/100 each frame.
+    angle_rel: f32,
+    /// SpellBubble pop: -1 = live; >= 0 = fading out (`unk_17b`), freed at 16.
+    pop: i32,
     pub color: [f32; 4],
+    /// True for the spellcard-declaration bubble (g_Effects 13, Callback4): drawn
+    /// in 3D via the stage camera rather than as a flat 2D particle.
+    pub spell_bubble: bool,
     pub runner: AnmRunner,
 }
+
+/// g_EffectsColorWithTextureBlending (BulletManager.cpp:21) — the default
+/// spellcard-effect palette, indexed by SPELLCARDEFFECT's effectColorId.
+pub const G_EFFECTS_COLOR: [u32; 28] = [
+    0xff000000, 0xff303030, 0xff606060, 0xff500000, 0xff900000, 0xffff2020, 0xff400040,
+    0xff800080, 0xffff30ff, 0xff000050, 0xff000090, 0xff2020ff, 0xff203060, 0xff304090,
+    0xff3080ff, 0xff005000, 0xff009000, 0xff20ff20, 0xff206000, 0xff409010, 0xff80ff20,
+    0xff505000, 0xff909000, 0xffffff20, 0xff603000, 0xff904010, 0xfff08020, 0xffffffff,
+];
 
 /// The g_Effects update-callback column (EffectManager.cpp:18).
 #[derive(Clone, Copy, PartialEq)]
@@ -443,6 +490,9 @@ enum EffCb {
     Still,
     Attract,
     AttractSlow,
+    /// EffectUpdateCallback4 (EffectManager.cpp:94): the spellcard-declaration
+    /// bubble — a 3D swirl driven by the owning enemy's effectArray update.
+    SpellBubble,
 }
 
 /// g_Effects[effect_idx] -> (etama4 local script id, update callback).
@@ -464,7 +514,7 @@ fn g_effects(effect_idx: i32) -> (u32, EffCb) {
         10 => (15, EffCb::RandomSplash),
         11 => (16, EffCb::RandomSplash),
         12 => (17, EffCb::None),
-        13 | 14 | 15 => (18, EffCb::None), // bubble cb4 (3D, no RNG) — anm only
+        13 | 14 | 15 => (18, EffCb::SpellBubble), // spellcard bubble cb4 (3D, no RNG)
         16 => (0, EffCb::None),            // spellcard bg (different anm); no particle
         17 => (7, EffCb::Attract),         // glow 2
         18 => (8, EffCb::AttractSlow),     // glow 3
@@ -491,7 +541,11 @@ impl World {
                 dir: [0.0; 3],
                 timer: 0,
                 cb,
+                sweep: 0.0,
+                angle_rel: 0.0,
+                pop: -1,
                 color,
+                spell_bubble: false,
                 runner: AnmRunner::new(instrs.clone()),
             };
             if let Some(slot) = self.effects.iter_mut().find(|e| e.is_none()) {
@@ -499,6 +553,37 @@ impl World {
             } else {
                 self.effects.push(Some(eff));
             }
+        }
+    }
+
+    /// SPELLCARDEFFECT (ECL op102): spawn one effect-13 bubble at `pos`, store its
+    /// swirl axis `pos2` and tint, and return its slot so the owning enemy can
+    /// drive it from its effectArray. Returns None if etama4 lacks the script.
+    pub fn spawn_spell_bubble(&mut self, pos: [f32; 3], pos2: [f32; 3], color: [f32; 4]) -> Option<usize> {
+        let (script, cb) = g_effects(13);
+        let instrs = self.eff_scripts.get(&script).cloned()?;
+        let eff = Effect {
+            in_use: true,
+            pos,
+            vel: [0.0; 3],
+            accel: [0.0; 3],
+            anchor: pos,
+            dir: pos2,
+            timer: 0,
+            cb,
+            sweep: 0.0,
+            angle_rel: 0.0,
+            pop: -1,
+            color,
+            spell_bubble: true,
+            runner: AnmRunner::new(instrs),
+        };
+        if let Some(i) = self.effects.iter().position(|e| e.is_none()) {
+            self.effects[i] = Some(eff);
+            Some(i)
+        } else {
+            self.effects.push(Some(eff));
+            Some(self.effects.len() - 1)
         }
     }
 
@@ -523,7 +608,11 @@ impl World {
             dir: [0.0; 3],
             timer: 0,
             cb,
+            sweep: 0.0,
+            angle_rel: 0.0,
+            pop: -1,
             color,
+            spell_bubble: false,
             runner: AnmRunner::new(instrs),
         };
         if let Some(slot) = self.effects.iter_mut().find(|e| e.is_none()) {
@@ -594,6 +683,36 @@ impl World {
                     let r = 256.0 - e.timer as f32 * 256.0 / span;
                     for k in 0..3 {
                         e.pos[k] = r * e.dir[k] + e.anchor[k];
+                    }
+                }
+                EffCb::SpellBubble => {
+                    // EffectUpdateCallback4 (EffectManager.cpp:94): place the
+                    // bubble on a circle perpendicular to its axis `pos2` (e.dir),
+                    // radius `sweep`, rotated about that axis by `angle_rel`, then
+                    // exaggerate depth (z*6). `anchor` is the followed enemy pos.
+                    let n = normalize3(e.dir);
+                    // posOffset = normalize(cross(n, (1,0,0))) = normalize(ny, -nx, 0)
+                    let perp = normalize3([n[1], -n[0], 0.0]);
+                    let mut off = [perp[0] * e.sweep, perp[1] * e.sweep, perp[2] * e.sweep];
+                    // Rotate `off` about axis `n` by `angle_rel` via the unit
+                    // quaternion (sin*n, cos): p' = p + 2w(n×p) + n×(2(n×p)).
+                    let (s, c) = e.angle_rel.sin_cos();
+                    let u = [n[0] * s, n[1] * s, n[2] * s];
+                    let t = cross3([2.0 * u[0], 2.0 * u[1], 2.0 * u[2]], off);
+                    let ut = cross3(u, t);
+                    off = [off[0] + c * t[0] + ut[0], off[1] + c * t[1] + ut[1], off[2] + c * t[2] + ut[2]];
+                    off[2] *= 6.0;
+                    e.pos = [off[0] + e.anchor[0], off[1] + e.anchor[1], off[2] + e.anchor[2]];
+                    if e.pop >= 0 {
+                        e.pop += 1;
+                        if e.pop >= 16 {
+                            *slot = None;
+                            continue;
+                        }
+                        let alpha = 1.0 - e.pop as f32 / 16.0;
+                        e.color[3] = alpha;
+                        let sc = 2.0 - alpha;
+                        e.runner.scale = [sc, sc];
                     }
                 }
                 EffCb::None => {}
@@ -1297,6 +1416,9 @@ impl Enemy {
             93 => {
                 // SPELLCARDSTART (EclRawInstrSpellcardStartArgs): portrait sprite
                 // at byte 0, id at byte 2, Shift-JIS name from byte 4.
+                // A new declaration ends the previous card: pop its bubbles
+                // (the decomp resets the effectArray at card end, EnemyManager:463).
+                self.reset_effect_array(world);
                 let sprite = instr.arg_i16(0) as i32;
                 let id = instr.arg_i16(2) as i32;
                 let name = instr.args.get(4..).map(|b| {
@@ -1312,7 +1434,10 @@ impl Enemy {
                 self.rank_amount2_low = 0;
                 self.rank_amount2_high = 0;
             }
-            94 => world.events.push(WorldEvent::SpellcardEnd),
+            94 => {
+                self.reset_effect_array(world); // card ended: pop its bubbles
+                world.events.push(WorldEvent::SpellcardEnd);
+            }
             95 => {
                 // ENEMYCREATE
                 world.pending_spawns.push(SpawnReq {
@@ -1372,7 +1497,24 @@ impl Enemy {
                     world.events.push(WorldEvent::BossSet(false));
                 }
             }
-            102 => {} // spellcard visual effect
+            102 => {
+                // SPELLCARDEFFECT (EclManager.cpp:552): spawn an effect-13 bubble
+                // at the enemy, tinted by g_EffectsColor[colorId], store its swirl
+                // axis pos2 + the shared target radius, and track it in effectArray.
+                let color_id = instr.arg_i32(0).rem_euclid(28) as usize;
+                let pos2 = [instr.arg_f32(1), instr.arg_f32(2), instr.arg_f32(3)];
+                self.effect_distance = instr.arg_f32(4);
+                let c = G_EFFECTS_COLOR[color_id];
+                let color = [
+                    ((c >> 16) & 0xff) as f32 / 255.0,
+                    ((c >> 8) & 0xff) as f32 / 255.0,
+                    (c & 0xff) as f32 / 255.0,
+                    ((c >> 24) & 0xff) as f32 / 255.0,
+                ];
+                if let Some(slot) = world.spawn_spell_bubble(self.pos, pos2, color) {
+                    self.effect_slots.push(slot);
+                }
+            }
             103 => {
                 self.hitbox = [instr.arg_f32(0), instr.arg_f32(1)];
             }
@@ -2134,6 +2276,35 @@ impl Enemy {
         }
     }
 
+    /// Enemy::UpdateEffects (EnemyManager.cpp:744): keep each live spellcard
+    /// bubble on the enemy, grow its sweep toward effectDistance, and spin it.
+    pub fn update_effects(&self, world: &mut World) {
+        for &slot in &self.effect_slots {
+            let Some(Some(e)) = world.effects.get_mut(slot) else { continue };
+            if !e.in_use || !e.spell_bubble {
+                continue;
+            }
+            e.anchor = self.pos;
+            if e.sweep < self.effect_distance {
+                e.sweep += 0.3;
+            }
+            e.angle_rel = normalize_angle(e.angle_rel + std::f32::consts::PI / 100.0);
+        }
+    }
+
+    /// Enemy::ResetEffectArray (EnemyManager.cpp:127): trigger the fade-out (pop)
+    /// on every tracked bubble and forget them. Run on death and at card change.
+    pub fn reset_effect_array(&mut self, world: &mut World) {
+        for &slot in &self.effect_slots {
+            if let Some(Some(e)) = world.effects.get_mut(slot) {
+                if e.spell_bubble && e.pop < 0 {
+                    e.pop = 0;
+                }
+            }
+        }
+        self.effect_slots.clear();
+    }
+
     /// Queue this enemy's death particle effects (EnemyManager.cpp:641-706 —
     /// the `SpawnParticles` calls only; drops/score/removal stay in collide()).
     /// `death_anm1` is the bubble pop (no RNG), `death_anm2 + 4` the splash
@@ -2241,6 +2412,7 @@ impl Enemy {
     }
 
     pub fn on_death(&mut self, ecl: &Ecl, world: &mut World) {
+        self.reset_effect_array(world); // pop any live spellcard bubbles
         self.life_cb_threshold = -1;
         self.timer_cb_threshold = -1;
         match self.death_mode {

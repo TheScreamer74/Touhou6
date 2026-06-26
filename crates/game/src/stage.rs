@@ -1445,6 +1445,8 @@ impl Stage {
                     sv.tick();
                 }
             }
+            // Enemy::UpdateEffects: keep this enemy's spellcard bubbles on it.
+            self.enemies[i].update_effects(&mut self.world);
             i += 1;
         }
         self.flush_spawns();
@@ -2826,13 +2828,40 @@ impl Stage {
         for e in self.world.effects.iter().flatten() {
             let Some(idx) = e.runner.sprite else { continue };
             let Some(sp) = self.eff_sprites.get(&idx) else { continue };
+            let src = [sp.x / etw, sp.y / eth, (sp.x + sp.width) / etw, (sp.y + sp.height) / eth];
+            let tint = [e.color[0], e.color[1], e.color[2], e.runner.alpha * e.color[3]];
+            if e.spell_bubble {
+                // Draw3: the bubble lives at a 3D world point. Project its centre
+                // and a half-width/height offset through the stage camera, so the
+                // on-screen size carries the camera's perspective scale.
+                let hw_w = sp.width * e.runner.scale[0].abs() / 2.0;
+                let hh_w = sp.height * e.runner.scale[1].abs() / 2.0;
+                let (Some(c), Some(rx), Some(by)) = (
+                    Background::project_point(e.pos),
+                    Background::project_point([e.pos[0] + hw_w, e.pos[1], e.pos[2]]),
+                    Background::project_point([e.pos[0], e.pos[1] + hh_w, e.pos[2]]),
+                ) else {
+                    continue;
+                };
+                let hw = ((rx[0] - c[0]).powi(2) + (rx[1] - c[1]).powi(2)).sqrt();
+                let hh = ((by[0] - c[0]).powi(2) + (by[1] - c[1]).powi(2)).sqrt();
+                cmds.push(DrawCmd {
+                    tex: self.eff_tex,
+                    dst: [FIELD_X + c[0] - hw, FIELD_Y + c[1] - hh, hw * 2.0, hh * 2.0],
+                    src,
+                    tint,
+                    rot: e.runner.rotation,
+                    additive: e.runner.additive,
+                });
+                continue;
+            }
             let w = sp.width * e.runner.scale[0].abs();
             let h = sp.height * e.runner.scale[1].abs();
             cmds.push(DrawCmd {
                 tex: self.eff_tex,
                 dst: [FIELD_X + e.pos[0] - w / 2.0, FIELD_Y + e.pos[1] - h / 2.0, w, h],
-                src: [sp.x / etw, sp.y / eth, (sp.x + sp.width) / etw, (sp.y + sp.height) / eth],
-                tint: [e.color[0], e.color[1], e.color[2], e.runner.alpha * e.color[3]],
+                src,
+                tint,
                 rot: e.runner.rotation,
                 additive: e.runner.additive,
             });

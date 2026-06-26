@@ -384,6 +384,30 @@ impl Background {
         Mat4::look_at_lh(eye, at, Vec3::Y)
     }
 
+    /// Project a playfield point (x, y, z) through a straight-on SetupCamera to
+    /// field-pixel screen coords — used to render Draw3 effects (spellcard
+    /// bubbles) at their 3D positions. The gameplay layer (enemies/bullets) is
+    /// drawn screen-space 1:1 (XYZRHW), so effects use the matching un-pitched
+    /// camera (facing 0,0,1): playfield x/y map 1:1 and the bubble's z adds the
+    /// perspective swirl. World Y is negated to match the camera's convention.
+    pub fn project_point(pf: [f32; 3]) -> Option<[f32; 2]> {
+        let mid_w = FIELD_W / 2.0;
+        let mid_h = FIELD_H / 2.0;
+        let fov = 30.0_f32.to_radians();
+        let cam_dist = mid_h / (fov / 2.0).tan();
+        let eye = Vec3::new(mid_w, -mid_h, -cam_dist);
+        let at = Vec3::new(mid_w, -mid_h, 0.0);
+        let view = Mat4::look_at_lh(eye, at, Vec3::Y);
+        let proj = Mat4::perspective_lh(fov, FIELD_W / FIELD_H, 100.0, 10000.0);
+        let clip = (proj * view) * glam::Vec4::new(pf[0], -pf[1], pf[2], 1.0);
+        if clip.w <= 1e-3 {
+            return None;
+        }
+        let nx = clip.x / clip.w;
+        let ny = clip.y / clip.w;
+        Some([(nx * 0.5 + 0.5) * FIELD_W, (1.0 - (ny * 0.5 + 0.5)) * FIELD_H])
+    }
+
     pub fn scene(&self) -> BgScene {
         let mvp = self.view_proj();
         let view = self.view_matrix();
