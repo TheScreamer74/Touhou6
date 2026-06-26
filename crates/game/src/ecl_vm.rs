@@ -1867,6 +1867,47 @@ impl Enemy {
                 self.ex_bat_transform(world);
                 self.ctx.ivars[3] = total;
             }
+            12 => {
+                // ExInsStage4Func12 (EnemyEclInstr.cpp:1071): from each of the
+                // enemy's first 8 live lasers, fire the current bulletProps from a
+                // point 64px out along the laser's angle.
+                for slot in 0..8 {
+                    let Some(idx) = self.lasers[slot] else { continue };
+                    let Some(angle) = world.lasers.get(idx).filter(|l| l.in_use).map(|l| l.angle)
+                    else {
+                        continue;
+                    };
+                    self.bullet_props.pos =
+                        [self.pos[0] + angle.cos() * 64.0, self.pos[1] + angle.sin() * 64.0];
+                    spawn_bullet_pattern(world, &self.bullet_props);
+                }
+            }
+            14 => {
+                // ExInsStageXFunc14 (EnemyEclInstr.cpp:1110): walk each of the
+                // enemy's first 8 live lasers from startOffset to endOffset in 48px
+                // steps, firing the current bulletProps at each point. var3 counts
+                // the lasers that fired.
+                self.ctx.ivars[3] = 0;
+                for slot in 0..8 {
+                    let Some(idx) = self.lasers[slot] else { continue };
+                    let Some((angle, lpos, start, end)) = world
+                        .lasers
+                        .get(idx)
+                        .filter(|l| l.in_use)
+                        .map(|l| (l.angle, l.pos, l.start_offset, l.end_offset))
+                    else {
+                        continue;
+                    };
+                    let (sin, cos) = (angle.sin(), angle.cos());
+                    let mut pm = start;
+                    while end > pm {
+                        self.bullet_props.pos = [cos * pm + lpos[0], sin * pm + lpos[1]];
+                        spawn_bullet_pattern(world, &self.bullet_props);
+                        pm += 48.0;
+                    }
+                    self.ctx.ivars[3] += 1;
+                }
+            }
             _ => {}
         }
     }
