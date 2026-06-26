@@ -257,6 +257,12 @@ pub struct Enemy {
     pub anm_poses: [i16; 5], // default, far left, far right, left, right
     pub anm_pose_state: u8,  // 0xff = unset, 0 = default, 1 = left, 2 = right
     pub anm_dirty: bool,
+    /// ECL op120 ANMFLAGROTATION: render the sprite rotated to the enemy's
+    /// movement angle (EnemyManager.cpp:801, primaryVm.rotation.z = angle).
+    pub rotate_anm: bool,
+    /// ECL op128 ANMINTERRUPTMAIN: an interrupt label queued for the primary anm
+    /// runner, applied before its next tick (primaryVm.pendingInterrupt).
+    pub pending_interrupt: Option<i32>,
     pub boss_id: u8,
     /// Boss remaining-attack count shown by the HUD (ECL BOSSSETLIFECOUNT).
     pub spell_count: i32,
@@ -336,6 +342,8 @@ impl Default for Enemy {
             anm_poses: [-1; 5],
             anm_pose_state: 0xff,
             anm_dirty: false,
+            rotate_anm: false,
+            pending_interrupt: None,
             boss_id: 0,
             spell_count: 0,
             star_angle: [0.0; 6],
@@ -1389,7 +1397,14 @@ impl Enemy {
                 // in update_effects, like death effects. (#23/#30)
                 let effect_id = instr.arg_i32(0);
                 let count = instr.arg_i32(1);
-                world.spawn_particles(effect_id, self.pos, count, [1.0; 4]);
+                let c = instr.arg_i32(2) as u32; // ZunColor ARGB particleColor
+                let color = [
+                    ((c >> 16) & 0xff) as f32 / 255.0,
+                    ((c >> 8) & 0xff) as f32 / 255.0,
+                    (c & 0xff) as f32 / 255.0,
+                    ((c >> 24) & 0xff) as f32 / 255.0,
+                ];
+                world.spawn_particles(effect_id, self.pos, count, color);
             }
             119 => {
                 // DROPITEMS (exact port: big power first unless maxed)
@@ -1407,7 +1422,7 @@ impl Enemy {
                     world.events.push(WorldEvent::DropItem(pos, kind));
                 }
             }
-            120 => {} // ANMFLAGROTATION
+            120 => self.rotate_anm = instr.arg_i32(0) != 0, // ANMFLAGROTATION
             121 => {
                 // EXINSCALL: run g_EclExInsn[arg0] once, with arg1 as i32Param.
                 self.exec_ex(instr.arg_i32(0), instr.arg_i32(1), world);
@@ -1431,7 +1446,11 @@ impl Enemy {
             125 => {} // STDUNPAUSE
             126 => self.spell_count = instr.arg_i32(0), // BOSSSETLIFECOUNT (gui)
             127 => {} // DEBUGWATCH
-            128 | 129 => {} // ANMINTERRUPTMAIN / SLOT — anm interrupts pending
+            // ANMINTERRUPTMAIN: queue an interrupt for the primary anm runner.
+            // ANMINTERRUPTSLOT (129) targets the sub-vms (enemy->vms[]) the port
+            // doesn't model, so it stays a no-op.
+            128 => self.pending_interrupt = Some(instr.arg_i32(0)),
+            129 => {} // ANMINTERRUPTSLOT — sub-vm anim not modelled
             op if std::env::var_os("TH06_TRACE_OP").is_some() => { eprintln!("unhandled ECL op {op}"); }
             130 => self.disable_call_stack = instr.arg_i32(0) != 0,
             131 => {

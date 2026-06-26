@@ -1381,6 +1381,15 @@ impl Stage {
                     .get(&anm_script)
                     .map(|s| AnmRunner::new(s.instrs.clone()));
             }
+            // ECL op128 ANMINTERRUPTMAIN: jump the primary runner to its queued
+            // interrupt label before the tick (primaryVm.pendingInterrupt).
+            if let Some(n) = self.enemies[i].pending_interrupt.take() {
+                if n >= 0 {
+                    if let Some(anim) = &mut self.anims[i] {
+                        anim.interrupt(n as u32);
+                    }
+                }
+            }
             if let Some(anim) = &mut self.anims[i] {
                 anim.tick();
             }
@@ -2563,7 +2572,9 @@ impl Stage {
                 ],
                 src: [u0, sy / th, u1, (sy + sp.height) / th],
                 tint: [1.0, 1.0, 1.0, anim.alpha],
-                rot: 0.0,
+                // op120 ANMFLAGROTATION: face the movement angle when flagged
+                // (EnemyManager.cpp:801); otherwise unrotated as before.
+                rot: if e.rotate_anm { e.angle } else { 0.0 },
                 additive: false,
             });
         }
