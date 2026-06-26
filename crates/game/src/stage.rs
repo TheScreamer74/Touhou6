@@ -1468,7 +1468,14 @@ impl Stage {
     fn update_player(&mut self, input: &Input) {
         let focus = input.held(Key::Focus);
         self.last_input_focus = focus;
-        let speed = if focus { 2.0 } else { 4.0 };
+        // Per-character movement speed (g_CharData, Player.cpp:27): Reimu 4.0/2.0,
+        // Marisa 5.0/2.5 (ortho / focus). Diagonal is ortho/sqrt(2), applied below.
+        let (ortho, focus_speed) = if self.character.is_marisa() {
+            (5.0, 2.5)
+        } else {
+            (4.0, 2.0)
+        };
+        let speed = if focus { focus_speed } else { ortho };
         let mut d = [0.0f32, 0.0f32];
         if input.held(Key::Left) {
             d[0] -= 1.0;
@@ -1994,13 +2001,31 @@ impl Stage {
         }
     }
 
+    /// Half of the bullet's collision box (grazeSize/2), used for both the kill
+    /// box and the +20 graze box against the player's 1.25 hitbox. The decomp
+    /// (BulletManager.cpp:1382) derives grazeSize from the type's sprite height
+    /// and its anm script: <=8px -> 4; <=16px -> rice/shard 4, kunai 5, else 6;
+    /// <=32px -> fireball 11, dagger 9, else 16; bigger -> 32.
     fn bullet_radius(&self, b: &Bullet) -> f32 {
-        match self.bullet_sprites.get(&b.sprite).map(|s| s.height as u32) {
-            Some(h) if h <= 8 => 2.0,
-            Some(h) if h <= 16 => 3.2,
-            Some(_) => 8.0,
-            None => 3.0,
-        }
+        let t = bullet_type_of(b.sprite);
+        let graze_size = if b.height <= 8.0 {
+            4.0
+        } else if b.height <= 16.0 {
+            match t {
+                2 | 5 => 4.0, // rice, shard
+                4 => 5.0,     // kunai
+                _ => 6.0,
+            }
+        } else if b.height <= 32.0 {
+            match t {
+                7 => 11.0, // fireball
+                8 => 9.0,  // dagger
+                _ => 16.0,
+            }
+        } else {
+            32.0
+        };
+        graze_size / 2.0
     }
 
     fn collide(&mut self) {
