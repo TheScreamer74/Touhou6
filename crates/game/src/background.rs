@@ -191,6 +191,10 @@ pub struct Background {
 
     time: f32,
     script_idx: usize,
+    /// Set by ECL op125 STDUNPAUSE to release the STD script parked at an
+    /// STDOP_PAUSE (op5) — the camera freeze during a boss intro. Consumed on
+    /// the next tick. (g_Stage.unpauseFlag)
+    unpause: bool,
     cam: Vec3,
     cam_init: Vec3,
     cam_final: Vec3,
@@ -264,6 +268,7 @@ impl Background {
             tex_slot,
             time: 0.0,
             script_idx: 0,
+            unpause: false,
             cam: Vec3::ZERO,
             cam_init: Vec3::ZERO,
             cam_final: Vec3::ZERO,
@@ -332,6 +337,17 @@ impl Background {
                     self.facing_timer = 0;
                     self.script_idx += 1;
                 }
+                5 => {
+                    // STDOP_PAUSE: park the script here (camera freeze during a
+                    // boss intro) until ECL op125 sets the unpause flag, then step
+                    // past it and clear the flag (Stage.cpp:138).
+                    if self.unpause {
+                        self.unpause = false;
+                        self.script_idx += 1;
+                    } else {
+                        break;
+                    }
+                }
                 _ => self.script_idx += 1,
             }
         }
@@ -382,6 +398,11 @@ impl Background {
         let eye = Vec3::new(mid_w, -mid_h, -cam_dist * self.facing.z);
         let at = Vec3::new(mid_w + self.facing.x, -mid_h + self.facing.y, 0.0);
         Mat4::look_at_lh(eye, at, Vec3::Y)
+    }
+
+    /// ECL op125 STDUNPAUSE: release the STD script from its STDOP_PAUSE keyframe.
+    pub fn request_unpause(&mut self) {
+        self.unpause = true;
     }
 
     pub fn scene(&self) -> BgScene {

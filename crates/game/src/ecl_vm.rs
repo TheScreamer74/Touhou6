@@ -356,6 +356,9 @@ pub enum WorldEvent {
     BulletCancel,
     BossSet(bool),
     DropItem([f32; 2], i32),
+    /// ECL op125 STDUNPAUSE: release the STD background script parked at an
+    /// STDOP_PAUSE keyframe (the boss-intro camera freeze).
+    StdUnpause,
 }
 
 /// Per-frame context the VM needs from the game.
@@ -1428,8 +1431,11 @@ impl Enemy {
                     .events
                     .push(WorldEvent::DropItem([self.pos[0], self.pos[1]], instr.arg_i32(0)));
             }
-            125 => {} // STDUNPAUSE
-            126 => self.spell_count = instr.arg_i32(0), // BOSSSETLIFECOUNT (gui)
+            125 => world.events.push(WorldEvent::StdUnpause), // STDUNPAUSE
+            // BOSSSETLIFECOUNT: sets the boss phase-pip count. The decomp also adds
+            // 1800 to g_GameManager.counat, which only feeds the result-screen
+            // completion %, a screen the port doesn't have — so that part is moot.
+            126 => self.spell_count = instr.arg_i32(0),
             127 => {} // DEBUGWATCH
             128 | 129 => {} // ANMINTERRUPTMAIN / SLOT — anm interrupts pending
             op if std::env::var_os("TH06_TRACE_OP").is_some() => { eprintln!("unhandled ECL op {op}"); }

@@ -2478,6 +2478,11 @@ impl Stage {
                         self.items.push(Item::fall(pos, kind));
                     }
                 }
+                WorldEvent::StdUnpause => {
+                    if let Some(bg) = &mut self.background {
+                        bg.request_unpause();
+                    }
+                }
             }
         }
     }
