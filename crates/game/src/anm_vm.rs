@@ -32,6 +32,9 @@ pub struct AnmRunner {
     pub sprite: Option<u32>,
     pub pos: [f32; 2],
     pub alpha: f32,
+    /// RGB tint (opcode 4 SetColor), 0..1 per channel. Decomp keeps it in the
+    /// same D3DCOLOR as alpha; here it is split out. Default white (no tint).
+    pub color: [f32; 3],
     pub scale: [f32; 2],
     /// Per-frame scale velocity (opcode 11 SetScaleSpeed), added to `scale`.
     scale_vel: [f32; 2],
@@ -64,6 +67,7 @@ impl AnmRunner {
             sprite: None,
             pos: [0.0, 0.0],
             alpha: 1.0,
+            color: [1.0, 1.0, 1.0],
             scale: [1.0, 1.0],
             scale_vel: [0.0, 0.0],
             rotation: 0.0,
@@ -168,6 +172,16 @@ impl AnmRunner {
                 2 => self.scale = [i.arg_f32(0), i.arg_f32(1)],
                 11 => self.scale_vel = [i.arg_f32(0), i.arg_f32(1)],
                 3 => self.alpha = i.arg_u32(0) as f32 / 255.0,
+                4 => {
+                    // SetColor: RGB from the arg's low 24 bits (D3DCOLOR 0xAARRGGBB),
+                    // alpha kept separately (op3).
+                    let v = i.arg_u32(0);
+                    self.color = [
+                        ((v >> 16) & 0xff) as f32 / 255.0,
+                        ((v >> 8) & 0xff) as f32 / 255.0,
+                        (v & 0xff) as f32 / 255.0,
+                    ];
+                }
                 5 => {
                     // Jump: arg is a byte offset from script start; the
                     // clock snaps to the target instruction's time.
