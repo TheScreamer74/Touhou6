@@ -495,13 +495,16 @@ fn power_rank(power: i32) -> usize {
     i
 }
 
-/// One Fantasy Seal bomb orb (ReimuA bomb): flies out, then homes onto the
-/// nearest enemy as a moving damage zone.
-struct BombOrb {
+/// One axis-aligned bomb rectangle (Player::PlayerRect), rebuilt every frame.
+/// `bomb_projectiles` cancel bullets (Player::CalcKillBoxCollision / CheckGraze
+/// return 2 → the bullet despawns and drops a point item); `bomb_regions` damage
+/// enemies (Player::CalcDamageToEnemy via bombRegionSizes/Positions/Damages). An
+/// entry with `size[0] == 0` is inactive, matching the decomp's per-frame clear
+/// (Player::OnUpdate zeroes every `sizeX` before the bomb calc repopulates them).
+#[derive(Clone, Copy, Default)]
+struct BombRect {
     pos: [f32; 2],
-    vel: [f32; 2],
-    spd: f32,
-    hue: f32,
+    size: [f32; 2],
 }
 
 /// Falling collectible (ItemManager port). `kind` matches ItemType:
@@ -718,7 +721,42 @@ pub struct Stage {
     lives: i32,
     bombs: i32,
     invuln: u32,
+    /// `> 0` while a bomb is running (mirrors PlayerBombInfo.isInUse for the many
+    /// `bombing > 0` gates).
     bombing: u32,
+    /// Bomb timer (PlayerBombInfo.timer): counts up 0..bomb_duration.
+    bomb_timer: i32,
+    /// Bomb duration (PlayerBombInfo.duration), set by the active bomb's calc.
+    bomb_duration: i32,
+    /// PlayerBombInfo.isInUse.
+    bomb_in_use: bool,
+    /// Movement speed multiplier during a bomb (MarisaB slows to 0.3, others 1.0).
+    bomb_move_mult: f32,
+    /// ReimuA Fantasy Seal per-seal state machine (PlayerBombInfo): 0 dormant,
+    /// 1 homing, 2.. exploding/cooldown. `seal_speed` is reimuABombProjectiles-
+    /// Related; `seal_pos`/`seal_vel` are bombInfo.bombRegion{Positions,Velocities}.
+    seal_state: [i32; 8],
+    seal_speed: [f32; 8],
+    seal_pos: [[f32; 2]; 8],
+    seal_vel: [[f32; 2]; 8],
+    /// Per-region accumulated raw bomb damage (Player::unk_838): ReimuA explodes a
+    /// seal once it has dealt >= 100. Reset at bomb start, not each frame.
+    bomb_dmg_accum: [i32; 32],
+    /// Transient bomb rects, zeroed each frame then rebuilt by the bomb calc.
+    /// `bomb_projectiles` cancel bullets; `bomb_regions`/`bomb_region_dmg` damage
+    /// enemies (see [`BombRect`]).
+    bomb_projectiles: [BombRect; 16],
+    bomb_regions: [BombRect; 32],
+    bomb_region_dmg: [i32; 32],
+    /// spellcardInfo.usedBomb: a bomb was fired while a spellcard was active.
+    spell_used_bomb: bool,
+    /// Bomb sprite anm runners (PlayerBombInfo.sprites[8][4], flattened to 32),
+    /// started by each bomb's calc (ExecuteAnmIdx) and ticked per frame
+    /// (ExecuteScript). ReimuA: seal i slot k → index i*4+k (scripts 133+k).
+    /// ReimuB: beam i (scripts 137+i). MarisaA: star i, 0..8 (scripts 5+i%3).
+    /// MarisaB: i, 0..4 (scripts 8+i). ReimuB also reads each runner's `pos` as
+    /// the posOffset added to its beam's region/projectile.
+    bomb_sprites: Vec<Option<AnmRunner>>,
     /// Player.cpp fireBulletTimer: -1 idle, else counts 0..=30 while shooting.
     fire_timer: i32,
     /// Deathbomb grace: frames left to bomb after a lethal hit (0 = not dying).
@@ -728,11 +766,11 @@ pub struct Stage {
     point_items: i64,
     /// Focus held last update, for drawing the orbs in their focused position.
     last_input_focus: bool,
-    /// Position of the last enemy a player shot hit, for orb-amulet homing.
+    /// positionOfLastEnemyHit: the lowest on-screen enemy, for the orb-amulet and
+    /// ReimuA-seal homing (set in `collide`).
     last_enemy_hit: Option<[f32; 2]>,
     state: PlayerState,
     shots: Vec<Shot>,
-    bomb_orbs: Vec<BombOrb>,
     items: Vec<Item>,
     particles: Vec<Particle>,
     /// Cosmetic-only RNG for visual particle bursts (`spawn_burst`), kept
@@ -884,6 +922,20 @@ impl Stage {
             bombs: 3,
             invuln: 0,
             bombing: 0,
+            bomb_timer: 0,
+            bomb_duration: 0,
+            bomb_in_use: false,
+            bomb_move_mult: 1.0,
+            seal_state: [0; 8],
+            seal_speed: [0.0; 8],
+            seal_pos: [[0.0; 2]; 8],
+            seal_vel: [[0.0; 2]; 8],
+            bomb_dmg_accum: [0; 32],
+            bomb_projectiles: [BombRect::default(); 16],
+            bomb_regions: [BombRect::default(); 32],
+            bomb_region_dmg: [0; 32],
+            spell_used_bomb: false,
+            bomb_sprites: (0..32).map(|_| None).collect(),
             fire_timer: -1,
             dying: 0,
             graze: 0,
@@ -892,7 +944,6 @@ impl Stage {
             last_enemy_hit: None,
             state: PlayerState::Alive,
             shots: Vec::new(),
-            bomb_orbs: Vec::new(),
             items: Vec::new(),
             particles: Vec::new(),
             fx_rng: Rng::new(0x4321),
@@ -1112,6 +1163,15 @@ impl Stage {
             self.pos = [FIELD_W / 2.0, FIELD_H - 40.0];
             self.invuln = 180;
             self.state = PlayerState::Alive;
+        }
+        // Player::OnUpdate clears every bomb rect's size before the bomb calc
+        // repopulates the active ones, so each frame's rects come only from this
+        // frame's calc (a despawned seal stops cancelling/damaging immediately).
+        for r in &mut self.bomb_projectiles {
+            r.size[0] = 0.0;
+        }
+        for r in &mut self.bomb_regions {
+            r.size[0] = 0.0;
         }
         // The player can still move (but not shoot/bomb) during dialogue.
         if matches!(self.state, PlayerState::Alive) {
@@ -1475,7 +1535,9 @@ impl Stage {
         } else {
             (4.0, 2.0)
         };
-        let speed = if focus { focus_speed } else { ortho };
+        // MarisaB's Master Spark slows the player to 0.3 while bombing
+        // (verticalMovementSpeedMultiplierDuringBomb); other bombs leave it 1.0.
+        let speed = if focus { focus_speed } else { ortho } * self.bomb_move_mult;
         let mut d = [0.0f32, 0.0f32];
         if input.held(Key::Left) {
             d[0] -= 1.0;
@@ -1547,7 +1609,7 @@ impl Stage {
             0
         };
 
-        if self.bombing > 0 {
+        if self.bomb_in_use {
             self.update_bomb();
         } else if can_act && input.pressed(Key::Bomb) && self.bombs > 0 {
             self.fire_bomb();
@@ -1560,130 +1622,266 @@ impl Stage {
         }
     }
 
-    /// Bomb, one per shot type (BombData.cpp). 360-frame invulnerability.
+    /// Fire a bomb (Player::OnUpdate bomb branch): mark it in use, reset the
+    /// timer, drop uncollected items (each calc's RemoveAllItems), then run the
+    /// calc once for frame 0. Bullets are no longer cleared wholesale — the
+    /// per-bomb `bombProjectiles` cancel them region-by-region in `collide`.
     fn fire_bomb(&mut self) {
         self.dying = 0; // a bomb in the deathbomb window cancels the death
         self.bombs -= 1;
         self.spell_capturing = false; // bombing forfeits the capture
-        self.world.bullets.clear();
-        self.cancel_lasers();
-        self.bomb_orbs.clear();
+        self.spell_used_bomb = self.spell_active; // spellcardInfo.usedBomb
+        self.items.clear(); // g_ItemManager.RemoveAllItems()
         self.bomb_kind = match self.character {
             Character::ReimuA => 0,
             Character::ReimuB => 1,
             Character::MarisaA => 2,
             Character::MarisaB => 3,
         };
-        // Per-bomb invulnerability (BombData SetCurrent): ReimuB 200, MarisaA
-        // 300, the others 360.
-        let invuln = match self.bomb_kind {
-            1 => 200,
-            2 => 300,
-            _ => 360,
-        };
-        self.invuln = self.invuln.max(invuln);
-        match self.bomb_kind {
-            0 => {
-                // Fantasy Seal: 8 homing orbs.
-                self.bombing = 300;
-                for i in 0..8 {
-                    let a = i as f32 / 8.0 * std::f32::consts::TAU + 0.39;
-                    self.bomb_orbs.push(BombOrb { pos: self.pos, vel: [a.cos() * 4.0, a.sin() * 4.0], spd: 4.0, hue: i as f32 / 8.0 });
-                }
-            }
-            1 => self.bombing = 140, // Dream cross: beams, no orbs
-            2 => {
-                // Stardust: a ring of stars drifting outward (no homing).
-                self.bombing = 250;
-                for i in 0..16 {
-                    let a = i as f32 / 16.0 * std::f32::consts::TAU;
-                    self.bomb_orbs.push(BombOrb { pos: self.pos, vel: [a.cos() * 3.0, a.sin() * 3.0], spd: 3.0, hue: i as f32 / 16.0 });
-                }
-            }
-            _ => self.bombing = 300, // Master Spark
+        self.bomb_in_use = true;
+        self.bomb_timer = 0;
+        self.bomb_duration = 999; // each calc overwrites this on its frame 0
+        self.bomb_dmg_accum = [0; 32]; // Player::unk_838, reset per bomb
+        for s in &mut self.bomb_sprites {
+            *s = None;
         }
-        self.spawn_burst(self.pos, 24, 6.0, [0.6, 0.8, 1.0], 16.0);
-        self.events.push(Event::Sfx("power1"));
+        self.update_bomb(); // run the calc for frame 0
     }
 
-    /// Per-frame bomb update.
+    /// End the active bomb (Gui::EndPlayerSpellcard + isInUse = 0); also restores
+    /// the movement multiplier MarisaB's Master Spark lowered.
+    fn end_bomb(&mut self) {
+        self.bomb_in_use = false;
+        self.bomb_move_mult = 1.0;
+    }
+
+    /// Per-frame bomb update: the per-frame rect clear already ran in `update`,
+    /// so each calc only repopulates its active rects. Dispatches to the
+    /// character's BombData calc, then refreshes the `bombing` gate.
     fn update_bomb(&mut self) {
-        self.bombing -= 1;
-        self.world.bullets.clear();
         match self.bomb_kind {
-            1 => {
-                // Dream cross: a vertical beam at the player's x and a
-                // horizontal beam at the player's y melt anything they touch.
-                let (px, py) = (self.pos[0], self.pos[1]);
-                for e in &mut self.enemies {
-                    if e.occupied && e.interactable && e.damageable
-                        && ((e.pos[0] - px).abs() < 40.0 || (e.pos[1] - py).abs() < 40.0)
-                    {
-                        e.life -= 12;
-                    }
-                }
-                return;
-            }
-            3 => {
-                // Master Spark (BombMarisaBCalc): full playfield width, from the
-                // top down to the player, 12 damage per frame (skipping every
-                // 4th, matching `timer % 4`).
-                if self.bombing % 4 != 0 {
-                    for e in &mut self.enemies {
-                        if e.occupied && e.interactable && e.damageable && e.pos[1] <= self.pos[1] {
-                            e.life -= 12;
-                        }
-                    }
-                }
-                return;
-            }
-            _ => {}
+            0 => self.bomb_reimu_a(),
+            1 => self.bomb_reimu_b(),
+            2 => self.bomb_marisa_a(),
+            _ => self.bomb_marisa_b(),
         }
-        let stardust = self.bomb_kind == 2;
-        // Pick the nearest enemy as the shared homing pivot.
-        let pivot = self
-            .enemies
-            .iter()
-            .filter(|e| e.occupied && e.interactable)
-            .min_by(|a, b| {
-                let da = (a.pos[0] - self.pos[0]).hypot(a.pos[1] - self.pos[1]);
-                let db = (b.pos[0] - self.pos[0]).hypot(b.pos[1] - self.pos[1]);
-                da.total_cmp(&db)
-            })
-            .map(|e| [e.pos[0], e.pos[1]]);
-        for o in &mut self.bomb_orbs {
-            // Fantasy Seal orbs home; Stardust stars drift straight outward.
-            if let (false, Some(t)) = (stardust, pivot) {
-                let mut vx = t[0] - o.pos[0];
-                let mut vy = t[1] - o.pos[1];
-                let mut len = (vx * vx + vy * vy).sqrt() / (o.spd / 8.0).max(0.01);
+        // Active-state gate: tracks isInUse exactly (no off-by-one at the last
+        // processed frame, where the timer has already reached the duration).
+        self.bombing = self.bomb_in_use as u32;
+    }
+
+    /// BombData::BombReimuACalc — Fantasy Seal. A one-frame 256² central blast
+    /// (`bombProjectiles[8]`) at the cast, then seals 1..=7 spawn over frames
+    /// 76..=172 (seal 0 is never spawned — the decomp's `&& (i = …)` short-
+    /// circuits on i==0, a ZUN quirk), each homing toward the lowest on-screen
+    /// enemy and exploding into a 256²/200-damage burst once it has dealt 100
+    /// damage or the bomb is in its last 30 frames.
+    fn bomb_reimu_a(&mut self) {
+        use std::f32::consts::{PI, TAU};
+        if self.bomb_timer >= self.bomb_duration {
+            self.end_bomb();
+            return;
+        }
+        if self.bomb_timer == 0 {
+            self.bomb_duration = 300;
+            self.invuln = 360;
+            self.seal_state = [0; 8];
+            // 256² central blast; cleared next frame, so it cancels bullets once.
+            self.bomb_projectiles[8] = BombRect { pos: self.pos, size: [256.0, 256.0] };
+        }
+        if (60..180).contains(&self.bomb_timer) && self.bomb_timer % 16 == 0 {
+            let i = ((self.bomb_timer - 60) / 16) as usize;
+            if i != 0 {
+                self.seal_state[i] = 1;
+                self.seal_speed[i] = 4.0;
+                self.seal_pos[i] = self.pos;
+                let angle = self.world.rng.f32_zero_to_one() * TAU - PI;
+                self.seal_vel[i] = [angle.cos() * self.seal_speed[i], angle.sin() * self.seal_speed[i]];
+                self.bomb_dmg_accum[i] = 0;
+                // ExecuteAnmIdx the seal's 4 sprites (REIMU_A_BOMB_ARRAY = 133+k).
+                for k in 0..4 {
+                    self.bomb_sprites[i * 4 + k] =
+                        Some(AnmRunner::new(self.player_scripts[&(133 + k as i32)].clone()));
+                }
+                self.events.push(Event::Sfx(SFX_BY_IDX[13])); // SOUND_BOMB_REIMU_A
+            }
+        }
+        // positionOfLastEnemyHit: the lowest on-screen enemy, else the player.
+        let pivot = self.last_enemy_hit.unwrap_or(self.pos);
+        for i in 0..8 {
+            if self.seal_state[i] == 0 {
+                continue;
+            }
+            if self.seal_state[i] == 1 {
+                let mut ax = pivot[0] - self.seal_pos[i][0];
+                let mut ay = pivot[1] - self.seal_pos[i][1];
+                let mut len = (ax * ax + ay * ay).sqrt() / (self.seal_speed[i] / 8.0);
                 if len < 1.0 {
                     len = 1.0;
                 }
-                vx = vx / len + o.vel[0];
-                vy = vy / len + o.vel[1];
-                len = (vx * vx + vy * vy).sqrt().max(0.01);
-                o.spd = len.min(10.0).max(1.0);
-                o.vel = [vx * o.spd / len, vy * o.spd / len];
+                ax = ax / len + self.seal_vel[i][0];
+                ay = ay / len + self.seal_vel[i][1];
+                len = (ax * ax + ay * ay).sqrt();
+                self.seal_speed[i] = len.min(10.0).max(1.0);
+                self.seal_vel[i] = [ax * self.seal_speed[i] / len, ay * self.seal_speed[i] / len];
+
+                self.bomb_regions[i] = BombRect { pos: self.seal_pos[i], size: [48.0, 48.0] };
+                self.bomb_region_dmg[i] = 8;
+                self.bomb_projectiles[i] = BombRect { pos: self.seal_pos[i], size: [48.0, 48.0] };
+
+                if self.bomb_dmg_accum[i] >= 100 || self.bomb_timer >= self.bomb_duration - 30 {
+                    self.seal_state[i] = 2;
+                    self.bomb_regions[i].size = [256.0, 256.0];
+                    self.bomb_region_dmg[i] = 200;
+                    self.bomb_projectiles[i].size = [256.0, 256.0];
+                    // pendingInterrupt = 1: jump the 4 seal sprites to the burst.
+                    for k in 0..4 {
+                        if let Some(r) = &mut self.bomb_sprites[i * 4 + k] {
+                            r.interrupt(1);
+                        }
+                    }
+                    self.events.push(Event::Sfx(SFX_BY_IDX[15])); // SOUND_F
+                    // ScreenEffect SHAKE (16,8) — screen shake not yet ported.
+                }
+            } else {
+                self.seal_state[i] += 1;
+                if self.seal_state[i] >= 30 {
+                    self.seal_state[i] = 0;
+                }
             }
-            o.pos[0] += o.vel[0];
-            o.pos[1] += o.vel[1];
-        }
-        // Each orb is a damage region (Stardust's stars are larger, 64px).
-        let r = if stardust { 32.0 } else { 24.0 };
-        for e in &mut self.enemies {
-            if !e.occupied || !e.interactable || !e.damageable {
-                continue;
-            }
-            for o in &self.bomb_orbs {
-                if (e.pos[0] - o.pos[0]).abs() < r && (e.pos[1] - o.pos[1]).abs() < r {
-                    e.life -= 8;
+            self.seal_pos[i][0] += self.seal_vel[i][0];
+            self.seal_pos[i][1] += self.seal_vel[i][1];
+            for k in 0..4 {
+                if let Some(r) = &mut self.bomb_sprites[i * 4 + k] {
+                    r.tick(); // ExecuteScript
                 }
             }
         }
-        if self.bombing == 0 {
-            self.bomb_orbs.clear();
+        self.bomb_timer += 1;
+    }
+
+    /// BombData::BombReimuBCalc — Dream Sign "Evil Sealing Circle". Two vertical
+    /// (62×448) and two horizontal (384×62) beams cross at the player; their
+    /// bullet-cancel rects stay live every frame, but they only damage enemies
+    /// on odd frames (`timer % 2`).
+    fn bomb_reimu_b(&mut self) {
+        if self.bomb_timer >= self.bomb_duration {
+            self.end_bomb();
+            return;
         }
+        if self.bomb_timer == 0 {
+            self.bomb_duration = 140;
+            self.invuln = 200;
+            self.events.push(Event::Sfx(SFX_BY_IDX[6])); // SOUND_BOMB_REIMARI
+            // ExecuteAnmIdx the 4 beam sprites (REIMU_B_BOMB_ARRAY = scripts 137+i);
+            // their animated pos becomes each beam's posOffset.
+            for i in 0..4 {
+                self.bomb_sprites[i] =
+                    Some(AnmRunner::new(self.player_scripts[&(137 + i as i32)].clone()));
+            }
+            // bombRegionPositions seeds (z layering is draw-only, omitted).
+            self.seal_pos[0] = [self.pos[0], 224.0];
+            self.seal_pos[1] = [192.0, self.pos[1]];
+            self.seal_pos[2] = [self.pos[0], 224.0];
+            self.seal_pos[3] = [192.0, self.pos[1]];
+            // ScreenEffect SHAKE (60,2,6) — not yet ported.
+        } else {
+            // ScreenEffect SHAKE (80,20) at timer 60 — not yet ported.
+            self.bomb_projectiles[0].size = [62.0, 448.0];
+            self.bomb_projectiles[1].size = [384.0, 62.0];
+            self.bomb_projectiles[2].size = [62.0, 448.0];
+            self.bomb_projectiles[3].size = [384.0, 62.0];
+            for i in 0..4 {
+                let off = if let Some(r) = self.bomb_sprites[i].as_mut() {
+                    r.tick(); // ExecuteScript
+                    r.pos
+                } else {
+                    [0.0, 0.0]
+                };
+                if self.bomb_timer % 2 != 0 {
+                    let pos = [self.seal_pos[i][0] + off[0], self.seal_pos[i][1] + off[1]];
+                    self.bomb_projectiles[i].pos = pos;
+                    self.bomb_regions[i] = BombRect { pos, size: self.bomb_projectiles[i].size };
+                    self.bomb_region_dmg[i] = 8;
+                }
+            }
+        }
+        self.bomb_timer += 1;
+    }
+
+    /// BombData::BombMarisaACalc — Stardust Reverie. Eight 128² stars fan out
+    /// from the player at speed 2, cancelling bullets and dealing 8 on two of
+    /// every three frames (`timer % 3`).
+    fn bomb_marisa_a(&mut self) {
+        use std::f32::consts::TAU;
+        if self.bomb_timer >= self.bomb_duration {
+            self.end_bomb();
+            return;
+        }
+        if self.bomb_timer == 0 {
+            self.bomb_duration = 250;
+            self.invuln = 300;
+            for i in 0..8 {
+                // ExecuteAnmIdx the star sprite (BLUE/GREEN/RED = 5 + i%3).
+                self.bomb_sprites[i] =
+                    Some(AnmRunner::new(self.player_scripts[&(5 + (i % 3) as i32)].clone()));
+                self.seal_pos[i] = self.pos;
+                let a = i as f32 * TAU / 8.0;
+                self.seal_vel[i] = [a.cos() * 2.0, a.sin() * 2.0];
+            }
+            self.events.push(Event::Sfx(SFX_BY_IDX[6])); // SOUND_BOMB_REIMARI
+            // ScreenEffect SHAKE (120,4,1) — not yet ported.
+        } else {
+            for i in 0..8 {
+                self.seal_pos[i][0] += self.seal_vel[i][0];
+                self.seal_pos[i][1] += self.seal_vel[i][1];
+                if self.bomb_timer % 3 != 0 {
+                    self.bomb_projectiles[i] = BombRect { pos: self.seal_pos[i], size: [128.0, 128.0] };
+                    self.bomb_regions[i] = BombRect { pos: self.seal_pos[i], size: [128.0, 128.0] };
+                    self.bomb_region_dmg[i] = 8;
+                }
+                if let Some(r) = self.bomb_sprites[i].as_mut() {
+                    r.tick(); // ExecuteScript
+                }
+            }
+        }
+        self.bomb_timer += 1;
+    }
+
+    /// BombData::BombMarisaBCalc — Master Spark. A 384-wide column from the top
+    /// edge down to the player (height = player y), 12 damage on three of every
+    /// four frames (`timer % 4`); the player crawls at 0.3 speed while firing.
+    fn bomb_marisa_b(&mut self) {
+        if self.bomb_timer >= self.bomb_duration {
+            self.end_bomb();
+            return;
+        }
+        if self.bomb_timer == 0 {
+            self.bomb_duration = 300;
+            self.invuln = 360;
+            for i in 0..4 {
+                // ExecuteAnmIdx the spark sprites (MASTER_SPARK = 8 + i).
+                self.bomb_sprites[i] =
+                    Some(AnmRunner::new(self.player_scripts[&(8 + i as i32)].clone()));
+                self.seal_pos[i] = self.pos;
+            }
+            self.events.push(Event::Sfx(SFX_BY_IDX[19])); // SOUND_BOMB_MARISA_B
+            self.bomb_move_mult = 0.3;
+        } else {
+            // ScreenEffect SHAKE at timer 60 / 120 — not yet ported.
+            if self.bomb_timer % 4 != 0 {
+                let spark = BombRect { pos: [192.0, self.pos[1] / 2.0], size: [384.0, self.pos[1]] };
+                self.bomb_projectiles[0] = spark;
+                self.bomb_regions[0] = spark;
+                self.bomb_region_dmg[0] = 12;
+            }
+            for i in 0..4 {
+                if let Some(r) = self.bomb_sprites[i].as_mut() {
+                    r.tick(); // ExecuteScript
+                }
+            }
+        }
+        self.bomb_timer += 1;
     }
 
     /// Player::Die plus the respawn bookkeeping: lose a life, scatter items and
@@ -2029,16 +2227,19 @@ impl Stage {
     }
 
     fn collide(&mut self) {
-        // Player shots vs enemies. Damage is the table value; orb amulets
-        // remember where they last connected so they can home (positionOf-
-        // LastEnemyHit, reset each frame). Hitting an enemy scores
-        // (min(dmg,70)/5)*10 (EnemyManager.cpp), regardless of any spellcard
-        // damage cut; the cut only reduces the life lost.
-        let spell_penalty = self.spell_active && self.bombing == 0;
-        let mut last_hit = None;
-        let mut dmg_score: i64 = 0;
+        // Player shots + bomb regions vs enemies (EnemyManager.cpp damage block /
+        // Player::CalcDamageToEnemy). Per enemy, sum every shot that hits it plus
+        // every overlapping bomb region, cap the total at 70, score (total/5)*10,
+        // then apply the spellcard penalty before subtracting life. Bomb regions
+        // also accumulate their raw damage into bomb_dmg_accum (unk_838) and flag
+        // the enemy as bomb-hit (local_8) while a bomb is active.
+        let n = self.enemies.len();
+        let mut enemy_dmg = vec![0i32; n];
+        let mut enemy_bombed = vec![false; n];
+
+        // Shots: each hits the first enemy it overlaps, then despawns.
         for s in &mut self.shots {
-            for e in &mut self.enemies {
+            for (ei, e) in self.enemies.iter().enumerate() {
                 if !e.occupied || !e.interactable {
                     continue;
                 }
@@ -2046,24 +2247,78 @@ impl Stage {
                 let dx = s.pos[0] - e.pos[0];
                 let dy = s.pos[1] - e.pos[1];
                 if dx * dx + dy * dy < r * r {
-                    dmg_score += (s.damage.min(70) / 5 * 10) as i64;
-                    let dmg = if spell_penalty {
-                        if s.damage > 7 { s.damage / 7 } else { 1 }
-                    } else {
-                        s.damage
-                    };
-                    if e.damageable {
-                        e.life -= dmg;
-                    }
-                    last_hit = Some([e.pos[0], e.pos[1]]);
+                    enemy_dmg[ei] += s.damage;
                     s.pos[1] = -100.0;
                     break;
                 }
             }
         }
-        self.score += dmg_score;
-        self.last_enemy_hit = last_hit;
         self.shots.retain(|s| s.pos[1] > -90.0);
+
+        // Bomb regions: AABB overlap of each active region with each enemy's
+        // hitbox (Player::CalcDamageToEnemy bombRegion loop).
+        for ri in 0..self.bomb_regions.len() {
+            let reg = self.bomb_regions[ri];
+            if reg.size[0] <= 0.0 {
+                continue;
+            }
+            let (rl, rt) = (reg.pos[0] - reg.size[0] / 2.0, reg.pos[1] - reg.size[1] / 2.0);
+            let (rr, rb) = (reg.pos[0] + reg.size[0] / 2.0, reg.pos[1] + reg.size[1] / 2.0);
+            let dmg = self.bomb_region_dmg[ri];
+            for (ei, e) in self.enemies.iter().enumerate() {
+                if !e.occupied || !e.interactable {
+                    continue;
+                }
+                let (el, et) = (e.pos[0] - e.hitbox[0] / 2.0, e.pos[1] - e.hitbox[1] / 2.0);
+                let (er, eb) = (e.pos[0] + e.hitbox[0] / 2.0, e.pos[1] + e.hitbox[1] / 2.0);
+                if rl > er || rr < el || rt > eb || rb < et {
+                    continue;
+                }
+                enemy_dmg[ei] += dmg;
+                self.bomb_dmg_accum[ri] += dmg; // raw, drives ReimuA seal explosion
+                if self.bomb_in_use {
+                    enemy_bombed[ei] = true; // local_8 / hitWithLazerDuringBomb
+                }
+            }
+        }
+
+        // Apply the aggregated per-enemy damage, scoring and spell penalty.
+        let spell = self.spell_active;
+        let used_bomb = self.spell_used_bomb;
+        let mut dmg_score: i64 = 0;
+        for (ei, e) in self.enemies.iter_mut().enumerate() {
+            let total = enemy_dmg[ei];
+            if total <= 0 {
+                continue;
+            }
+            let capped = total.min(70);
+            dmg_score += (capped / 5 * 10) as i64;
+            let effective = if spell {
+                if !enemy_bombed[ei] {
+                    if capped > 7 { capped / 7 } else { 1 }
+                } else if used_bomb {
+                    if capped > 3 { capped / 3 } else { 1 }
+                } else {
+                    0
+                }
+            } else {
+                capped
+            };
+            if e.damageable {
+                e.life -= effective;
+            }
+        }
+        self.score += dmg_score;
+
+        // positionOfLastEnemyHit (EnemyManager.cpp:636): the lowest on-screen
+        // interactable enemy (max y), or None. Reset each frame; drives ReimuA's
+        // seal homing and the orb-amulet homing.
+        self.last_enemy_hit = self
+            .enemies
+            .iter()
+            .filter(|e| e.occupied && e.interactable)
+            .max_by(|a, b| a.pos[1].total_cmp(&b.pos[1]))
+            .map(|e| [e.pos[0], e.pos[1]]);
 
         // MarisaB orb beams: damage enemies in each orb's vertical column.
         if self.beam_dmg > 0 {
@@ -2119,6 +2374,39 @@ impl Stage {
             self.spawn_drop(pos, drop);
         }
         self.flush_spawns();
+
+        // Bomb projectiles cancel bullets every frame, regardless of player state
+        // (BulletManager.cpp:919-943: CheckGraze / CalcKillBoxCollision return 2 →
+        // the bullet despawns and drops a homing point item). A not-yet-grazed
+        // bullet is tested with its graze box (+20, CheckGraze); a grazed one with
+        // its kill box (CalcKillBoxCollision) — both cancel.
+        if self.bomb_projectiles.iter().any(|r| r.size[0] != 0.0) {
+            let projs = self.bomb_projectiles;
+            let radii: Vec<f32> = self.world.bullets.iter().map(|b| self.bullet_radius(b)).collect();
+            let mut cancelled: Vec<[f32; 2]> = Vec::new();
+            let mut i = 0;
+            self.world.bullets.retain(|b| {
+                let m = radii[i] + if b.grazed { 0.0 } else { 20.0 };
+                i += 1;
+                let (bl, bt) = (b.pos[0] - m, b.pos[1] - m);
+                let (br, bb) = (b.pos[0] + m, b.pos[1] + m);
+                for r in projs.iter() {
+                    if r.size[0] == 0.0 {
+                        continue;
+                    }
+                    let (pl, pt) = (r.pos[0] - r.size[0] / 2.0, r.pos[1] - r.size[1] / 2.0);
+                    let (pr, pb) = (r.pos[0] + r.size[0] / 2.0, r.pos[1] + r.size[1] / 2.0);
+                    if !(pl > br || pr < bl || pt > bb || pb < bt) {
+                        cancelled.push(b.pos);
+                        return false;
+                    }
+                }
+                true
+            });
+            for pos in cancelled {
+                self.items.push(Item::homing(pos, 6)); // ITEM_POINT_BULLET
+            }
+        }
 
         // Bullets / lasers / enemy bodies vs player. Player.cpp uses an AABB:
         // a tiny hitbox (half-extent 1.25) for kills, expanded by 20 (bullets)
@@ -2508,6 +2796,7 @@ impl Stage {
                     self.spell_id = id;
                     self.spell_portrait_sprite = sprite;
                     self.spell_capturing = true;
+                    self.spell_used_bomb = false; // fresh spellcardInfo
                     // Start the name announce + portrait slide-in (ShowSpellcard).
                     self.spell_name_runner = Some(AnmRunner::new(self.spell_name_script.clone()));
                     self.portrait_runner = Some(AnmRunner::new(self.portrait_script.clone()));
@@ -2542,6 +2831,7 @@ impl Stage {
                         }
                     }
                     self.spell_active = false;
+                    self.spell_used_bomb = false;
                 }
                 WorldEvent::SpellTimeout => {
                     // Ran the timer out on a non-timeout spell: no capture bonus,
@@ -2578,6 +2868,38 @@ impl Stage {
         let idx = script.iter().find(|i| i.opcode == 1).map(|i| i.arg_u32(0))?;
         let sp = self.player_sprites.get(&idx)?;
         Some(SpriteRef { tex: self.player_tex, rect: [sp.x, sp.y, sp.width, sp.height] })
+    }
+
+    /// Draw one bomb sprite runner (player sheet) centred at screen (cx,cy).
+    /// `scale` overrides the runner's anm scale (MarisaA's trailing stars draw at
+    /// 3.2 / 2.2 / 1.0); `None` uses the runner's own scale.
+    fn bomb_sprite_cmd(
+        &self,
+        slot: usize,
+        cx: f32,
+        cy: f32,
+        rot: f32,
+        scale: Option<[f32; 2]>,
+    ) -> Option<DrawCmd> {
+        let r = self.bomb_sprites[slot].as_ref()?;
+        let sp = self.player_sprites.get(&r.sprite?)?;
+        let [tw, th] = self.player_tex_size;
+        let s = scale.unwrap_or(r.scale);
+        let w = sp.width * s[0].abs();
+        let h = sp.height * s[1].abs();
+        let (sx, sy) = (sp.x % tw, sp.y % th);
+        let (mut u0, mut u1) = (sx / tw, (sx + sp.width) / tw);
+        if r.flip_x {
+            std::mem::swap(&mut u0, &mut u1);
+        }
+        Some(DrawCmd {
+            tex: self.player_tex,
+            dst: [cx - w / 2.0, cy - h / 2.0, w, h],
+            src: [u0, sy / th, u1, (sy + sp.height) / th],
+            tint: [r.color[0], r.color[1], r.color[2], r.alpha],
+            rot,
+            additive: r.additive,
+        })
     }
 
     fn draw(&self) -> Vec<DrawCmd> {
@@ -2761,74 +3083,99 @@ impl Stage {
             }
         }
 
-        // Master Spark: a huge bright beam fired straight up from the player.
-        // The damage is full playfield width, but the *visible* spark is a wide
-        // central column — bright white core wrapped in pink/cyan bloom, with a
-        // flare at the muzzle — built from stacked alpha quads (the renderer is
-        // alpha-blended, so overlapping layers bloom toward white).
-        if self.bomb_kind == 3 && self.bombing > 0 {
-            let t = self.anim as f32;
-            let flick = 0.85 + 0.15 * (t * 0.9).sin();
-            let pulse = 0.92 + 0.08 * (t * 0.5).sin();
-            let h = self.pos[1]; // beam reaches from the top edge to the player
-            let cx = self.pos[0];
-            // Faint full-width wash: the spark lights the whole field.
-            cmds.push(rect([FIELD_X, FIELD_Y, FIELD_W, h], [0.80, 0.70, 1.0, 0.20 * flick]));
-            // Wide column: cyan/pink outer glow grading into a white-hot core.
-            for (w, col) in [
-                (210.0, [0.55, 0.85, 1.0, 0.32]), // cyan outer
-                (150.0, [1.0, 0.65, 1.0, 0.42]),  // pink mid
-                (96.0, [1.0, 0.95, 1.0, 0.65]),   // bright
-                (52.0, [1.0, 1.0, 1.0, 0.92]),    // core
-                (22.0, [1.0, 1.0, 1.0, 1.0]),     // hot center
-            ] {
-                let ww = w * pulse;
-                cmds.push(rect(
-                    [FIELD_X + cx - ww / 2.0, FIELD_Y, ww, h],
-                    [col[0], col[1], col[2], col[3] * flick],
-                ));
-            }
-            // Muzzle flare: layered glow bloom where the beam leaves the player.
-            for s in [130.0, 80.0, 44.0] {
-                let mut g = sprite_at(BOMB_GLOW, self.pos, 0.9 * flick);
-                g.dst = [FIELD_X + cx - s / 2.0, FIELD_Y + h - s / 2.0, s, s];
-                g.rot = t * 0.08;
-                cmds.push(g);
-            }
-        }
-        // Dream cross: a vertical + horizontal beam through the player.
-        if self.bomb_kind == 1 && self.bombing > 0 {
-            let a = 0.5 + 0.3 * (self.anim as f32 * 0.6).sin();
-            cmds.push(DrawCmd {
-                tex: TEX_WHITE,
-                dst: [FIELD_X + self.pos[0] - 40.0, FIELD_Y, 80.0, FIELD_H],
-                src: [0.25, 0.25, 0.75, 0.75],
-                tint: [1.0, 0.6, 0.7, a],
-                rot: 0.0,
-                additive: false,
-            });
-            cmds.push(DrawCmd {
-                tex: TEX_WHITE,
-                dst: [FIELD_X, FIELD_Y + self.pos[1] - 40.0, FIELD_W, 80.0],
-                src: [0.25, 0.25, 0.75, 0.75],
-                tint: [1.0, 0.6, 0.7, a],
-                rot: 0.0,
-                additive: false,
-            });
+        // BombData::DarkenViewport: a black square over the playfield whose alpha
+        // ramps 0..176 over the first 60 frames, holds at 176, then ramps back to
+        // 0 over the last 60.
+        if self.bombing > 0 {
+            let dur = self.bomb_duration as f32;
+            let t = self.bomb_timer as f32;
+            let level = if self.bomb_timer < 60 {
+                (t * 176.0 / 60.0).min(176.0)
+            } else if self.bomb_timer >= self.bomb_duration - 60 {
+                ((dur - t) * 176.0 / 60.0).max(0.0)
+            } else {
+                176.0
+            };
+            cmds.push(rect([FIELD_X, FIELD_Y, FIELD_W, FIELD_H], [0.0, 0.0, 0.0, level / 255.0]));
         }
 
-        // Fantasy Seal bomb orbs: spinning rainbow glows tracking enemies.
-        for o in &self.bomb_orbs {
-            let h = o.hue * std::f32::consts::TAU;
-            let col = [
-                0.55 + 0.45 * h.cos(),
-                0.55 + 0.45 * (h + 2.094).cos(),
-                0.55 + 0.45 * (h + 4.188).cos(),
-            ];
-            let mut glow = sprite_at(BOMB_GLOW, o.pos, 0.85);
-            glow.tint = [col[0], col[1], col[2], 0.85];
-            glow.rot = self.anim as f32 * 0.2 + o.hue * 6.28;
-            cmds.push(glow);
+        // Bomb sprites, drawn from the player sheet via each bomb's anm runner —
+        // faithful ports of BombData::Bomb*Draw.
+        if self.bombing > 0 {
+            use std::f32::consts::PI;
+            match self.bomb_kind {
+                // BombReimuADraw: each active seal's 4 sprites at the seal centre
+                // plus the sprite's own posOffset, no rotation.
+                0 => {
+                    for idx in 0..8 {
+                        if self.seal_state[idx] == 0 {
+                            continue;
+                        }
+                        for k in 0..4 {
+                            let slot = idx * 4 + k;
+                            let Some(r) = self.bomb_sprites[slot].as_ref() else { continue };
+                            let cx = FIELD_X + self.seal_pos[idx][0] + r.pos[0];
+                            let cy = FIELD_Y + self.seal_pos[idx][1] + r.pos[1];
+                            if let Some(c) = self.bomb_sprite_cmd(slot, cx, cy, 0.0, None) {
+                                cmds.push(c);
+                            }
+                        }
+                    }
+                }
+                // BombReimuBDraw: each beam at its seed + posOffset, with rotation.
+                1 => {
+                    for i in 0..4 {
+                        let Some(r) = self.bomb_sprites[i].as_ref() else { continue };
+                        let cx = FIELD_X + self.seal_pos[i][0] + r.pos[0];
+                        let cy = FIELD_Y + self.seal_pos[i][1] + r.pos[1];
+                        let rot = r.rotation;
+                        if let Some(c) = self.bomb_sprite_cmd(i, cx, cy, rot, None) {
+                            cmds.push(c);
+                        }
+                    }
+                }
+                // BombMarisaADraw: each star drawn three times along its trail at
+                // scale 3.2 / 2.2 / 1.0 (offsets built from its velocity).
+                2 => {
+                    for idx in 0..8 {
+                        let Some(r) = self.bomb_sprites[idx].as_ref() else { continue };
+                        let rot = r.rotation;
+                        let a = self.seal_pos[idx];
+                        let v = self.seal_vel[idx];
+                        let trail = [
+                            (a, 3.2),
+                            ([a[0] - v[0] * 6.0 - 32.0, a[1] - v[1] * 6.0 - 32.0], 2.2),
+                            ([a[0] - v[0] * 10.0, a[1] - v[1] * 10.0], 1.0),
+                        ];
+                        for (p, sc) in trail {
+                            if let Some(c) =
+                                self.bomb_sprite_cmd(idx, FIELD_X + p[0], FIELD_Y + p[1], rot, Some([sc, sc]))
+                            {
+                                cmds.push(c);
+                            }
+                        }
+                    }
+                }
+                // BombMarisaBDraw: the four spark sprites fanned around the player,
+                // offset along their angle by half the (scaled) sprite height.
+                _ => {
+                    for i in 0..4 {
+                        let Some(r) = self.bomb_sprites[i].as_ref() else { continue };
+                        let Some(sp) = r.sprite.and_then(|s| self.player_sprites.get(&s)) else {
+                            continue;
+                        };
+                        let mut ang = ((PI / 5.0) * i as f32) / 3.0 - PI + (2.0 * PI / 5.0);
+                        let reach = sp.height * r.scale[1] / 2.0;
+                        let cx = FIELD_X + self.pos[0] + ang.cos() * reach;
+                        let cy = FIELD_Y + self.pos[1] + ang.sin() * reach;
+                        ang = PI / 2.0 - ang;
+                        let rot = normalize_angle(ang + PI);
+                        if let Some(c) = self.bomb_sprite_cmd(i, cx, cy, rot, None) {
+                            cmds.push(c);
+                        }
+                    }
+                }
+            }
         }
 
         // Death / pickup puffs (under bullets, additive-looking glow).
