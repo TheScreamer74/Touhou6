@@ -83,6 +83,12 @@ fn vs(@location(0) pos: vec3f, @location(1) uv: vec2f, @location(2) depth: f32, 
 @fragment
 fn fs(in: VOut) -> @location(0) vec4f {
     let c = textureSample(tex, samp, in.uv) * in.color;
+    // Alpha test (D3DRS_ALPHATESTENABLE, ALPHAREF=4, GREATEREQUAL): discard
+    // near-transparent fragments so they don't write depth and occlude the
+    // tiles behind them (GameWindow.cpp:515-517).
+    if (c.a < 4.0 / 255.0) {
+        discard;
+    }
     let span = max(u.fog_params.y - u.fog_params.x, 1.0);
     let f = clamp((u.fog_params.y - in.depth) / span, 0.0, 1.0);
     if (u.fog_params.z > 0.5) {
