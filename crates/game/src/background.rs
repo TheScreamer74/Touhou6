@@ -205,6 +205,12 @@ pub struct Background {
     fog_color: [f32; 4],
     fog_near: f32,
     fog_far: f32,
+    /// STDOP_FOG_INTERP (op4): gradual fog transition (Stage::OnUpdate). The
+    /// fog lerps from `fog_init` to `fog_final` over `fog_interp_dur` frames.
+    fog_init: ([f32; 4], f32, f32),
+    fog_final: ([f32; 4], f32, f32),
+    fog_interp_dur: i32,
+    fog_interp_timer: i32,
 }
 
 fn fbits(i: i32) -> f32 {
@@ -274,9 +280,15 @@ impl Background {
             facing_final: Vec3::new(0.0, 0.0, 1.0),
             facing_dur: 1,
             facing_timer: 0,
-            fog_color: [0.05, 0.05, 0.12, 1.0],
+            // Stage::AddedCallback initial skyFog: black, near 200, far 500
+            // (overwritten by the script's frame-0 FOG instruction).
+            fog_color: [0.0, 0.0, 0.0, 1.0],
             fog_near: 200.0,
-            fog_far: 3000.0,
+            fog_far: 500.0,
+            fog_init: ([0.0, 0.0, 0.0, 1.0], 200.0, 500.0),
+            fog_final: ([0.0, 0.0, 0.0, 1.0], 200.0, 500.0),
+            fog_interp_dur: 0,
+            fog_interp_timer: 0,
         }
     }
 
@@ -311,11 +323,17 @@ impl Background {
                     self.script_idx += 1;
                 }
                 1 => {
-                    // FOG: color, near, far.
-                    self.fog_color = color_argb(ins.args[0]);
-                    self.fog_color[3] = 1.0;
-                    self.fog_near = fbits(ins.args[1]);
-                    self.fog_far = fbits(ins.args[2]);
+                    // FOG: color, near, far. skyFog is set to the target; when a
+                    // FOG_INTERP is active it becomes the interp final and the
+                    // step below lerps toward it (Stage::OnUpdate STDOP_FOG).
+                    let mut col = color_argb(ins.args[0]);
+                    col[3] = 1.0;
+                    let near = fbits(ins.args[1]);
+                    let far = fbits(ins.args[2]);
+                    self.fog_color = col;
+                    self.fog_near = near;
+                    self.fog_far = far;
+                    self.fog_final = (col, near, far);
                     self.script_idx += 1;
                 }
                 2 => {
@@ -330,6 +348,14 @@ impl Background {
                     // CAMERA_FACING_INTERP_LINEAR: duration; restart timer.
                     self.facing_dur = ins.args[0];
                     self.facing_timer = 0;
+                    self.script_idx += 1;
+                }
+                4 => {
+                    // FOG_INTERP: capture the current fog as the interp start and
+                    // begin a `dur`-frame transition toward the next FOG target.
+                    self.fog_init = (self.fog_color, self.fog_near, self.fog_far);
+                    self.fog_interp_dur = ins.args[0];
+                    self.fog_interp_timer = 0;
                     self.script_idx += 1;
                 }
                 _ => self.script_idx += 1,
@@ -349,6 +375,22 @@ impl Background {
             }
             let r = self.facing_timer as f32 / self.facing_dur as f32;
             self.facing = self.facing_init.lerp(self.facing_final, r);
+        }
+        // Interpolate fog (op4 FOG_INTERP): lerp colour/near/far from start to the
+        // FOG target over the duration, then clear (Stage::OnUpdate fog block).
+        if self.fog_interp_dur != 0 {
+            self.fog_interp_timer += 1;
+            let r = (self.fog_interp_timer as f32 / self.fog_interp_dur as f32).min(1.0);
+            let (ic, inear, ifar) = self.fog_init;
+            let (fc, fnear, ffar) = self.fog_final;
+            for k in 0..4 {
+                self.fog_color[k] = ic[k] + (fc[k] - ic[k]) * r;
+            }
+            self.fog_near = inear + (fnear - inear) * r;
+            self.fog_far = ifar + (ffar - ifar) * r;
+            if self.fog_interp_timer >= self.fog_interp_dur {
+                self.fog_interp_dur = 0;
+            }
         }
         self.time += 1.0;
 
