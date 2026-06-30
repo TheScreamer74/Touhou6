@@ -345,17 +345,22 @@ impl Background {
                     self.script_idx += 1;
                 }
                 3 => {
-                    // CAMERA_FACING_INTERP_LINEAR: duration; restart timer.
+                    // CAMERA_FACING_INTERP_LINEAR: duration; restart the timer so
+                    // the interp begins at ratio 0 on this frame (the decomp's
+                    // facing ramp is one frame behind a naive timer).
                     self.facing_dur = ins.args[0];
-                    self.facing_timer = 0;
+                    self.facing_timer = -1;
                     self.script_idx += 1;
                 }
                 4 => {
                     // FOG_INTERP: capture the current fog as the interp start and
                     // begin a `dur`-frame transition toward the next FOG target.
+                    // Timer starts at -1 (ZunTimer::InitializeForPopup); the step
+                    // below Ticks it to 0 (ratio 0) on this frame, matching the
+                    // decomp's one-frame-later ramp.
                     self.fog_init = (self.fog_color, self.fog_near, self.fog_far);
                     self.fog_interp_dur = ins.args[0];
-                    self.fog_interp_timer = 0;
+                    self.fog_interp_timer = -1;
                     self.script_idx += 1;
                 }
                 _ => self.script_idx += 1,
@@ -374,7 +379,14 @@ impl Background {
                 self.facing_timer += 1;
             }
             let r = self.facing_timer as f32 / self.facing_dur as f32;
-            self.facing = self.facing_init.lerp(self.facing_final, r);
+            // Exact decomp order: (final - init) * ratio + init (Stage::OnUpdate),
+            // not glam's init + (final-init)*ratio — they differ by 1 ulp.
+            let d = self.facing_final - self.facing_init;
+            self.facing = Vec3::new(
+                d.x * r + self.facing_init.x,
+                d.y * r + self.facing_init.y,
+                d.z * r + self.facing_init.z,
+            );
         }
         // Interpolate fog (op4 FOG_INTERP): lerp colour/near/far from start to the
         // FOG target over the duration, then clear (Stage::OnUpdate fog block).
@@ -383,8 +395,13 @@ impl Background {
             let r = (self.fog_interp_timer as f32 / self.fog_interp_dur as f32).min(1.0);
             let (ic, inear, ifar) = self.fog_init;
             let (fc, fnear, ffar) = self.fog_final;
+            // Per-byte lerp truncated to u8, matching the decomp's COLOR_SET_-
+            // COMPONENT((u8)((finalByte - initByte) * ratio + initByte)).
             for k in 0..4 {
-                self.fog_color[k] = ic[k] + (fc[k] - ic[k]) * r;
+                let ib = ic[k] * 255.0;
+                let fb = fc[k] * 255.0;
+                let b = ((fb - ib) * r + ib) as i32;
+                self.fog_color[k] = b as f32 / 255.0;
             }
             self.fog_near = inear + (fnear - inear) * r;
             self.fog_far = ifar + (ffar - ifar) * r;
@@ -398,6 +415,23 @@ impl Background {
         for dq in &mut self.quads {
             dq.vm.tick();
         }
+    }
+
+    /// Per-frame bg state (camera pos, facing, fog) for the bg-state oracle diff.
+    /// Returns (pos, facing, fog_argb_packed, fog_near, fog_far).
+    pub fn dbg_state(&self) -> ([f32; 3], [f32; 3], u32, f32, f32) {
+        let b = |v: f32| (v * 255.0) as u32 & 0xff;
+        let argb = (b(self.fog_color[3]) << 24)
+            | (b(self.fog_color[0]) << 16)
+            | (b(self.fog_color[1]) << 8)
+            | b(self.fog_color[2]);
+        (
+            [self.cam.x, self.cam.y, self.cam.z],
+            [self.facing.x, self.facing.y, self.facing.z],
+            argb,
+            self.fog_near,
+            self.fog_far,
+        )
     }
 
     fn view_proj(&self) -> Mat4 {
