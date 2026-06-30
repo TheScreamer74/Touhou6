@@ -2,3 +2,4 @@ vm/build/
 vm/src/
 bg/build/
 anm/build/
+vm/enemy_sizes.h

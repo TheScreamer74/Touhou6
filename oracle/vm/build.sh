@@ -12,6 +12,11 @@ DECOMP="../../../refs/th06-decomp/src"
 rm -rf build && mkdir build
 cp "$DECOMP"/*.hpp "$DECOMP"/*.cpp build/
 cp engine_stub/*.hpp build/        # overlay full stub headers
+# Per-stage real enemy sprite sizes for the despawn test (#38). compare.sh
+# generates enemy_sizes.h for the stage under test; default to a no-op table.
+if [ -f enemy_sizes.h ]; then cp enemy_sizes.h build/; else
+    printf 'static inline bool anm_enemy_size(int,float*,float*){return false;}\n' > build/enemy_sizes.h
+fi
 
 cd build
 # --- patches to the real decomp sources ---

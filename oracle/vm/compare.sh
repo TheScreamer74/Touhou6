@@ -6,6 +6,8 @@ set -euo pipefail
 cd "$(dirname "$0")"
 STAGE="${1:-5}"; FRAMES="${2:-6000}"; ECL="${3:-/tmp/ecldata$STAGE.ecl}"
 ROOT=../..
+# Generate the real per-stage enemy sprite-size table for the despawn test (#38).
+(cd "$ROOT" && cargo run -q -p th06 --example enemy_anm_sizes --release -- ../res/ST.DAT "$STAGE" 2>/dev/null) > enemy_sizes.h
 ./build.sh >/dev/null
 /tmp/oracle_vm "$ECL" "$FRAMES" > /tmp/oracle_out.txt 2>/dev/null
 (cd "$ROOT" && ./target/release/th06 --scene stage --ecl-dump --stage "$STAGE" --char 0 --frames "$FRAMES" >/tmp/rust_out.txt 2>/dev/null)
