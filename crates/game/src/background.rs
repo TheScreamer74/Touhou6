@@ -34,6 +34,9 @@ struct BgQuadVm {
     angle_vel: [f32; 3],
     /// op26 SetAutoRotate (2 = always face the camera).
     auto_rotate: i32,
+    /// op23 AnchorTopLeft: Draw3 shifts the quad by +spriteW*scaleX/2 (x) and
+    /// -spriteH*scaleY/2 (y) so `pos` is the top-left corner, not the centre.
+    corner: bool,
     /// op27/28 UVScroll accumulators, wrapped to [0, 1).
     uv: [f32; 2],
     /// op13/14: true = additive (One/One) blend.
@@ -61,6 +64,7 @@ impl BgQuadVm {
             rot: [0.0, 0.0, 0.0],
             angle_vel: [0.0, 0.0, 0.0],
             auto_rotate: 0,
+            corner: false,
             uv: [0.0, 0.0],
             blend_add: false,
             color: [1.0, 1.0, 1.0, 1.0],
@@ -153,6 +157,7 @@ impl BgQuadVm {
                     self.halted = true;
                     return;
                 }
+                23 => self.corner = true,
                 26 => self.auto_rotate = i.arg_u32(0) as i32,
                 27 => {
                     self.uv[0] = (self.uv[0] + i.arg_f32(0)).rem_euclid(1.0);
@@ -509,12 +514,17 @@ impl Background {
             let hw = 128.0 * scale_x;
             let hh = 128.0 * scale_y;
 
-            // World center (camera subtracted; y up). Quads are centered on
-            // their position — this matches the original's on-screen layout in
-            // this view model; applying the literal AnchorTopLeft (op23) +hw/-hh
-            // shift offsets the scene sideways here.
-            let ox = dq.base[0] - self.cam.x;
-            let oy = -(dq.base[1] - self.cam.y);
+            // World center (camera subtracted; y up). With op23 AnchorTopLeft,
+            // Draw3 makes `pos` the top-left corner by shifting the centre by
+            // +spriteW*scaleX/2 in x and -spriteH*scaleY/2 in y (note: the shift
+            // uses the sprite px size, not the 128-unit quad half-extent `hw`).
+            let (ax, ay) = if vm.corner {
+                (sw * scale_x / 2.0, -(sh * scale_y / 2.0))
+            } else {
+                (0.0, 0.0)
+            };
+            let ox = dq.base[0] - self.cam.x + ax;
+            let oy = -(dq.base[1] - self.cam.y) + ay;
             let oz = dq.base[2] - self.cam.z;
 
             // 3D orientation from the anm rotation (Draw3: Rx*Ry*Rz). auto_rotate
