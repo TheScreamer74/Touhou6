@@ -175,6 +175,39 @@ impl BgQuadVm {
     }
 }
 
+/// Run one bg quad script through `BgQuadVm` and dump per-frame VM state in the
+/// anm-interpreter oracle format (sprite w/h, scale, rotation, colour, uv-scroll,
+/// visible) — to diff against the decomp's real `AnmManager::ExecuteScript`.
+/// `sprites` maps sprite index -> [w, h]. Both sides process the t0 instructions
+/// once before the loop, so frame N lines up.
+pub fn dbg_quad_run(
+    instrs: Vec<Instr>,
+    sprites: &HashMap<u32, [f32; 2]>,
+    frames: u32,
+) -> Vec<String> {
+    let mut vm = BgQuadVm::new(instrs);
+    let mut out = Vec::new();
+    let byte = |v: f32| ((v * 255.0) as u32) & 0xff;
+    for _ in 0..frames {
+        vm.tick();
+        let (w, h) = vm
+            .sprite
+            .and_then(|s| sprites.get(&s))
+            .map(|d| (d[0], d[1]))
+            .unwrap_or((0.0, 0.0));
+        let argb = (byte(vm.color[3]) << 24)
+            | (byte(vm.color[0]) << 16)
+            | (byte(vm.color[1]) << 8)
+            | byte(vm.color[2]);
+        let vis = (vm.visible && !vm.dead) as i32;
+        out.push(format!(
+            "{:.0} {:.0} {:.4} {:.4} {:.5} {:.5} {:.5} {:08x} {:.5} {:.5} {}",
+            w, h, vm.scale[0], vm.scale[1], vm.rot[0], vm.rot[1], vm.rot[2], argb, vm.uv[0], vm.uv[1], vis
+        ));
+    }
+    out
+}
+
 /// A background quad: its world position (STD quad + instance) and z-level,
 /// plus the live ANM VM driving its sprite/rotation/scroll.
 struct DrawQuad {
