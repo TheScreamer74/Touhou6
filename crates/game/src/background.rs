@@ -591,12 +591,16 @@ impl Background {
 
             // Exact decomp sizing: a 256-unit base quad (vertices at ±128)
             // scaled by scaleX/scaleY, where scaleX = quad.size.x / sprite.widthPx
-            // when the quad size is set, else the anm scale (op2). So the on-screen
-            // half-extent is 128 * scaleX (Draw3 + SetupVertexBuffer).
+            // when the quad size is set, else the anm scale (op2).
             let scale_x = if dq.size[0] != 0.0 { dq.size[0] / sw } else { vm.scale[0] };
             let scale_y = if dq.size[1] != 0.0 { dq.size[1] / sh } else { vm.scale[1] };
-            let hw = 128.0 * scale_x;
-            let hh = 128.0 * scale_y;
+            // Draw3 seeds worldTransform from vm->matrix, whose diagonal holds
+            // widthPx/textureWidth (AnmManager.cpp:487-488), so the world half-
+            // extent is 128 * (spriteW/texW) * scaleX, not 128 * scaleX. Omitting
+            // this factor drew sub-texture sprites oversized (stage-5 floor 8x too
+            // big, tiles overlapping instead of tiling seamlessly).
+            let hw = 128.0 * scale_x * sw / tw;
+            let hh = 128.0 * scale_y * sh / th;
 
             // World center (camera subtracted; y up). With op23 AnchorTopLeft,
             // Draw3 makes `pos` the top-left corner by shifting the centre by

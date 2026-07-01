@@ -502,16 +502,6 @@ impl Engine {
     }
 
     pub fn create_texture(&self, rgba: &[u8], width: u32, height: u32) -> Texture {
-        self.create_texture_mode(rgba, width, height, false)
-    }
-
-    /// Like `create_texture`, but the sampler wraps (Repeat) so tiled/scrolling
-    /// backgrounds blend seamlessly at quad edges.
-    pub fn create_texture_wrapped(&self, rgba: &[u8], width: u32, height: u32) -> Texture {
-        self.create_texture_mode(rgba, width, height, true)
-    }
-
-    fn create_texture_mode(&self, rgba: &[u8], width: u32, height: u32, wrap: bool) -> Texture {
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: None,
             size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
@@ -538,17 +528,16 @@ impl Engine {
             wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
         );
         let view = texture.create_view(&Default::default());
-        let address = if wrap {
-            wgpu::AddressMode::Repeat
-        } else {
-            wgpu::AddressMode::ClampToEdge
-        };
+        // Decomp sets one global sampler state, unconditionally, for every
+        // texture (GameWindow.cpp:568-574): ADDRESSU/V = WRAP, ADDRESSW = CLAMP,
+        // MAG/MIN = LINEAR, MIPFILTER = NONE (no mipmaps).
         let sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
-            address_mode_u: address,
-            address_mode_v: address,
-            address_mode_w: address,
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
         let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {

@@ -151,6 +151,7 @@ fn main() {
     let mut debug_power: Option<i32> = None;
     let mut debug_score: Option<i64> = None;
     let mut god = false;
+    let mut autoplay = false;
     let mut probe_run = false;
     let mut ecl_dump = false;
     let mut warp: Option<bool> = None; // Some(false) = midboss, Some(true) = boss
@@ -170,6 +171,7 @@ fn main() {
             "--power" => debug_power = Some(args.next().expect("--power <0-128>").parse().expect("power")),
             "--score" => debug_score = Some(args.next().expect("--score <n>").parse().expect("score")),
             "--god" => god = true,
+            "--autoplay" => autoplay = true,
             "--probe-run" => probe_run = true,
             "--ecl-dump" => ecl_dump = true,
             "--midboss" => warp = Some(false),
@@ -209,7 +211,8 @@ fn main() {
 
     // `--god` makes the player invulnerable (the collide() check reads this).
     // Safe: still single-threaded here, before the game/run loop starts.
-    if god {
+    // `--autoplay` implies god: auto_play_input steers but never dodges bullets.
+    if god || autoplay {
         unsafe { std::env::set_var("TH06_GOD", "1") };
     }
 
@@ -465,6 +468,16 @@ fn main() {
         image::save_buffer(&out, &pixels, th06_engine::SCREEN_W, th06_engine::SCREEN_H, image::ColorType::Rgba8)
             .expect("save screenshot");
         println!("wrote {out}");
+    } else if autoplay {
+        // Drive the live window with the god-mode auto-player (steer under the
+        // nearest enemy, hold Shoot, pulse to advance menus), ignoring keyboard.
+        game.start_title_bgm();
+        let mut f = 0u32;
+        engine.run_game("Touhou 6 ~ EoSD (autoplay)", textures, move |_input| {
+            let inp = auto_play_input(&game, f);
+            f = f.wrapping_add(1);
+            game.update(&inp)
+        });
     } else {
         game.start_title_bgm();
         engine.run_game("Touhou 6 ~ EoSD (Mac port)", textures, move |input| game.update(input));
