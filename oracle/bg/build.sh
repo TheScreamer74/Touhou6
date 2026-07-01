@@ -16,8 +16,13 @@ for h in "$VM"/engine_stub/*.hpp; do
     b=$(basename "$h"); [ "$b" = "Stage.hpp" ] && continue; cp "$h" build/
 done
 cp ScreenEffect.hpp d3dconsts.hpp build/
+# AnmManager.hpp (pulled in transitively) includes the #38 per-stage enemy-size
+# table; the bg oracle doesn't need it, so stub a no-op.
+printf 'static inline bool anm_enemy_size(int,float*,float*){return false;}\n' > build/enemy_sizes.h
+# Add the camera facing-dir field to the stub GameManager (livesRemaining value
+# varies with the vm stub, so anchor only on currentStage=0;).
 grep -q stageCameraFacingDir build/GameManager.hpp || \
-  sed -i '' 's|    i32 livesRemaining=0, currentStage=0;|    i32 livesRemaining=0, currentStage=0;\
+  sed -i '' 's|\(i32 livesRemaining=[0-9]*, currentStage=0;\)|\1\
     D3DXVECTOR3 stageCameraFacingDir{0,0,1};|' build/GameManager.hpp
 
 awk -f trim.awk build/Stage.cpp > build/Stage.trim && mv build/Stage.trim build/Stage.cpp

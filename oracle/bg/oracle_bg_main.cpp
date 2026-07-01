@@ -42,8 +42,22 @@ int main(int argc, char **argv)
     s->unpauseFlag = 0;
     s->objectsCount = 0; // skip UpdateObjects quad work
 
+    // Optional STDUNPAUSE injection: UNPAUSE_FRAMES="7871,9171" sets unpauseFlag
+    // at the start of those frames, emulating ECL op125 releasing an STDOP_PAUSE.
+    const char *upf = getenv("UNPAUSE_FRAMES");
+
     for (int i = 0; i < frames; i++)
     {
+        if (upf)
+        {
+            const char *p = upf;
+            while (*p)
+            {
+                if (atoi(p) == i) { s->unpauseFlag = 1; break; }
+                while (*p && *p != ',') p++;
+                if (*p == ',') p++;
+            }
+        }
         Stage::OnUpdate(s);
         printf("%.3f %.3f %.3f %.5f %.5f %.5f %08x %.2f %.2f\n",
                s->position.x, s->position.y, s->position.z,

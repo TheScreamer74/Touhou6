@@ -395,6 +395,8 @@ pub enum WorldEvent {
     BulletCancel,
     BossSet(bool),
     DropItem([f32; 2], i32),
+    /// ECL op125 STDUNPAUSE: release the background camera park (Stage::unpauseFlag).
+    Unpause,
 }
 
 /// Per-frame context the VM needs from the game.
@@ -1600,7 +1602,7 @@ impl Enemy {
                     .events
                     .push(WorldEvent::DropItem([self.pos[0], self.pos[1]], instr.arg_i32(0)));
             }
-            125 => {} // STDUNPAUSE
+            125 => world.events.push(WorldEvent::Unpause), // STDUNPAUSE
             126 => self.spell_count = instr.arg_i32(0), // BOSSSETLIFECOUNT (gui)
             127 => {} // DEBUGWATCH
             // ANMINTERRUPTMAIN: queue an interrupt for the primary anm runner.

@@ -2856,6 +2856,11 @@ impl Stage {
                         self.items.push(Item::fall(pos, kind));
                     }
                 }
+                WorldEvent::Unpause => {
+                    if let Some(bg) = self.background.as_mut() {
+                        bg.unpause();
+                    }
+                }
             }
         }
     }

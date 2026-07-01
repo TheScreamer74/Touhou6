@@ -17,7 +17,16 @@ fn main() {
     let std = Std::parse(&get(format!("stage{n}.std"))).unwrap();
     let bg = Anm0::parse(&get(format!("stg{n}bg.anm"))).unwrap();
     let mut background = Background::new(std, &bg.entries[0], 0);
-    for _ in 0..frames {
+    // Optional STDUNPAUSE injection (emulates ECL op125), matching the oracle's
+    // UNPAUSE_FRAMES env, to diff the pause mechanism.
+    let unpause: Vec<u32> = std::env::var("UNPAUSE_FRAMES")
+        .ok()
+        .map(|s| s.split(',').filter_map(|x| x.trim().parse().ok()).collect())
+        .unwrap_or_default();
+    for f in 0..frames {
+        if unpause.contains(&f) {
+            background.unpause();
+        }
         background.tick();
         let (p, f, c, near, far) = background.dbg_state();
         println!(
