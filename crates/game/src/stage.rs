@@ -552,11 +552,70 @@ struct Particle {
 /// Spell card names in English, indexed by the ECL spell id (op93). Only
 /// stage 1's are filled in; the in-game names are Shift-JIS and cannot be
 /// drawn with the ASCII font.
+/// English spellcard names indexed by the ECL SPELLCARDSTART id (op93 byte 2).
+/// The names themselves are Shift-JIS in the ecl (left untranslated per the
+/// Japanese-text exception in CLAUDE.md); this is the recognised English
+/// rendering of each card, id order verified against the real ecldata1-6.ecl.
+/// ids 51+ are unused by the main game (Extra stage lives in a separate ecl).
 fn spellcard_name(id: i32) -> &'static str {
     match id {
+        // Rumia (stage 1)
         0 => "Moon Sign \"Moonlight Ray\"",
         1 => "Night Sign \"Night Bird\"",
         2 => "Darkness Sign \"Demarcation\"",
+        // Cirno (stage 2)
+        3 => "Ice Sign \"Icicle Fall\"",
+        4 => "Hail Sign \"Hailstorm\"",
+        5 => "Freeze Sign \"Perfect Freeze\"",
+        6 => "Snow Sign \"Diamond Blizzard\"",
+        // Hong Meiling (stage 3)
+        7 => "Flower Sign \"Gorgeous Sweet Flower\"",
+        8 => "Flower Sign \"Selaginella 9\"",
+        9 => "Rainbow Sign \"Wind Chime of the Colorful Rainbow\"",
+        10 => "Illusion Sign \"Flower-Imagining Dreamweed\"",
+        11 => "Colorful Sign \"Colorful Rain\"",
+        12 => "Colorful Sign \"Wild Dance of Colorful Light\"",
+        13 => "Colorful Sign \"Intense Colorful Typhoon\"",
+        // Patchouli Knowledge (stage 4)
+        14 => "Fire Sign \"Agni Shine\"",
+        15 => "Water Sign \"Princess Undine\"",
+        16 => "Wood Sign \"Sylphae Horn\"",
+        17 => "Earth Sign \"Rage Trilithon\"",
+        18 => "Metal Sign \"Metal Fatigue\"",
+        19 => "Fire Sign \"Agni Shine (Advanced)\"",
+        20 => "Wood Sign \"Sylphae Horn (Advanced)\"",
+        21 => "Earth Sign \"Rage Trilithon (Advanced)\"",
+        22 => "Fire Sign \"Agni Radiance\"",
+        23 => "Water Sign \"Bury in Lake\"",
+        24 => "Wood Sign \"Green Storm\"",
+        25 => "Earth Sign \"Trilithon Shake\"",
+        26 => "Metal Sign \"Silver Dragon\"",
+        27 => "Fire & Earth Sign \"Lava Cromlech\"",
+        28 => "Wood & Fire Sign \"Forest Blaze\"",
+        29 => "Water & Wood Sign \"Water Elf\"",
+        30 => "Metal & Water Sign \"Mercury Poison\"",
+        31 => "Earth & Metal Sign \"Emerald Megalith\"",
+        // Sakuya Izayoi (stage 5)
+        32 => "Conjuring \"Misdirection\"",
+        33 => "Conjuring \"Illusionary Misdirection\"",
+        34 => "Illusion Existence \"Clock Corpse\"",
+        35 => "Illusion Image \"Luna Clock\"",
+        36 => "Maid Secret Skill \"Marionette\"",
+        37 => "Illusion Ghost \"Jack the Ludo Bile\"",
+        38 => "Illusion World \"The World\"",
+        39 => "Maid Secret Skill \"Killing Doll\"",
+        // Remilia Scarlet (stage 6)
+        40 => "Conjuring \"Eternal Meek\"",
+        41 => "Divine Punishment \"Star of David\"",
+        42 => "Nether Sign \"Scarlet Netherworld\"",
+        43 => "Curse \"Vlad Tepes' Curse\"",
+        44 => "Scarlet Sign \"Scarlet Shoot\"",
+        45 => "\"Red Magic\"",
+        46 => "Divine Punishment \"Young Demon Lord\"",
+        47 => "Hell Sign \"Mountain of a Thousand Needles\"",
+        48 => "God Sign \"Vampire Illusion\"",
+        49 => "Scarlet Sign \"Scarlet Meister\"",
+        50 => "\"Scarlet Gensokyo\"",
         _ => "Spell Card",
     }
 }
