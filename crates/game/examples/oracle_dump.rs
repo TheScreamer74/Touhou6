@@ -10,6 +10,9 @@ fn make_world() -> World {
         rng: Rng::new(0x1234),
         difficulty: 1,
         rank: 16,
+        sub_rank: 0,
+        min_rank: 10,
+        max_rank: 32,
         // pos is [0,0]; player at angle 1.2345 so AngleToPlayer == 1.2345.
         player_pos: [1.2345f32.cos(), 1.2345f32.sin()],
         bullets: Vec::new(),

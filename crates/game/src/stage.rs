@@ -874,7 +874,11 @@ impl Stage {
             world: World {
                 rng: Rng::new(0x1234),
                 difficulty: 1, // Normal
+                // g_DifficultyInfo[NORMAL]: rank 16, range [10, 32].
                 rank: 16,
+                sub_rank: 0,
+                min_rank: 10,
+                max_rank: 32,
                 player_pos: [FIELD_W / 2.0, FIELD_H - 40.0],
                 bullets: Vec::new(),
                 lasers: Vec::new(),
@@ -1266,6 +1270,19 @@ impl Stage {
     /// Port of EnemyManager::RunEclTimeline (dialogue ops are skipped — no
     /// MSG interpreter yet).
     fn run_timeline(&mut self) {
+        // Survival subrank tick (EnemyManager.cpp:161-172): every
+        // (2400 - lives*240) frames of timeline time, +100 subrank (= +1 rank).
+        // Gated on no-dialogue like the decomp (run_timeline is only called when
+        // the dialogue is inactive). Fires at timeline_time 0, then each interval.
+        // The decomp checks timelineTime AFTER it has ticked for this frame (the
+        // Tick is at the end of EnemyManager::OnUpdate, the check near the start of
+        // the next), so it fires at timelineTime = interval, 2*interval, ...; the
+        // port's `timeline_time` here is one behind (incremented at the end of
+        // run_timeline), so use `+ 1` to fire on the same frame as the oracle.
+        let interval = 2400 - self.lives * 240;
+        if interval > 0 && (self.timeline_time + 1) % interval == 0 {
+            self.world.increase_subrank(100);
+        }
         loop {
             // Copy the instruction out so the borrow of the ECL data ends
             // before any spawning mutates `self`.
@@ -1629,6 +1646,7 @@ impl Stage {
     fn fire_bomb(&mut self) {
         self.dying = 0; // a bomb in the deathbomb window cancels the death
         self.bombs -= 1;
+        self.world.decrease_subrank(200); // Player.cpp:185: bombing drops rank ~2
         self.spell_capturing = false; // bombing forfeits the capture
         self.spell_used_bomb = self.spell_active; // spellcardInfo.usedBomb
         self.items.clear(); // g_ItemManager.RemoveAllItems()
@@ -1889,6 +1907,7 @@ impl Stage {
     /// drops by 16 (Player.cpp). On the fatal death: 5 full-power items, power 0.
     fn commit_death(&mut self) {
         self.lives -= 1;
+        self.world.decrease_subrank(1600); // Player.cpp:225: a miss drops rank ~16
         let pos = self.pos;
         if self.lives >= 0 {
             self.items.push(Item::scatter(pos, 2, &mut self.world.rng)); // POWER_BIG
@@ -2675,6 +2694,15 @@ impl Stage {
                 }
             }
         }
+        // Items that fall off the bottom uncollected drop rank (ItemManager.cpp:145).
+        let lost = self
+            .items
+            .iter()
+            .filter(|it| it.kind != -100 && it.pos[1] >= FIELD_H + 16.0)
+            .count();
+        if lost > 0 {
+            self.world.decrease_subrank(3 * lost as i32);
+        }
         self.items.retain(|it| it.kind != -100 && it.pos[1] < FIELD_H + 16.0);
         for (kind, pos) in collected {
             let color = match kind {
@@ -2682,6 +2710,9 @@ impl Stage {
                 3 | 5 => [1.0, 0.6, 0.6],   // bomb/life = red
                 _ => [1.0, 0.4, 0.4],       // power = red
             };
+            // Per-item subrank (ItemManager.cpp collect switch): small power +1,
+            // point +30 (high) / +3, bomb +5, life +200; big/full power and
+            // point-bullet give none.
             match kind {
                 0 => self.collect_power(1),
                 2 => self.collect_power(8),
@@ -2699,6 +2730,7 @@ impl Stage {
                     let y = pos[1] as i64;
                     self.score += if y < 128 { 100_000 } else { (60_000 - (y - 128) * 100).max(0) };
                     self.point_items += 1;
+                    self.world.increase_subrank(if pos[1] < 128.0 { 30 } else { 3 });
                 }
                 6 => {
                     // ITEM_POINT_BULLET: (grazeInStage/3)*10 + 500, or 100 while
@@ -2707,6 +2739,12 @@ impl Stage {
                 }
                 3 => self.bombs = (self.bombs + 1).min(8),
                 5 => self.lives = (self.lives + 1).min(8),
+                _ => {}
+            }
+            match kind {
+                0 => self.world.increase_subrank(1),
+                3 => self.world.increase_subrank(5),
+                5 => self.world.increase_subrank(200),
                 _ => {}
             }
             self.spawn_burst(pos, 4, 1.5, color, 6.0);

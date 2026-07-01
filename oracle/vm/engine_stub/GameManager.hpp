@@ -28,8 +28,21 @@ struct GameManager {
     // random spawns (RunEclTimeline case 4-7) draw against this, so the stub
     // must match or every random-spawn x/y diverges from the port.
     D3DXVECTOR3 playerMovementAreaSize{368,416,0};
-    i32 livesRemaining=0, currentStage=0;
-    void IncreaseSubrank(i32){}
+    // livesRemaining = 2 matches a fresh Normal game and the port's --ecl-dump;
+    // the survival subrank tick interval depends on it (EnemyManager.cpp:166-170).
+    i32 livesRemaining=2, currentStage=0;
+    // Dynamic rank (#3): g_DifficultyInfo[NORMAL] = rank 16, range [10,32].
+    i32 subRank=0, minRank=10, maxRank=32;
+    void IncreaseSubrank(i32 amount){
+        subRank += amount;
+        while (subRank >= 100){ rank++; subRank -= 100; }
+        if (rank > maxRank) rank = maxRank;
+    }
+    void DecreaseSubrank(i32 amount){
+        subRank -= amount;
+        while (subRank < 0){ rank--; subRank += 100; }
+        if (rank < minRank) rank = minRank;
+    }
 };
 extern GameManager g_GameManager;
 }

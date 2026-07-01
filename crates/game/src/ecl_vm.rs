@@ -321,8 +321,11 @@ impl Default for Enemy {
             move_start_time: 0,
             movement_mode: 0,
             ease_type: 0,
-            rank_speed_low: 0.0,
-            rank_speed_high: 0.0,
+            // EnemyManager.cpp:83-84: a fresh enemy's bullet rank-speed influence
+            // defaults to [-0.5, 0.5] (amounts 0). At rank 16 this contributes 0
+            // (the midpoint), so it was invisible until dynamic rank moved off 16.
+            rank_speed_low: -0.5,
+            rank_speed_high: 0.5,
             rank_amount1_low: 0,
             rank_amount1_high: 0,
             rank_amount2_low: 0,
@@ -401,7 +404,13 @@ pub enum WorldEvent {
 pub struct World {
     pub rng: Rng,
     pub difficulty: u8, // 0 easy, 1 normal, 2 hard, 3 lunatic
+    /// Internal difficulty (GameManager.rank): scales enemy bullet speed/count/
+    /// interval. Driven by `sub_rank` via Increase/DecreaseSubrank, clamped to
+    /// [min_rank, max_rank] (g_DifficultyInfo).
     pub rank: i32,
+    pub sub_rank: i32,
+    pub min_rank: i32,
+    pub max_rank: i32,
     pub player_pos: [f32; 2],
     pub bullets: Vec<Bullet>,
     pub lasers: Vec<Laser>,
@@ -524,6 +533,32 @@ fn g_effects(effect_idx: i32) -> (u32, EffCb) {
 }
 
 impl World {
+    /// GameManager::IncreaseSubrank: add to subRank, carrying every 100 into a
+    /// rank up, clamped to maxRank (GameManager.cpp:578).
+    pub fn increase_subrank(&mut self, amount: i32) {
+        self.sub_rank += amount;
+        while self.sub_rank >= 100 {
+            self.rank += 1;
+            self.sub_rank -= 100;
+        }
+        if self.rank > self.max_rank {
+            self.rank = self.max_rank;
+        }
+    }
+
+    /// GameManager::DecreaseSubrank: subtract from subRank, borrowing every 100
+    /// from a rank down, clamped to minRank (GameManager.cpp:593).
+    pub fn decrease_subrank(&mut self, amount: i32) {
+        self.sub_rank -= amount;
+        while self.sub_rank < 0 {
+            self.rank -= 1;
+            self.sub_rank += 100;
+        }
+        if self.rank < self.min_rank {
+            self.rank = self.min_rank;
+        }
+    }
+
     /// EffectManager::SpawnParticles (EffectManager.cpp:195) — allocate `count`
     /// effects of `effect_idx` at `pos`, each cycling `next_effect_index` to the
     /// next free slot. No RNG here; the callbacks draw on their first OnUpdate
