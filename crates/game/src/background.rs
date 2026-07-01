@@ -249,6 +249,9 @@ pub struct Background {
     fog_final: ([f32; 4], f32, f32),
     fog_interp_dur: i32,
     fog_interp_timer: i32,
+    /// STDOP_PAUSE (op5) latch: the camera parks on the pause instruction until
+    /// ECL op125 STDUNPAUSE sets this, mirroring Stage::unpauseFlag (Stage.cpp:139).
+    unpause_flag: bool,
 }
 
 fn fbits(i: i32) -> f32 {
@@ -327,11 +330,35 @@ impl Background {
             fog_final: ([0.0, 0.0, 0.0, 1.0], 200.0, 500.0),
             fog_interp_dur: 0,
             fog_interp_timer: 0,
+            unpause_flag: false,
         }
+    }
+
+    /// ECL op125 STDUNPAUSE: release the camera park (sets Stage::unpauseFlag).
+    pub fn unpause(&mut self) {
+        self.unpause_flag = true;
     }
 
     pub fn tick(&mut self) {
         // Camera/fog script (STD): position keys, fog, facing.
+        // `parked` is set when we stop on an STDOP_PAUSE whose release hasn't
+        // arrived; while parked the script clock (`self.time`) does not tick, so
+        // the position interp freezes (Stage.cpp:206 gates scriptTime.Tick()).
+        let mut parked = false;
+        // The decomp breaks the instruction loop on every position key, so a
+        // PAUSE right after one is reached only on the next frame (one extra
+        // scriptTime tick). This port processes all due instructions in one
+        // frame (with -1 timer offsets compensating the ramps), so it would meet
+        // the PAUSE a frame early. Park only once the PAUSE is the standing
+        // instruction at frame start; if a same-frame key just advanced into it,
+        // let this frame tick first.
+        let idx_at_start = self.script_idx;
+        // The -1 timer start on FACING_INTERP/FOG_INTERP compensates for the
+        // decomp deferring instructions that follow a position key by one frame
+        // (POSKEY breaks the loop). Interps reached without crossing a key this
+        // frame — e.g. the pause block after an unpause release — are processed
+        // on the same frame in the decomp, so they start their timer at 0.
+        let mut crossed_poskey = false;
         loop {
             let Some(ins) = self.std.script.get(self.script_idx) else { break };
             if ins.frame < 0 {
@@ -359,6 +386,7 @@ impl Background {
                         }
                     }
                     self.script_idx += 1;
+                    crossed_poskey = true;
                 }
                 1 => {
                     // FOG: color, near, far. skyFog is set to the target; when a
@@ -387,7 +415,7 @@ impl Background {
                     // the interp begins at ratio 0 on this frame (the decomp's
                     // facing ramp is one frame behind a naive timer).
                     self.facing_dur = ins.args[0];
-                    self.facing_timer = -1;
+                    self.facing_timer = if crossed_poskey { -1 } else { 0 };
                     self.script_idx += 1;
                 }
                 4 => {
@@ -398,8 +426,21 @@ impl Background {
                     // decomp's one-frame-later ramp.
                     self.fog_init = (self.fog_color, self.fog_near, self.fog_far);
                     self.fog_interp_dur = ins.args[0];
-                    self.fog_interp_timer = -1;
+                    self.fog_interp_timer = if crossed_poskey { -1 } else { 0 };
                     self.script_idx += 1;
+                }
+                5 => {
+                    // STDOP_PAUSE (Stage.cpp:139): park on this instruction until
+                    // ECL op125 sets unpause_flag; then advance past and continue.
+                    if self.unpause_flag {
+                        self.unpause_flag = false;
+                        self.script_idx += 1;
+                        continue;
+                    }
+                    if self.script_idx == idx_at_start {
+                        parked = true;
+                    }
+                    break;
                 }
                 _ => self.script_idx += 1,
             }
@@ -409,7 +450,14 @@ impl Background {
         if self.interp_end > self.interp_start {
             let r = ((self.time - self.interp_start) / (self.interp_end - self.interp_start))
                 .clamp(0.0, 1.0);
-            self.cam = self.cam_init.lerp(self.cam_final, r);
+            // Exact decomp arithmetic (Stage.cpp:153): (final - init) * ratio +
+            // init, per component — glam's lerp differs by 1 ulp on some frames.
+            let d = self.cam_final - self.cam_init;
+            self.cam = Vec3::new(
+                d.x * r + self.cam_init.x,
+                d.y * r + self.cam_init.y,
+                d.z * r + self.cam_init.z,
+            );
         }
         // Interpolate camera facing (op2/op3), as Stage::OnUpdate does.
         if self.facing_dur != 0 {
@@ -447,7 +495,10 @@ impl Background {
                 self.fog_interp_dur = 0;
             }
         }
-        self.time += 1.0;
+        // Script clock only advances when not parked on a pause (Stage.cpp:206).
+        if !parked {
+            self.time += 1.0;
+        }
 
         // Advance every background quad's ANM script.
         for dq in &mut self.quads {
