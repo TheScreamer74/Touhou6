@@ -3,4 +3,5 @@ vm/src/
 bg/build/
 anm/build/
 vtx/build/
+refcap/d3d8.dll
 vm/enemy_sizes.h
