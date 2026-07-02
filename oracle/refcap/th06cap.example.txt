@@ -1,0 +1,21 @@
+# Reference-capture config (copy next to 102h.exe as th06cap.txt).
+# Frames are logic frames == Present count == capture frame index.
+
+capdir capture
+capstart 0
+capend 1500
+
+# realtime 1   # Sleep(16) per Present so a human can watch at ~60fps.
+              # Omit for capture: the game runs uncapped (fast) but each
+              # captured frame is exactly one logic tick, so patterns are
+              # frame-exact regardless of wall-clock speed.
+
+# Menu navigation: 4-frame Z taps with generous gaps (title -> difficulty ->
+# character -> shot type). Calibrate against th06cap.log / captured frames.
+key 300 304 Z
+key 420 424 Z
+key 540 544 Z
+key 660 664 Z
+
+# For unobstructed-background stage capture, do NOT hold Z (no shooting).
+# To fight instead: key 800 999999 Z
