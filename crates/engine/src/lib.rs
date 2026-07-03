@@ -190,7 +190,14 @@ impl Engine {
     pub async fn new_web(
         canvas: web_sys::HtmlCanvasElement,
     ) -> (Self, wgpu::Surface<'static>) {
-        let instance = wgpu::Instance::default();
+        // Enable both WebGPU and WebGL: `Instance::default()` on wasm only picks
+        // BROWSER_WEBGPU, so a browser without WebGPU (Safari/Firefox, or any
+        // page served over plain HTTP — WebGPU needs a secure context) would
+        // find no adapter and panic. Requesting GL too falls back to WebGL2.
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::BROWSER_WEBGPU | wgpu::Backends::GL,
+            ..Default::default()
+        });
         let surface = instance
             .create_surface(wgpu::SurfaceTarget::Canvas(canvas))
             .expect("create surface from canvas");
