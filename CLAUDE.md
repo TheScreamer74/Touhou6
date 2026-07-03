@@ -14,5 +14,9 @@ authoritative ground truth. For every element:
 4. Use YouTube footage only to validate. If a difference is found and the right answer is
    unclear, ask.
 
-Known accepted exception (2026-06-18): Japanese Shift-JIS text (spell/song/stage names,
-dialogue) is left as English ASCII for now — no Japanese font subsystem exists yet.
+Japanese text (2026-07-03): a Japanese font subsystem now exists (`engine::text`:
+Shift-JIS decode + `ab_glyph` rasterisation of bundled Noto Sans JP, reproducing
+`TextHelper::RenderTextToTexture`). **Spellcard names** now render the original
+Japanese (pre-baked textures from the ecl). Still on the English-ASCII stopgap,
+pending the same pre-bake wiring: **dialogue** (switch the msg source from
+`th06e_ST.DAT` to `ST.DAT`), **stage names**, **song names**.
