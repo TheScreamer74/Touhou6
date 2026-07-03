@@ -93,6 +93,8 @@ struct StageData {
     /// SPELLCARDSTART id -> (texture slot, width, height) for the pre-baked
     /// original Japanese spellcard-name textures.
     spell_name_tex: HashMap<i32, (usize, f32, f32)>,
+    /// TEXTDIALOGUE instruction offset -> pre-baked JP line texture.
+    dialogue_tex: HashMap<u32, (usize, f32, f32)>,
 }
 
 /// Shared (cross-stage) assets plus the per-stage table.
@@ -153,7 +155,7 @@ impl Assets {
             ecl, scripts, &self.etama.entries[0], &self.etama4.entries[0], self.etama4_tex,
             player_anm, player_tex, character, msg,
             background, hud, cfg, spell_name_script, portrait_script,
-            sd.spell_name_tex.clone(),
+            sd.spell_name_tex.clone(), sd.dialogue_tex.clone(),
         )
     }
 }
@@ -307,9 +309,30 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
                 spell_name_tex.insert(id, (slot, img.width as f32, img.height as f32));
             }
         }
+        // Original Japanese dialogue lives in ST.DAT (the port previously used the
+        // English patch th06e_ST.DAT). Pre-bake each TEXTDIALOGUE line texture.
+        let msg_data = files
+            .st
+            .get(&format!("msg{n}.dat"))
+            .cloned()
+            .unwrap_or_else(|| files.st_en[&format!("msg{n}.dat")].clone());
+        let mut dialogue_tex = HashMap::new();
+        if let Some(msg) = th06_formats::msg::Msg::parse(msg_data.clone()) {
+            for (off, raw) in stage::scan_dialogue_lines(&msg) {
+                if dialogue_tex.contains_key(&off) {
+                    continue;
+                }
+                // White text + black shadow; the line colour (player/boss) is a
+                // draw-time tint (Gui line_colors), so keep the bake neutral.
+                let img = th06_engine::text::render_shiftjis(&raw, 16.0, [255, 255, 255], Some([0, 0, 0]));
+                let slot = textures.len();
+                textures.push(engine.create_texture(&img.rgba, img.width, img.height));
+                dialogue_tex.insert(off, (slot, img.width as f32, img.height as f32));
+            }
+        }
         stages.push(StageData {
             ecl_data: ecl_bytes,
-            msg_data: files.st_en[&format!("msg{n}.dat")].clone(),
+            msg_data,
             std_data: files.st[&format!("stage{n}.std")].clone(),
             enm: Anm0::parse(&files.st[&format!("stg{n}enm.anm")]).expect("enm"),
             enm_tex,
@@ -319,6 +342,7 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
             bg_tex,
             boss_face_tex,
             spell_name_tex,
+            dialogue_tex,
         });
     }
 
