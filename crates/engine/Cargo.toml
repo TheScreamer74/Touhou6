@@ -9,6 +9,10 @@ winit = "0.30"
 image = "0.25"
 bytemuck = { version = "1", features = ["derive"] }
 glam = "0.29"
+# JP text rasterisation (reproduces TextHelper::RenderTextToTexture): a pure-Rust
+# glyph rasteriser + Shift-JIS decoder, both wasm-safe.
+ab_glyph = "0.2"
+encoding_rs = "0.8"
 # Drop-in Instant that works on wasm (re-exports std on native).
 web-time = "1"
 

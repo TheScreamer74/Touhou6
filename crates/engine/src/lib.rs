@@ -2,6 +2,7 @@
 //! headless render-to-image for verification plus a winit window mode.
 
 pub mod audio;
+pub mod text;
 
 use std::collections::HashSet;
 use std::sync::Arc;
