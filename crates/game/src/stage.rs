@@ -552,11 +552,37 @@ struct Particle {
 /// Spell card names in English, indexed by the ECL spell id (op93). Only
 /// stage 1's are filled in; the in-game names are Shift-JIS and cannot be
 /// drawn with the ASCII font.
+/// Walk every sub of an ecl and collect (spellcard id, raw Shift-JIS name
+/// bytes) from each SPELLCARDSTART (op93: id at arg byte 2, NUL-terminated name
+/// from byte 4). Used to pre-bake the original Japanese name textures at load.
+pub fn scan_spell_names(ecl: &Ecl) -> Vec<(i32, Vec<u8>)> {
+    let mut out = Vec::new();
+    for &start in &ecl.sub_offsets {
+        let mut off = start;
+        let mut budget = 100_000; // guard against a malformed offset loop
+        while let Some(ins) = ecl.instr_at(off) {
+            if ins.opcode == 93 && ins.args.len() >= 4 {
+                let id = i16::from_le_bytes([ins.args[2], ins.args[3]]) as i32;
+                let name = &ins.args[4..];
+                let end = name.iter().position(|&c| c == 0).unwrap_or(name.len());
+                out.push((id, name[..end].to_vec()));
+            }
+            if ins.offset_to_next <= 0 {
+                break;
+            }
+            off += ins.offset_to_next as u32;
+            budget -= 1;
+            if budget == 0 {
+                break;
+            }
+        }
+    }
+    out
+}
+
 /// English spellcard names indexed by the ECL SPELLCARDSTART id (op93 byte 2).
-/// The names themselves are Shift-JIS in the ecl (left untranslated per the
-/// Japanese-text exception in CLAUDE.md); this is the recognised English
-/// rendering of each card, id order verified against the real ecldata1-6.ecl.
-/// ids 51+ are unused by the main game (Extra stage lives in a separate ecl).
+/// Kept as a fallback for cards whose JP-name texture failed to bake.
+#[allow(dead_code)]
 fn spellcard_name(id: i32) -> &'static str {
     match id {
         // Rumia (stage 1)
@@ -866,6 +892,10 @@ pub struct Stage {
     /// drives the spell-name announce animation (fly-in, shrink, fly-up/off).
     spell_name_script: Vec<AnmInstr>,
     spell_name_runner: Option<AnmRunner>,
+    /// Pre-baked JP spellcard-name textures by id (slot, w, h), and the current
+    /// card's entry while its announce runs.
+    spell_name_tex: HashMap<i32, (usize, f32, f32)>,
+    spell_name_cur: Option<(usize, f32, f32)>,
     /// Boss spellcard portrait (face*.anm script 3) + which boss-face sprite.
     portrait_script: Vec<AnmInstr>,
     portrait_runner: Option<AnmRunner>,
@@ -894,7 +924,7 @@ pub struct Stage {
 }
 
 impl Stage {
-    pub fn new(ecl: Ecl, enemy_scripts: HashMap<i32, ScriptRef>, etama: &Entry, eff: &Entry, eff_tex: usize, player: &Entry, player_tex: usize, character: Character, msg: Msg, background: Option<Background>, hud: Hud, cfg: StageConfig, spell_name_script: Vec<AnmInstr>, portrait_script: Vec<AnmInstr>) -> Self {
+    pub fn new(ecl: Ecl, enemy_scripts: HashMap<i32, ScriptRef>, etama: &Entry, eff: &Entry, eff_tex: usize, player: &Entry, player_tex: usize, character: Character, msg: Msg, background: Option<Background>, hud: Hud, cfg: StageConfig, spell_name_script: Vec<AnmInstr>, portrait_script: Vec<AnmInstr>, spell_name_tex: HashMap<i32, (usize, f32, f32)>) -> Self {
         let timeline_off = ecl.timeline_offset;
         // etama4 (effect) ANM: per-script instructions for the runners, and the
         // shared sprite table + texture for rendering particles.
@@ -1025,6 +1055,8 @@ impl Stage {
             rand_item_spawn: 0,
             spell_active: false,
             spell_name: String::new(),
+            spell_name_tex,
+            spell_name_cur: None,
             spell_id: 0,
             spell_secs: 0,
             spell_name_script,
@@ -2887,9 +2919,11 @@ impl Stage {
                     let name = SFX_BY_IDX.get(idx as usize).copied().unwrap_or("tan00");
                     self.events.push(Event::Sfx(name));
                 }
-                WorldEvent::SpellcardStart(id, sprite, _raw) => {
+                WorldEvent::SpellcardStart(id, sprite, raw) => {
                     self.spell_active = true;
-                    self.spell_name = spellcard_name(id).to_string();
+                    // Original Japanese name: pre-baked texture + decoded string.
+                    self.spell_name = th06_engine::text::decode_shiftjis(&raw);
+                    self.spell_name_cur = self.spell_name_tex.get(&id).copied();
                     self.spell_id = id;
                     self.spell_portrait_sprite = sprite;
                     self.spell_capturing = true;
@@ -3476,35 +3510,38 @@ impl Stage {
         // sprite is centre-anchored at the VM pos; the blue bar (front.anm
         // script 24, enemySpellcardBackground) follows it, width strlen*15/2+16.
         if let Some(r) = &self.spell_name_runner {
-            if r.visible() && !self.spell_name.is_empty() {
-                let scale = r.scale[0].max(0.01);
-                // The original draws the name in the clipped game-region viewport
-                // with short Japanese text; the VM x is fixed at 256 until the
-                // fly-off. Centre it in the playfield so the longer English name
-                // stays readable, and follow the VM x once it flies off right.
-                let cx = if r.pos[0] > 256.5 { r.pos[0] } else { FIELD_X + FIELD_W / 2.0 };
-                let bar_len = self.spell_name.chars().count() as f32 * 15.0 / 2.0 + 16.0;
-                if let Some(([sx, sy, sw, sh], _, bscale, _)) = self.hud.script_state(24) {
-                    let ts = self.hud.tex_size();
-                    let bh = sh * bscale[1];
+            if r.visible() {
+                if let Some((slot, tw, th)) = self.spell_name_cur {
+                    let scale = r.scale[0].max(0.01);
+                    // The VM x is fixed at 256 until the fly-off; centre the name
+                    // in the playfield, then follow the VM x once it flies off.
+                    let cx = if r.pos[0] > 256.5 { r.pos[0] } else { FIELD_X + FIELD_W / 2.0 };
+                    let nw = tw * scale;
+                    let nh = th * scale;
+                    // Blue bar (front.anm 24) sized to the name texture + padding.
+                    let bar_len = nw + 20.0 * scale;
+                    if let Some(([sx, sy, sw, sh], _, bscale, _)) = self.hud.script_state(24) {
+                        let ts = self.hud.tex_size();
+                        let bh = sh * bscale[1];
+                        cmds.push(DrawCmd {
+                            tex: self.hud.tex(),
+                            dst: [cx - bar_len / 2.0, r.pos[1] - bh / 2.0, bar_len, bh],
+                            src: [sx / ts, sy / ts, (sx + sw) / ts, (sy + sh) / ts],
+                            tint: [1.0, 1.0, 1.0, r.alpha],
+                            rot: 0.0,
+                            additive: false,
+                        });
+                    }
+                    // Pre-baked JP name texture, centred at `cx`, scaled by the VM.
                     cmds.push(DrawCmd {
-                        tex: self.hud.tex(),
-                        dst: [cx - bar_len / 2.0, r.pos[1] - bh / 2.0, bar_len, bh],
-                        src: [sx / ts, sy / ts, (sx + sw) / ts, (sy + sh) / ts],
+                        tex: slot,
+                        dst: [cx - nw / 2.0, r.pos[1] - nh / 2.0, nw, nh],
+                        src: [0.0, 0.0, 1.0, 1.0],
                         tint: [1.0, 1.0, 1.0, r.alpha],
                         rot: 0.0,
                         additive: false,
                     });
                 }
-                // Name text: 15px glyphs scaled by the VM, centred at `cx`.
-                let w = self.spell_name.chars().count() as f32 * 14.0 * scale;
-                draw_num_scaled(
-                    &mut cmds,
-                    [cx - w / 2.0, r.pos[1] - 7.5 * scale],
-                    scale,
-                    [1.0, 0.94, 0.94, r.alpha],
-                    &self.spell_name,
-                );
             }
         }
 
