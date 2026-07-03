@@ -15,20 +15,23 @@ use th06_formats::pbg3::Pbg3;
 use crate::{build_game, GameFiles};
 
 /// Extract every entry of an in-memory PBG3 archive, keyed by entry name.
-fn extract(raw: &[u8]) -> HashMap<String, Vec<u8>> {
-    let archive = Pbg3::parse(raw).expect("parse PBG3");
-    archive
-        .entries
-        .iter()
-        .map(|e| (e.name.clone(), archive.extract(e).expect("extract")))
-        .collect()
+/// Returns an error (rather than panicking) so a wrong/corrupt upload surfaces
+/// as a visible message instead of a blank canvas.
+fn extract(raw: &[u8]) -> Result<HashMap<String, Vec<u8>>, String> {
+    let archive = Pbg3::parse(raw).map_err(|_| "not a valid PBG3 (.DAT) archive".to_string())?;
+    let mut out = HashMap::new();
+    for e in &archive.entries {
+        let bytes = archive.extract(e).ok_or_else(|| format!("failed to extract {}", e.name))?;
+        out.insert(e.name.clone(), bytes);
+    }
+    Ok(out)
 }
 
 /// Entry point invoked from JS once the player has selected their game
 /// folder. `files` is a plain object mapping each file's basename to a
 /// `Uint8Array` of its bytes. Returns a Promise (async).
 #[wasm_bindgen]
-pub async fn start_game(files: js_sys::Object) {
+pub async fn start_game(files: js_sys::Object) -> Result<(), JsValue> {
     console_error_panic_hook::set_once();
 
     // Pull every uploaded file into a name -> bytes map.
@@ -40,7 +43,19 @@ pub async fn start_game(files: js_sys::Object) {
         raw.insert(name, bytes);
     }
 
-    let get = |n: &str| raw.get(n).cloned().unwrap_or_default();
+    // Extract a required archive, or fail with a readable message the page
+    // shows — a wrong/partial/incompatible folder would otherwise panic deep in
+    // build_game and leave a blank canvas.
+    let need = |n: &str| -> Result<HashMap<String, Vec<u8>>, JsValue> {
+        let bytes = raw.get(n).filter(|b| !b.is_empty()).ok_or_else(|| {
+            JsValue::from_str(&format!(
+                "Missing required file: {n}. Select the th06 folder containing \
+                 TL.DAT, CM.DAT, ST.DAT, IN.DAT, th06e_ST.DAT and bgm/."
+            ))
+        })?;
+        extract(bytes).map_err(|e| JsValue::from_str(&format!("{n}: {e}")))
+    };
+
     // Loose BGM wavs (th06_0N.wav) sit beside the archives, not inside them.
     let bgm: HashMap<String, Vec<u8>> = raw
         .iter()
@@ -59,11 +74,11 @@ pub async fn start_game(files: js_sys::Object) {
         .collect();
 
     let game_files = GameFiles {
-        tl: extract(&get("TL.DAT")),
-        cm: extract(&get("CM.DAT")),
-        st: extract(&get("ST.DAT")),
-        inn: extract(&get("IN.DAT")),
-        st_en: extract(&get("th06e_ST.DAT")),
+        tl: need("TL.DAT")?,
+        cm: need("CM.DAT")?,
+        st: need("ST.DAT")?,
+        inn: need("IN.DAT")?,
+        st_en: need("th06e_ST.DAT")?,
         bgm,
         bgm_pos,
     };
@@ -91,4 +106,5 @@ pub async fn start_game(files: js_sys::Object) {
     let (textures, mut game) = build_game(&engine, &game_files, true);
     game.start_title_bgm();
     engine.run_game_web(canvas, surface, "Touhou 6 ~ EoSD", textures, move |input| game.update(input));
+    Ok(())
 }
