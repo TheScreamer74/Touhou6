@@ -14,9 +14,10 @@ authoritative ground truth. For every element:
 4. Use YouTube footage only to validate. If a difference is found and the right answer is
    unclear, ask.
 
-Japanese text (2026-07-03): a Japanese font subsystem now exists (`engine::text`:
+Japanese text (2026-07-03): a Japanese font subsystem exists (`engine::text`:
 Shift-JIS decode + `ab_glyph` rasterisation of bundled Noto Sans JP, reproducing
-`TextHelper::RenderTextToTexture`). **Spellcard names** now render the original
-Japanese (pre-baked textures from the ecl). Still on the English-ASCII stopgap,
-pending the same pre-bake wiring: **dialogue** (switch the msg source from
-`th06e_ST.DAT` to `ST.DAT`), **stage names**, **song names**.
+`TextHelper::RenderTextToTexture`). All gameplay-visible text now renders the
+original Japanese via pre-baked textures: **spellcard names** (ecl op93),
+**dialogue** (ST.DAT msg), **stage names** (STD name[128]). Only **song names**
+(STD songNames[4][128]) remain on hold — they need a Music Room menu, which the
+port doesn't have yet.

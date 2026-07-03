@@ -552,6 +552,35 @@ struct Particle {
 /// Spell card names in English, indexed by the ECL spell id (op93). Only
 /// stage 1's are filled in; the in-game names are Shift-JIS and cannot be
 /// drawn with the ASCII font.
+/// Walk every msg entry and collect (instruction offset, raw Shift-JIS text
+/// bytes) from each TEXTDIALOGUE (op3, text NUL-terminated from arg byte 4).
+/// Keyed by absolute offset so run_dialogue can look up the pre-baked texture.
+pub fn scan_dialogue_lines(msg: &Msg) -> Vec<(u32, Vec<u8>)> {
+    let mut out = Vec::new();
+    for &start in &msg.offsets {
+        let mut off = start;
+        let mut budget = 10_000;
+        while let Some(i) = msg.instr_at(off) {
+            if i.opcode == 3 && i.args.len() > 4 {
+                let text = &i.args[4..];
+                let end = text.iter().position(|&b| b == 0).unwrap_or(text.len());
+                if end > 0 {
+                    out.push((off, text[..end].to_vec()));
+                }
+            }
+            if i.opcode == 0 || i.opcode == 10 || i.size == 0 {
+                break; // MSGDELETE / MSGHALT ends this entry
+            }
+            off += i.size;
+            budget -= 1;
+            if budget == 0 {
+                break;
+            }
+        }
+    }
+    out
+}
+
 /// Walk every sub of an ecl and collect (spellcard id, raw Shift-JIS name
 /// bytes) from each SPELLCARDSTART (op93: id at arg byte 2, NUL-terminated name
 /// from byte 4). Used to pre-bake the original Japanese name textures at load.
@@ -670,6 +699,8 @@ struct Dialogue {
     ecl_resumed: bool,
     lines: [String; 2],
     line_colors: [usize; 2],
+    /// Pre-baked JP line textures (slot, w, h) for the two visible lines.
+    line_tex: [Option<(usize, f32, f32)>; 2],
     /// Which portrait (0 player / 1 boss) spoke last, -1 none.
     portrait_active: i32,
     /// Whether each portrait has appeared, and its chosen expression sprite.
@@ -687,6 +718,7 @@ impl Default for Dialogue {
             ecl_resumed: false,
             lines: [String::new(), String::new()],
             line_colors: [0, 0],
+            line_tex: [None, None],
             portrait_active: -1,
             portrait_shown: [false, false],
             portrait_expr: [0, 0],
@@ -896,6 +928,11 @@ pub struct Stage {
     /// card's entry while its announce runs.
     spell_name_tex: HashMap<i32, (usize, f32, f32)>,
     spell_name_cur: Option<(usize, f32, f32)>,
+    /// Pre-baked JP dialogue-line textures by TEXTDIALOGUE offset.
+    dialogue_tex: HashMap<u32, (usize, f32, f32)>,
+    /// Stage-name intro (text.anm script 0): pre-baked JP texture + live runner.
+    stage_name_tex: Option<(usize, f32, f32)>,
+    stage_name_runner: Option<AnmRunner>,
     /// Boss spellcard portrait (face*.anm script 3) + which boss-face sprite.
     portrait_script: Vec<AnmInstr>,
     portrait_runner: Option<AnmRunner>,
@@ -924,7 +961,7 @@ pub struct Stage {
 }
 
 impl Stage {
-    pub fn new(ecl: Ecl, enemy_scripts: HashMap<i32, ScriptRef>, etama: &Entry, eff: &Entry, eff_tex: usize, player: &Entry, player_tex: usize, character: Character, msg: Msg, background: Option<Background>, hud: Hud, cfg: StageConfig, spell_name_script: Vec<AnmInstr>, portrait_script: Vec<AnmInstr>, spell_name_tex: HashMap<i32, (usize, f32, f32)>) -> Self {
+    pub fn new(ecl: Ecl, enemy_scripts: HashMap<i32, ScriptRef>, etama: &Entry, eff: &Entry, eff_tex: usize, player: &Entry, player_tex: usize, character: Character, msg: Msg, background: Option<Background>, hud: Hud, cfg: StageConfig, spell_name_script: Vec<AnmInstr>, portrait_script: Vec<AnmInstr>, spell_name_tex: HashMap<i32, (usize, f32, f32)>, dialogue_tex: HashMap<u32, (usize, f32, f32)>, stage_name_script: Vec<AnmInstr>, stage_name_tex: Option<(usize, f32, f32)>) -> Self {
         let timeline_off = ecl.timeline_offset;
         // etama4 (effect) ANM: per-script instructions for the runners, and the
         // shared sprite table + texture for rendering particles.
@@ -1057,6 +1094,11 @@ impl Stage {
             spell_name: String::new(),
             spell_name_tex,
             spell_name_cur: None,
+            dialogue_tex,
+            stage_name_tex,
+            // Start the stage-name intro immediately (Gui shows it at stage init).
+            stage_name_runner: (!stage_name_script.is_empty() && stage_name_tex.is_some())
+                .then(|| AnmRunner::new(stage_name_script)),
             spell_id: 0,
             spell_secs: 0,
             spell_name_script,
@@ -1216,6 +1258,12 @@ impl Stage {
             r.tick();
             if !r.visible() {
                 self.spell_name_runner = None;
+            }
+        }
+        if let Some(r) = &mut self.stage_name_runner {
+            r.tick();
+            if !r.visible() {
+                self.stage_name_runner = None;
             }
         }
         if let Some(r) = &mut self.portrait_runner {
@@ -2634,14 +2682,23 @@ impl Stage {
                     return;
                 }
                 3 => {
-                    // TEXTDIALOGUE
+                    // TEXTDIALOGUE — original Japanese (Shift-JIS) via a pre-baked
+                    // texture keyed by this instruction's offset.
                     let color = i.arg_i16(0).clamp(0, 1) as usize;
                     let line = i.arg_i16(2).clamp(0, 1) as usize;
+                    let off = d.off;
                     if line == 0 {
                         d.lines[1].clear();
+                        d.line_tex[1] = None;
                     }
-                    d.lines[line] = i.arg_str(4);
+                    let raw = {
+                        let t = &i.args[4.min(i.args.len())..];
+                        let end = t.iter().position(|&b| b == 0).unwrap_or(t.len());
+                        t[..end].to_vec()
+                    };
+                    d.lines[line] = th06_engine::text::decode_shiftjis(&raw);
                     d.line_colors[line] = color;
+                    d.line_tex[line] = self.dialogue_tex.get(&off).copied();
                     d.frames_pause = 0;
                 }
                 4 => {
@@ -3545,6 +3602,25 @@ impl Stage {
             }
         }
 
+        // Stage-name intro (text.anm script 0): the STD stage title, lower-left,
+        // fading with the VM. The VM pos is playfield-relative; y follows it.
+        if let Some(r) = &self.stage_name_runner {
+            if r.visible() {
+                if let Some((slot, tw, th)) = self.stage_name_tex {
+                    let x = FIELD_X + 24.0;
+                    let y = FIELD_Y + r.pos[1].max(0.0);
+                    cmds.push(DrawCmd {
+                        tex: slot,
+                        dst: [x, y, tw, th],
+                        src: [0.0, 0.0, 1.0, 1.0],
+                        tint: [1.0, 1.0, 1.0, r.alpha],
+                        rot: 0.0,
+                        additive: false,
+                    });
+                }
+            }
+        }
+
         // Dialogue box.
         if self.dialogue.active && (!self.dialogue.lines[0].is_empty() || !self.dialogue.lines[1].is_empty()) {
             // Portraits: player (Reimu) lower-left, boss (Rumia) lower-right,
@@ -3579,22 +3655,26 @@ impl Stage {
 
             let box_y = FIELD_Y + FIELD_H - 80.0;
             cmds.push(rect([FIELD_X + 8.0, box_y, FIELD_W - 16.0, 64.0], [0.0, 0.0, 0.0, 0.65]));
-            for (li, text) in self.dialogue.lines.iter().enumerate() {
-                if text.is_empty() {
-                    continue;
-                }
+            for li in 0..2 {
                 let tint = if self.dialogue.line_colors[li] == 0 {
                     [1.0, 1.0, 1.0, 1.0] // player
                 } else {
                     [1.0, 0.55, 0.55, 1.0] // boss
                 };
-                draw_text(
-                    &mut cmds,
-                    [FIELD_X + 20.0, box_y + 10.0 + li as f32 * 24.0],
-                    14.0,
-                    tint,
-                    text,
-                );
+                let y = box_y + 10.0 + li as f32 * 24.0;
+                if let Some((slot, tw, th)) = self.dialogue.line_tex[li] {
+                    cmds.push(DrawCmd {
+                        tex: slot,
+                        dst: [FIELD_X + 20.0, y, tw, th],
+                        src: [0.0, 0.0, 1.0, 1.0],
+                        tint,
+                        rot: 0.0,
+                        additive: false,
+                    });
+                } else if !self.dialogue.lines[li].is_empty() {
+                    // Fallback (no baked texture): the ASCII glyph path.
+                    draw_text(&mut cmds, [FIELD_X + 20.0, y], 14.0, tint, &self.dialogue.lines[li]);
+                }
             }
         }
 
