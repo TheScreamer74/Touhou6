@@ -930,6 +930,9 @@ pub struct Stage {
     spell_name_cur: Option<(usize, f32, f32)>,
     /// Pre-baked JP dialogue-line textures by TEXTDIALOGUE offset.
     dialogue_tex: HashMap<u32, (usize, f32, f32)>,
+    /// Stage-name intro (text.anm script 0): pre-baked JP texture + live runner.
+    stage_name_tex: Option<(usize, f32, f32)>,
+    stage_name_runner: Option<AnmRunner>,
     /// Boss spellcard portrait (face*.anm script 3) + which boss-face sprite.
     portrait_script: Vec<AnmInstr>,
     portrait_runner: Option<AnmRunner>,
@@ -958,7 +961,7 @@ pub struct Stage {
 }
 
 impl Stage {
-    pub fn new(ecl: Ecl, enemy_scripts: HashMap<i32, ScriptRef>, etama: &Entry, eff: &Entry, eff_tex: usize, player: &Entry, player_tex: usize, character: Character, msg: Msg, background: Option<Background>, hud: Hud, cfg: StageConfig, spell_name_script: Vec<AnmInstr>, portrait_script: Vec<AnmInstr>, spell_name_tex: HashMap<i32, (usize, f32, f32)>, dialogue_tex: HashMap<u32, (usize, f32, f32)>) -> Self {
+    pub fn new(ecl: Ecl, enemy_scripts: HashMap<i32, ScriptRef>, etama: &Entry, eff: &Entry, eff_tex: usize, player: &Entry, player_tex: usize, character: Character, msg: Msg, background: Option<Background>, hud: Hud, cfg: StageConfig, spell_name_script: Vec<AnmInstr>, portrait_script: Vec<AnmInstr>, spell_name_tex: HashMap<i32, (usize, f32, f32)>, dialogue_tex: HashMap<u32, (usize, f32, f32)>, stage_name_script: Vec<AnmInstr>, stage_name_tex: Option<(usize, f32, f32)>) -> Self {
         let timeline_off = ecl.timeline_offset;
         // etama4 (effect) ANM: per-script instructions for the runners, and the
         // shared sprite table + texture for rendering particles.
@@ -1092,6 +1095,10 @@ impl Stage {
             spell_name_tex,
             spell_name_cur: None,
             dialogue_tex,
+            stage_name_tex,
+            // Start the stage-name intro immediately (Gui shows it at stage init).
+            stage_name_runner: (!stage_name_script.is_empty() && stage_name_tex.is_some())
+                .then(|| AnmRunner::new(stage_name_script)),
             spell_id: 0,
             spell_secs: 0,
             spell_name_script,
@@ -1251,6 +1258,12 @@ impl Stage {
             r.tick();
             if !r.visible() {
                 self.spell_name_runner = None;
+            }
+        }
+        if let Some(r) = &mut self.stage_name_runner {
+            r.tick();
+            if !r.visible() {
+                self.stage_name_runner = None;
             }
         }
         if let Some(r) = &mut self.portrait_runner {
@@ -3580,6 +3593,25 @@ impl Stage {
                     cmds.push(DrawCmd {
                         tex: slot,
                         dst: [cx - nw / 2.0, r.pos[1] - nh / 2.0, nw, nh],
+                        src: [0.0, 0.0, 1.0, 1.0],
+                        tint: [1.0, 1.0, 1.0, r.alpha],
+                        rot: 0.0,
+                        additive: false,
+                    });
+                }
+            }
+        }
+
+        // Stage-name intro (text.anm script 0): the STD stage title, lower-left,
+        // fading with the VM. The VM pos is playfield-relative; y follows it.
+        if let Some(r) = &self.stage_name_runner {
+            if r.visible() {
+                if let Some((slot, tw, th)) = self.stage_name_tex {
+                    let x = FIELD_X + 24.0;
+                    let y = FIELD_Y + r.pos[1].max(0.0);
+                    cmds.push(DrawCmd {
+                        tex: slot,
+                        dst: [x, y, tw, th],
                         src: [0.0, 0.0, 1.0, 1.0],
                         tint: [1.0, 1.0, 1.0, r.alpha],
                         rot: 0.0,

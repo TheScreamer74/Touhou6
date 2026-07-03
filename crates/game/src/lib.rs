@@ -95,6 +95,8 @@ struct StageData {
     spell_name_tex: HashMap<i32, (usize, f32, f32)>,
     /// TEXTDIALOGUE instruction offset -> pre-baked JP line texture.
     dialogue_tex: HashMap<u32, (usize, f32, f32)>,
+    /// Pre-baked JP stage-name texture (STD header name[128]), shown at start.
+    stage_name_tex: Option<(usize, f32, f32)>,
 }
 
 /// Shared (cross-stage) assets plus the per-stage table.
@@ -151,11 +153,19 @@ impl Assets {
             .find(|(id, _)| *id == 3)
             .map(|(_, i)| i.clone())
             .unwrap_or_default();
+        // text.anm script 0 = TEXT_STAGE_NAME (the stage-name fly-in at start).
+        let stage_name_script = self.text.entries[0]
+            .scripts
+            .iter()
+            .find(|(id, _)| *id == 0)
+            .map(|(_, i)| i.clone())
+            .unwrap_or_default();
         Stage::new(
             ecl, scripts, &self.etama.entries[0], &self.etama4.entries[0], self.etama4_tex,
             player_anm, player_tex, character, msg,
             background, hud, cfg, spell_name_script, portrait_script,
             sd.spell_name_tex.clone(), sd.dialogue_tex.clone(),
+            stage_name_script, sd.stage_name_tex,
         )
     }
 }
@@ -330,10 +340,23 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
                 dialogue_tex.insert(off, (slot, img.width as f32, img.height as f32));
             }
         }
+        // Stage name: STD header name[128] at offset 0x10 (Gui.cpp:438 uses
+        // stdData->stageName), drawn light-cyan with a black shadow (Gui.cpp:437).
+        let std_bytes = files.st[&format!("stage{n}.std")].clone();
+        let stage_name_tex = std_bytes.get(0x10..0x10 + 128).and_then(|nm| {
+            let end = nm.iter().position(|&c| c == 0).unwrap_or(nm.len());
+            if end == 0 {
+                return None;
+            }
+            let img = th06_engine::text::render_shiftjis(&nm[..end], 20.0, [180, 240, 240], Some([0, 0, 0]));
+            let slot = textures.len();
+            textures.push(engine.create_texture(&img.rgba, img.width, img.height));
+            Some((slot, img.width as f32, img.height as f32))
+        });
         stages.push(StageData {
             ecl_data: ecl_bytes,
             msg_data,
-            std_data: files.st[&format!("stage{n}.std")].clone(),
+            std_data: std_bytes,
             enm: Anm0::parse(&files.st[&format!("stg{n}enm.anm")]).expect("enm"),
             enm_tex,
             enm2,
@@ -343,6 +366,7 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
             boss_face_tex,
             spell_name_tex,
             dialogue_tex,
+            stage_name_tex,
         });
     }
 
