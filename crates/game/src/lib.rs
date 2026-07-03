@@ -90,6 +90,9 @@ struct StageData {
     bg: Anm0,
     bg_tex: usize,
     boss_face_tex: usize,
+    /// SPELLCARDSTART id -> (texture slot, width, height) for the pre-baked
+    /// original Japanese spellcard-name textures.
+    spell_name_tex: HashMap<i32, (usize, f32, f32)>,
 }
 
 /// Shared (cross-stage) assets plus the per-stage table.
@@ -150,6 +153,7 @@ impl Assets {
             ecl, scripts, &self.etama.entries[0], &self.etama4.entries[0], self.etama4_tex,
             player_anm, player_tex, character, msg,
             background, hud, cfg, spell_name_script, portrait_script,
+            sd.spell_name_tex.clone(),
         )
     }
 }
@@ -286,8 +290,25 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
         let face = BOSS_FACE[n - 1];
         let boss_face_tex =
             load(&files.st, &format!("{face}.png"), Some(&format!("{face}_a.png")), &mut textures);
+        // Pre-bake the original Japanese spellcard names (Shift-JIS in the ecl)
+        // into textures — the announce banner draws these instead of the English
+        // stopgap. ShowSpellcard colour: 0xfff0f0 text, black shadow (Gui.cpp:235).
+        let ecl_bytes = files.st[&format!("ecldata{n}.ecl")].clone();
+        let mut spell_name_tex = HashMap::new();
+        if let Ok(ecl) = th06_formats::ecl::Ecl::parse(ecl_bytes.clone()) {
+            for (id, raw) in stage::scan_spell_names(&ecl) {
+                if raw.is_empty() || spell_name_tex.contains_key(&id) {
+                    continue;
+                }
+                // ~18px name height at VM scale 1; white text, black shadow.
+                let img = th06_engine::text::render_shiftjis(&raw, 18.0, [255, 240, 240], Some([0, 0, 0]));
+                let slot = textures.len();
+                textures.push(engine.create_texture(&img.rgba, img.width, img.height));
+                spell_name_tex.insert(id, (slot, img.width as f32, img.height as f32));
+            }
+        }
         stages.push(StageData {
-            ecl_data: files.st[&format!("ecldata{n}.ecl")].clone(),
+            ecl_data: ecl_bytes,
             msg_data: files.st_en[&format!("msg{n}.dat")].clone(),
             std_data: files.st[&format!("stage{n}.std")].clone(),
             enm: Anm0::parse(&files.st[&format!("stg{n}enm.anm")]).expect("enm"),
@@ -297,6 +318,7 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
             bg: Anm0::parse(&files.st[&format!("stg{n}bg.anm")]).expect("bg"),
             bg_tex,
             boss_face_tex,
+            spell_name_tex,
         });
     }
 

@@ -2612,8 +2612,10 @@ dependencies = [
 name = "th06-engine"
 version = "0.1.0"
 dependencies = [
+ "ab_glyph",
  "bytemuck",
  "console_error_panic_hook",
+ "encoding_rs",
  "glam",
  "image",
  "js-sys",
