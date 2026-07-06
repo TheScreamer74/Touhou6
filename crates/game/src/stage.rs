@@ -101,7 +101,6 @@ const fn spr(tex: usize, x: f32, y: f32, w: f32, h: f32) -> SpriteRef {
 
 /// Fallback shot sprite (player00 amulet) when a script can't be resolved.
 const AMULET: SpriteRef = spr(TEX_PLAYER, 129.0, 1.0, 14.0, 14.0);
-const BOMB_GLOW: SpriteRef = spr(TEX_PLAYER, 1.0, 97.0, 62.0, 62.0);
 /// player00 sprite 66: the focus hitbox marker.
 const HITBOX_MARKER: SpriteRef = spr(TEX_PLAYER, 160.0, 0.0, 16.0, 16.0);
 
@@ -2148,7 +2147,11 @@ impl Stage {
         self.world.bullets.clear();
         self.world.time_stopped = false;
         self.cancel_lasers();
-        self.spawn_burst(self.pos, 20, 4.0, [1.0, 0.5, 0.5], 12.0);
+        // Player::Die spawns the real death effects (Player.cpp): one neon-blue
+        // UNK_12 puff, then sixteen white UNK_6 splash particles.
+        let dp = [self.pos[0], self.pos[1], 0.0];
+        self.world.spawn_particles(12, dp, 1, [0.251, 0.251, 1.0, 1.0]); // COLOR_NEONBLUE
+        self.world.spawn_particles(6, dp, 16, [1.0, 1.0, 1.0, 1.0]);
         self.state = PlayerState::Dead(60);
         self.events.push(Event::Sfx("pldead00"));
     }
@@ -3192,32 +3195,6 @@ impl Stage {
             ));
         }
 
-
-        // Spellcard aura: soft pulsing glows behind the boss (BOMB_GLOW is a
-        // round radial sprite, so this reads as an aura rather than squares).
-        if self.spell_active {
-            if let Some(boss) = self.enemies.iter().find(|e| e.is_boss && e.occupied) {
-                let [gx, gy, gw, gh] = BOMB_GLOW.rect;
-                let t = self.anim as f32;
-                for i in 0..4 {
-                    let s = 120.0 + i as f32 * 55.0 + (t * 0.06 + i as f32).sin() * 16.0;
-                    let a = (0.22 - i as f32 * 0.045) * (0.7 + 0.3 * (t * 0.05).sin());
-                    cmds.push(DrawCmd {
-                        tex: TEX_PLAYER,
-                        dst: [
-                            FIELD_X + boss.pos[0] - s / 2.0,
-                            FIELD_Y + boss.pos[1] - s / 2.0,
-                            s,
-                            s,
-                        ],
-                        src: [gx / 256.0, gy / 256.0, (gx + gw) / 256.0, (gy + gh) / 256.0],
-                        tint: [0.95, 0.35, 0.6, a.max(0.0)],
-                        rot: t * 0.015 * (i as f32 + 1.0),
-                        additive: false,
-                    });
-                }
-            }
-        }
 
         // Enemies via their ANM state. The decomp (EnemyManager::OnDraw) draws
         // sub-vms 0-3, then the primary vm, then sub-vms 4-7, each at the enemy's
