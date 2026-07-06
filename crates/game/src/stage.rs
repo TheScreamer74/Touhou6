@@ -2620,10 +2620,12 @@ impl Stage {
                 if !e.occupied || !e.collidable || !e.interactable {
                     return false;
                 }
-                let r = (e.hitbox[0].max(e.hitbox[1])) / 1.5 / 2.0 + 2.0;
-                let dx = e.pos[0] - p[0];
-                let dy = e.pos[1] - p[1];
-                dx * dx + dy * dy < r * r
+                // EnemyManager.cpp:588 tests the body as an AABB: enemyHitbox =
+                // hitboxDimensions / 1.5, against the player's 1.25 half-extent
+                // (CalcKillBoxCollision), per-axis — not a circle.
+                let hx = e.hitbox[0] / 1.5 / 2.0;
+                let hy = e.hitbox[1] / 1.5 / 2.0;
+                (e.pos[0] - p[0]).abs() < hx + PH && (e.pos[1] - p[1]).abs() < hy + PH
             })
         {
             kill = true;
