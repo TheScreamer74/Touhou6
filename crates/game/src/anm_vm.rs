@@ -36,8 +36,14 @@ pub struct AnmRunner {
     /// same D3DCOLOR as alpha; here it is split out. Default white (no tint).
     pub color: [f32; 3],
     pub scale: [f32; 2],
-    /// Per-frame scale velocity (opcode 11 SetScaleSpeed), added to `scale`.
-    scale_vel: [f32; 2],
+    /// Scale interpolation (AnmManager scaleInterp*): opcode 30 (ScaleTime)
+    /// ramps `scale` from `scale_init` toward `scale_final` over `scale_end`
+    /// frames from `scale_start`; opcode 11 (SetScaleSpeed) just presets the
+    /// target with `scale_end = 0` (no ramp), matching the decomp.
+    scale_final: [f32; 2],
+    scale_init: [f32; 2],
+    scale_end: u16,
+    scale_start: u16,
     /// Z rotation in radians (opcode 9), integrated by `angle_vel` (opcode 10).
     pub rotation: f32,
     angle_vel: f32,
@@ -69,7 +75,10 @@ impl AnmRunner {
             alpha: 1.0,
             color: [1.0, 1.0, 1.0],
             scale: [1.0, 1.0],
-            scale_vel: [0.0, 0.0],
+            scale_final: [0.0, 0.0],
+            scale_init: [1.0, 1.0],
+            scale_end: 0,
+            scale_start: 0,
             rotation: 0.0,
             angle_vel: 0.0,
             fade: None,
@@ -117,8 +126,19 @@ impl AnmRunner {
         self.clock = self.clock.saturating_add(1);
         self.exec_ready();
         self.rotation += self.angle_vel;
-        self.scale[0] += self.scale_vel[0];
-        self.scale[1] += self.scale_vel[1];
+        if self.scale_end > 0 {
+            let t = self.clock.saturating_sub(self.scale_start);
+            if t >= self.scale_end {
+                self.scale = self.scale_final;
+                self.scale_end = 0;
+            } else {
+                let f = t as f32 / self.scale_end as f32;
+                self.scale = [
+                    self.scale_init[0] + (self.scale_final[0] - self.scale_init[0]) * f,
+                    self.scale_init[1] + (self.scale_final[1] - self.scale_init[1]) * f,
+                ];
+            }
+        }
         if let Some((from, to, start, dur)) = self.fade {
             let t = self.clock.saturating_sub(start);
             if t >= dur {
@@ -170,7 +190,19 @@ impl AnmRunner {
                 }
                 1 => self.sprite = Some(i.arg_u32(0)),
                 2 => self.scale = [i.arg_f32(0), i.arg_f32(1)],
-                11 => self.scale_vel = [i.arg_f32(0), i.arg_f32(1)],
+                // SetScaleSpeed: preset the interp target with no ramp (endTime 0).
+                11 => {
+                    self.scale_final = [i.arg_f32(0), i.arg_f32(1)];
+                    self.scale_end = 0;
+                }
+                // ScaleTime: ramp scale from the current value to the target over
+                // arg(2) frames (AnmManager scaleInterp, AnmManager.cpp:1113).
+                30 => {
+                    self.scale_final = [i.arg_f32(0), i.arg_f32(1)];
+                    self.scale_end = i.arg_u32(2) as u16;
+                    self.scale_init = self.scale;
+                    self.scale_start = self.clock;
+                }
                 3 => self.alpha = i.arg_u32(0) as f32 / 255.0,
                 4 => {
                     // SetColor: RGB from the arg's low 24 bits (D3DCOLOR 0xAARRGGBB),
