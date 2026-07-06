@@ -56,6 +56,11 @@ pub struct AnmRunner {
     /// SetAutoRotate (opcode 26): the draw rotates this sprite to its owner's
     /// angle instead of using the runner's own rotation.
     pub auto_rotate: bool,
+    /// SetRandomSprite (opcode 16): (base, range) awaiting an RNG draw. The
+    /// decomp resolves the sprite as `base + GetRandomU16InRange(range)`
+    /// (AnmManager.cpp:1066), drawing from the shared game RNG; the owner draws
+    /// it right after ticking so the RNG stream stays in step with the decomp.
+    pending_random: Option<(u32, u16)>,
     /// op13/14 blend mode: true = additive (One) glow, e.g. the etama4 particle
     /// glows and laser base balls. Drawn with SrcAlpha/One instead of alpha.
     pub additive: bool,
@@ -88,6 +93,7 @@ impl AnmRunner {
             corner: false,
             flip_x: false,
             auto_rotate: false,
+            pending_random: None,
             additive: false,
             positioned: false,
         };
@@ -97,6 +103,13 @@ impl AnmRunner {
 
     pub fn visible(&self) -> bool {
         !self.dead && self.sprite.is_some()
+    }
+
+    /// Take a pending SetRandomSprite (opcode 16) request: (base, range). The
+    /// owner resolves the sprite as `base + rng.u16_in_range(range)` right after
+    /// ticking, keeping the shared game RNG in step with the decomp.
+    pub fn take_pending_random(&mut self) -> Option<(u32, u16)> {
+        self.pending_random.take()
     }
 
     /// The script reached its end opcode (0) — the decomp frees the owning
@@ -264,6 +277,9 @@ impl AnmRunner {
                 // SetAutoRotate: enemy sub-vm sprites with this flag are drawn
                 // rotated to the owning enemy's angle (EnemyManager.cpp:792).
                 26 => self.auto_rotate = i.arg_u32(0) != 0,
+                // SetRandomSprite: defer the RNG draw to the owner (resolve_random)
+                // so the shared game-RNG stream stays ordered like the decomp.
+                16 => self.pending_random = Some((i.arg_u32(0), i.arg_u32(1) as u16)),
                 _ => {}
             }
             self.pc += 1;

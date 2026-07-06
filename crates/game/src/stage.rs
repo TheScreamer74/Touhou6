@@ -1685,6 +1685,16 @@ impl Stage {
             if let Some(anim) = &mut self.anims[i] {
                 anim.tick();
             }
+            // SetRandomSprite (op16): resolve the deferred RNG draw here, right
+            // after ExecuteScript, so it lands at the decomp's point in the
+            // shared RNG stream (EnemyManager.cpp:573).
+            let pend = self.anims[i].as_mut().and_then(|a| a.take_pending_random());
+            if let Some((base, range)) = pend {
+                let v = self.world.rng.u16_in_range(range) as u32;
+                if let Some(a) = &mut self.anims[i] {
+                    a.sprite = Some(base + v);
+                }
+            }
             // Sub-vm runners (op99 ANMSETSLOT): (re)build dirtied slots, then tick.
             for s in 0..8 {
                 if self.enemies[i].sub_dirty[s] {
@@ -1697,6 +1707,13 @@ impl Stage {
                 }
                 if let Some(sv) = &mut self.sub_anims[i][s] {
                     sv.tick();
+                }
+                let pend = self.sub_anims[i][s].as_mut().and_then(|a| a.take_pending_random());
+                if let Some((base, range)) = pend {
+                    let v = self.world.rng.u16_in_range(range) as u32;
+                    if let Some(a) = &mut self.sub_anims[i][s] {
+                        a.sprite = Some(base + v);
+                    }
                 }
             }
             // Enemy::UpdateEffects: keep this enemy's spellcard bubbles on it.
