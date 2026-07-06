@@ -2142,17 +2142,15 @@ impl Stage {
                 vy = vy / len + s.vel[1];
                 len = (vx * vx + vy * vy).sqrt();
                 s.spd = len.min(10.0).max(1.0);
-                if len > 0.0 {
-                    s.vel = [vx * s.spd / len, vy * s.spd / len];
-                }
+                // Decomp (Player.cpp:522) divides by vecLength unconditionally.
+                s.vel = [vx * s.spd / len, vy * s.spd / len];
             }
             _ => {
                 if s.spd < 10.0 {
                     s.spd += 1.0 / 3.0;
                     let len = (s.vel[0] * s.vel[0] + s.vel[1] * s.vel[1]).sqrt();
-                    if len > 0.0 {
-                        s.vel = [s.vel[0] * s.spd / len, s.vel[1] * s.spd / len];
-                    }
+                    // Decomp (Player.cpp:534) divides unconditionally.
+                    s.vel = [s.vel[0] * s.spd / len, s.vel[1] * s.spd / len];
                 }
             }
         }
