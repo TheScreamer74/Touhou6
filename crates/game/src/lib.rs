@@ -582,6 +582,24 @@ impl Game {
         }
     }
 
+    /// Player centre + remaining bombs while in a stage — the dodging auto-player.
+    pub fn stage_player(&self) -> Option<([f32; 2], i32)> {
+        if let Scene::Stage(s) = &self.scene {
+            Some((s.player_pos(), s.player_bombs()))
+        } else {
+            None
+        }
+    }
+
+    /// Live item positions [x,y] of the current stage.
+    pub fn stage_items(&self) -> Vec<[f32; 2]> {
+        if let Scene::Stage(s) = &self.scene {
+            s.items_dump()
+        } else {
+            Vec::new()
+        }
+    }
+
     /// Start the title BGM (call once the audio context is unlocked).
     pub fn start_title_bgm(&mut self) {
         self.play_bgm("th06_01.wav");

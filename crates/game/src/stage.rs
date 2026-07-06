@@ -1197,6 +1197,21 @@ impl Stage {
         self.pos[0]
     }
 
+    /// Player centre [x, y] in field coords — for the headless dodging auto-player.
+    pub fn player_pos(&self) -> [f32; 2] {
+        self.pos
+    }
+
+    /// Remaining bombs — the auto-player bombs to escape when cornered.
+    pub fn player_bombs(&self) -> i32 {
+        self.bombs
+    }
+
+    /// Live item positions [x, y] — the auto-player drifts toward them when safe.
+    pub fn items_dump(&self) -> Vec<[f32; 2]> {
+        self.items.iter().map(|it| it.pos).collect()
+    }
+
     /// Every live bullet as [pos.x, pos.y, angle, speed] — for the full-VM
     /// oracle diff against the decomp.
     pub fn bullets_dump(&self) -> Vec<[f32; 4]> {
