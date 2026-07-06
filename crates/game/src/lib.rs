@@ -871,9 +871,8 @@ impl Game {
                     return Frame { cmds, bg: None, quit: false };
                 }
                 if next_stage {
-                    // Carry progress into the next stage; the last stage clear
-                    // returns to the title (ending not yet implemented).
                     if self.current_stage + 1 < N_STAGES {
+                        // Carry progress into the next stage.
                         self.current_stage += 1;
                         let mut s = self.assets.new_stage(self.current_stage, self.character);
                         s.apply_carry(carry);
@@ -881,7 +880,19 @@ impl Game {
                         self.scene = Scene::Stage(Box::new(s));
                         return Frame { cmds, bg: None, quit: false };
                     }
-                    back = true;
+                    // Final stage cleared — the run is won. Route into the result
+                    // flow with the run's score (name entry if it qualifies, else
+                    // the leaderboard) instead of dropping to the title. (The full
+                    // Ending story sequence, Ending.cpp, is still unported — #86.)
+                    let score = carry.score;
+                    let stage = self.current_stage as u8 + 1;
+                    self.play_bgm("th06_01.wav");
+                    self.scene = if self.score_qualifies(score) {
+                        Scene::NameEntry { score, stage, name: String::new(), sel: 0 }
+                    } else {
+                        Scene::Leaderboard { highlight: None }
+                    };
+                    return Frame { cmds, bg: None, quit: false };
                 }
                 if back {
                     self.scene = Scene::Title;
