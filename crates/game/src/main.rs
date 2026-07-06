@@ -88,33 +88,101 @@ fn load_scores(path: &Path) -> Vec<th06::ScoreEntry> {
         .collect()
 }
 
-/// Auto-player input for a full title-to-clear run: tap Shoot to walk the menus,
-/// then in a stage hold Shoot and slide horizontally under the boss/nearest
-/// enemy (no bullet dodging — relies on god mode to survive).
+/// Auto-player input for a full title-to-clear run. In the menus it taps Shoot
+/// to advance; in a stage it dodges: it scores nine candidate moves (stay + the
+/// eight directions) by how close the nearest bullet comes over a short
+/// look-ahead, holds Shoot, steps toward the safest, drifts toward items / under
+/// the target when comfortable, and bombs when even the safest move is tight.
+/// No god mode needed to survive most of a stage.
 fn auto_play_input(game: &th06::Game, f: u32) -> Input {
-    match game.stage_aim() {
-        Some((px, target)) => {
-            let mut held = vec![Key::Shoot];
-            if let Some(tx) = target {
-                if tx < px - 4.0 {
-                    held.push(Key::Left);
-                } else if tx > px + 4.0 {
-                    held.push(Key::Right);
+    let Some((p, bombs)) = game.stage_player() else {
+        // Menus: pulse Shoot to advance title -> char select -> stage.
+        return if f % 48 == 0 {
+            Input::synthetic(&[], &[Key::Shoot])
+        } else {
+            Input::default()
+        };
+    };
+
+    // Project each bullet linearly: (x, y, vx, vy).
+    let bullets = game.stage_bullets();
+    let vels: Vec<[f32; 4]> = bullets
+        .iter()
+        .map(|b| [b[0], b[1], b[2].cos() * b[3], b[2].sin() * b[3]])
+        .collect();
+
+    const SPD: f32 = 4.0; // unfocused move speed (conservative for both characters)
+    const H: i32 = 22; // look-ahead frames
+    // Player clamp bounds (Stage::clamp): x [12, 372], y [20, 428].
+    let d = 1.0 / 2f32.sqrt();
+    let moves: [[f32; 2]; 9] = [
+        [0.0, 0.0], [-1.0, 0.0], [1.0, 0.0], [0.0, -1.0], [0.0, 1.0],
+        [-d, -d], [d, -d], [-d, d], [d, d],
+    ];
+    // (min bullet distance over the horizon, the move, the end position).
+    let mut scored: Vec<(f32, [f32; 2], [f32; 2])> = Vec::with_capacity(9);
+    for m in moves {
+        let mut mind = f32::MAX;
+        let mut end = p;
+        for t in 1..=H {
+            let tx = (p[0] + m[0] * SPD * t as f32).clamp(12.0, 372.0);
+            let ty = (p[1] + m[1] * SPD * t as f32).clamp(20.0, 428.0);
+            if t == H {
+                end = [tx, ty];
+            }
+            for v in &vels {
+                let bx = v[0] + v[2] * t as f32;
+                let by = v[1] + v[3] * t as f32;
+                let dd = (bx - tx) * (bx - tx) + (by - ty) * (by - ty);
+                if dd < mind {
+                    mind = dd;
                 }
             }
-            let pressed: &[Key] = if f % 12 == 0 { &[Key::Shoot] } else { &[] };
-            Input::synthetic(&held, pressed)
         }
-        // Menus: pulse Shoot to advance title -> char select -> stage, paced so
-        // the menu screens are actually visible in a recording.
-        None => {
-            if f % 48 == 0 {
-                Input::synthetic(&[], &[Key::Shoot])
-            } else {
-                Input::default()
-            }
-        }
+        scored.push((mind.sqrt(), m, end));
     }
+
+    let safest = scored
+        .iter()
+        .cloned()
+        .fold(scored[0], |a, b| if b.0 > a.0 { b } else { a });
+
+    const BOMB_DIST: f32 = 10.0; // even the best escape is this tight -> bomb
+    const SAFE: f32 = 48.0; // comfortable enough to go for goals
+
+    // Goal x: the nearest item, else the target (boss / lowest enemy).
+    let goal_x = game
+        .stage_items()
+        .into_iter()
+        .min_by(|a, b| (a[1] - p[1]).abs().total_cmp(&(b[1] - p[1]).abs()))
+        .map(|it| it[0])
+        .or_else(|| game.stage_aim().and_then(|(_, t)| t));
+
+    let chosen = {
+        let comfy: Vec<&(f32, [f32; 2], [f32; 2])> = scored.iter().filter(|s| s.0 > SAFE).collect();
+        if comfy.is_empty() {
+            safest.1 // under threat: take the safest escape
+        } else if let Some(gx) = goal_x {
+            // comfortable: pick the move whose end position sits nearest the goal x
+            comfy.iter().min_by(|a, b| (a.2[0] - gx).abs().total_cmp(&(b.2[0] - gx).abs())).unwrap().1
+        } else {
+            comfy.iter().find(|s| s.1 == [0.0, 0.0]).map_or(safest.1, |s| s.1)
+        }
+    };
+
+    let mut held = vec![Key::Shoot];
+    if chosen[0] < -0.01 {
+        held.push(Key::Left);
+    } else if chosen[0] > 0.01 {
+        held.push(Key::Right);
+    }
+    if chosen[1] < -0.01 {
+        held.push(Key::Up);
+    } else if chosen[1] > 0.01 {
+        held.push(Key::Down);
+    }
+    let pressed: &[Key] = if safest.0 < BOMB_DIST && bombs > 0 { &[Key::Bomb] } else { &[] };
+    Input::synthetic(&held, pressed)
 }
 
 /// Encode one segment's PNG sequence (`<frames_dir>/f_%06d.png`) to an mp4 with
@@ -224,7 +292,8 @@ fn main() {
 
     // `--god` makes the player invulnerable (the collide() check reads this).
     // Safe: still single-threaded here, before the game/run loop starts.
-    // `--autoplay` implies god: auto_play_input steers but never dodges bullets.
+    // `--autoplay` implies god (the windowed demo shouldn't die); the dodging
+    // auto-player's no-god survival is exercised via `--probe-run`.
     if god || autoplay {
         unsafe { std::env::set_var("TH06_GOD", "1") };
     }
@@ -269,7 +338,11 @@ fn main() {
     // phase change (no rendering), to measure per-stage clear times and confirm
     // the auto-player can actually reach each stage clear.
     if probe_run {
-        unsafe { std::env::set_var("TH06_GOD", "1") };
+        // Respect --god so `--probe-run` alone exercises the dodging auto-player
+        // for real (no invulnerability), which is the point of a no-god probe.
+        if god {
+            unsafe { std::env::set_var("TH06_GOD", "1") };
+        }
         game.start_title_bgm();
         let mut last = game.record_phase();
         eprintln!("frame 0: {last:?}");
