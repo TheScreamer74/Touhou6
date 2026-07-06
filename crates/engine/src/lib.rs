@@ -133,6 +133,9 @@ pub struct BgScene {
     /// Additive-blended quads (op13), drawn after `verts` with no depth write.
     pub verts_add: Vec<Vertex3>,
     pub tex: usize,
+    /// Playfield viewport in 640x480 px: [x, y, w, h]. Baseline 32/16/384/448
+    /// (the arcade region); the ScreenEffect shake shifts/shrinks it.
+    pub arcade: [f32; 4],
 }
 
 /// One textured quad. `dst` is x, y, w, h in 640x480 screen pixels;
@@ -438,7 +441,8 @@ impl Engine {
         // (the surface is larger than 640x480 on HiDPI displays).
         let sx = target_size.0 as f32 / SCREEN_W as f32;
         let sy = target_size.1 as f32 / SCREEN_H as f32;
-        pass.set_viewport(32.0 * sx, 16.0 * sy, 384.0 * sx, 448.0 * sy, 0.0, 1.0);
+        let [ax, ay, aw, ah] = scene.arcade;
+        pass.set_viewport(ax * sx, ay * sy, aw * sx, ah * sy, 0.0, 1.0);
         pass.set_bind_group(0, &textures[scene.tex].bind_group, &[]);
         if !scene.verts.is_empty() {
             pass.set_pipeline(pipeline);

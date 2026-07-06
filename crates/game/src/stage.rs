@@ -865,6 +865,16 @@ pub struct Stage {
     bomb_projectiles: [BombRect; 16],
     bomb_regions: [BombRect; 32],
     bomb_region_dmg: [i32; 32],
+    /// ScreenEffect SHAKE (ScreenEffect.cpp). `arcade` is the current
+    /// arcadeRegion [topLeftX, topLeftY, sizeW, sizeH]; baseline 32/16/384/448.
+    /// Recomputed each frame by `update_shake`, which — while a shake is active —
+    /// consumes two RNG draws (x, y) exactly like `ScreenEffect::ShakeScreen`.
+    arcade: [f32; 4],
+    shake_active: bool,
+    shake_timer: i32,
+    shake_len: i32,
+    shake_p1: f32,
+    shake_p2: f32,
     /// spellcardInfo.usedBomb: a bomb was fired while a spellcard was active.
     spell_used_bomb: bool,
     /// Bomb sprite anm runners (PlayerBombInfo.sprites[8][4], flattened to 32),
@@ -1064,6 +1074,12 @@ impl Stage {
             bomb_projectiles: [BombRect::default(); 16],
             bomb_regions: [BombRect::default(); 32],
             bomb_region_dmg: [0; 32],
+            arcade: [FIELD_X, FIELD_Y, FIELD_W, FIELD_H],
+            shake_active: false,
+            shake_timer: 0,
+            shake_len: 0,
+            shake_p1: 0.0,
+            shake_p2: 0.0,
             spell_used_bomb: false,
             bomb_sprites: (0..32).map(|_| None).collect(),
             fire_timer: -1,
@@ -1211,7 +1227,13 @@ impl Stage {
     }
 
     pub fn background_scene(&self) -> Option<BgScene> {
-        self.background.as_ref().map(|b| b.scene())
+        self.background.as_ref().map(|b| {
+            let mut sc = b.scene();
+            // The 3D bg fills the arcade region, so the shake shifts its origin
+            // and shrinks its viewport (arcadeRegionTopLeftPos + arcadeRegionSize).
+            sc.arcade = self.arcade;
+            sc
+        })
     }
 
     pub fn update(&mut self, input: &Input) -> Vec<DrawCmd> {
@@ -1371,6 +1393,8 @@ impl Stage {
             self.state = PlayerState::Cleared(420);
         }
 
+        // ScreenEffect calc chain (screen shake) runs after the gameplay calc.
+        self.update_shake();
         self.draw()
     }
 
@@ -1827,6 +1851,58 @@ impl Stage {
         self.bombing = self.bomb_in_use as u32;
     }
 
+    /// ScreenEffect::RegisterChain(SCREEN_EFFECT_SHAKE, len, p1, p2). The port
+    /// tracks a single active shake (not a chain), so a new registration
+    /// replaces any running one.
+    fn register_shake(&mut self, len: i32, p1: f32, p2: f32) {
+        self.shake_active = true;
+        self.shake_timer = 0;
+        self.shake_len = len;
+        self.shake_p1 = p1;
+        self.shake_p2 = p2;
+    }
+
+    /// ScreenEffect::ShakeScreen — recompute the arcade region each frame. While
+    /// a shake runs, `screenOffset` ramps p1→p2 over `len`, and two RNG rolls
+    /// (x, y) each pick: leave the region, shift+shrink it, or only shrink it.
+    /// The 2D playfield reads the region's top-left (a translate); the 3D bg
+    /// viewport reads its size (a shrink).
+    fn update_shake(&mut self) {
+        self.arcade = [FIELD_X, FIELD_Y, FIELD_W, FIELD_H];
+        if !self.shake_active {
+            return;
+        }
+        // During Sakuya's time-stop the effect holds the region at baseline and
+        // neither ticks nor consumes RNG (ShakeScreen's isTimeStopped early-out).
+        if self.world.time_stopped {
+            return;
+        }
+        self.shake_timer += 1;
+        if self.shake_timer >= self.shake_len {
+            self.shake_active = false;
+            return;
+        }
+        let off = (self.shake_timer as f32 * (self.shake_p2 - self.shake_p1))
+            / self.shake_len as f32
+            + self.shake_p1;
+        match self.world.rng.u32_in_range(3) {
+            1 => {
+                self.arcade[0] = FIELD_X + off;
+                self.arcade[2] = FIELD_W - off;
+            }
+            2 => self.arcade[2] = FIELD_W - off,
+            _ => {}
+        }
+        match self.world.rng.u32_in_range(3) {
+            1 => {
+                self.arcade[1] = FIELD_Y + off;
+                self.arcade[3] = FIELD_H - off;
+            }
+            2 => self.arcade[3] = FIELD_H - off,
+            _ => {}
+        }
+    }
+
     /// BombData::BombReimuACalc — Fantasy Seal. A one-frame 256² central blast
     /// (`bombProjectiles[8]`) at the cast, then seals 1..=7 spawn over frames
     /// 76..=172 (seal 0 is never spawned — the decomp's `&& (i = …)` short-
@@ -1898,7 +1974,7 @@ impl Stage {
                         }
                     }
                     self.events.push(Event::Sfx(SFX_BY_IDX[15])); // SOUND_F
-                    // ScreenEffect SHAKE (16,8) — screen shake not yet ported.
+                    self.register_shake(16, 8.0, 0.0); // ScreenEffect SHAKE (16,8,0)
                 }
             } else {
                 self.seal_state[i] += 1;
@@ -1941,9 +2017,11 @@ impl Stage {
             self.seal_pos[1] = [192.0, self.pos[1]];
             self.seal_pos[2] = [self.pos[0], 224.0];
             self.seal_pos[3] = [192.0, self.pos[1]];
-            // ScreenEffect SHAKE (60,2,6) — not yet ported.
+            self.register_shake(60, 2.0, 6.0); // ScreenEffect SHAKE (60,2,6)
         } else {
-            // ScreenEffect SHAKE (80,20) at timer 60 — not yet ported.
+            if self.bomb_timer == 60 {
+                self.register_shake(80, 20.0, 0.0); // ScreenEffect SHAKE (80,20,0)
+            }
             self.bomb_projectiles[0].size = [62.0, 448.0];
             self.bomb_projectiles[1].size = [384.0, 62.0];
             self.bomb_projectiles[2].size = [62.0, 448.0];
@@ -1987,7 +2065,7 @@ impl Stage {
                 self.seal_vel[i] = [a.cos() * 2.0, a.sin() * 2.0];
             }
             self.events.push(Event::Sfx(SFX_BY_IDX[6])); // SOUND_BOMB_REIMARI
-            // ScreenEffect SHAKE (120,4,1) — not yet ported.
+            self.register_shake(120, 4.0, 1.0); // ScreenEffect SHAKE (120,4,1)
         } else {
             for i in 0..8 {
                 self.seal_pos[i][0] += self.seal_vel[i][0];
@@ -2025,7 +2103,11 @@ impl Stage {
             self.events.push(Event::Sfx(SFX_BY_IDX[19])); // SOUND_BOMB_MARISA_B
             self.bomb_move_mult = 0.3;
         } else {
-            // ScreenEffect SHAKE at timer 60 / 120 — not yet ported.
+            if self.bomb_timer == 60 {
+                self.register_shake(60, 1.0, 7.0); // ScreenEffect SHAKE (60,1,7)
+            } else if self.bomb_timer == 120 {
+                self.register_shake(200, 24.0, 0.0); // ScreenEffect SHAKE (200,24,0)
+            }
             if self.bomb_timer % 4 != 0 {
                 let spark = BombRect { pos: [192.0, self.pos[1] / 2.0], size: [384.0, self.pos[1]] };
                 self.bomb_projectiles[0] = spark;
@@ -3675,6 +3757,18 @@ impl Stage {
                     // Fallback (no baked texture): the ASCII glyph path.
                     draw_text(&mut cmds, [FIELD_X + 20.0, y], 14.0, tint, &self.dialogue.lines[li]);
                 }
+            }
+        }
+
+        // ScreenEffect shake: the 2D playfield rides the arcade region's
+        // top-left (a translate). Everything pushed so far is field-relative;
+        // the HUD (draw_hud, absolute 640x480) is appended after and stays put.
+        let dx = self.arcade[0] - FIELD_X;
+        let dy = self.arcade[1] - FIELD_Y;
+        if dx != 0.0 || dy != 0.0 {
+            for c in &mut cmds {
+                c.dst[0] += dx;
+                c.dst[1] += dy;
             }
         }
 

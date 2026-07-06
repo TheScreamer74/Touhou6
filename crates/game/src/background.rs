@@ -666,6 +666,7 @@ impl Background {
             verts,
             verts_add,
             tex: self.tex_slot,
+            arcade: [32.0, 16.0, 384.0, 448.0],
         }
     }
 
