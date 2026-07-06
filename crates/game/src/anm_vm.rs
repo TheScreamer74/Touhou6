@@ -53,6 +53,11 @@ pub struct AnmRunner {
     pub corner: bool,
     /// Horizontal mirror (opcode 7).
     pub flip_x: bool,
+    /// Vertical mirror (opcode 8 FlipY).
+    pub flip_y: bool,
+    /// Explicit hide (opcode 29 SetVisibility 0); cleared when a sprite is set
+    /// (SetActiveSprite / SetRandomSprite set isVisible=1 in the decomp).
+    hidden: bool,
     /// SetAutoRotate (opcode 26): the draw rotates this sprite to its owner's
     /// angle instead of using the runner's own rotation.
     pub auto_rotate: bool,
@@ -92,6 +97,8 @@ impl AnmRunner {
             fade: None,
             corner: false,
             flip_x: false,
+            flip_y: false,
+            hidden: false,
             auto_rotate: false,
             pending_random: None,
             additive: false,
@@ -102,7 +109,7 @@ impl AnmRunner {
     }
 
     pub fn visible(&self) -> bool {
-        !self.dead && self.sprite.is_some()
+        !self.dead && self.sprite.is_some() && !self.hidden
     }
 
     /// Take a pending SetRandomSprite (opcode 16) request: (base, range). The
@@ -205,7 +212,11 @@ impl AnmRunner {
                     // Freeze in place, still visible.
                     self.halted = true;
                 }
-                1 => self.sprite = Some(i.arg_u32(0)),
+                1 => {
+                    // SetActiveSprite also sets isVisible=1 (AnmManager.cpp:1059).
+                    self.sprite = Some(i.arg_u32(0));
+                    self.hidden = false;
+                }
                 2 => self.scale = [i.arg_f32(0), i.arg_f32(1)],
                 // SetScaleSpeed: preset the interp target with no ramp (endTime 0).
                 11 => {
@@ -242,6 +253,7 @@ impl AnmRunner {
                     }
                 }
                 7 => self.flip_x = !self.flip_x,
+                8 => self.flip_y = !self.flip_y,
                 9 => self.rotation = i.arg_f32(2),
                 10 => self.angle_vel = i.arg_f32(2),
                 12 => {
@@ -279,7 +291,13 @@ impl AnmRunner {
                 26 => self.auto_rotate = i.arg_u32(0) != 0,
                 // SetRandomSprite: defer the RNG draw to the owner (resolve_random)
                 // so the shared game-RNG stream stays ordered like the decomp.
-                16 => self.pending_random = Some((i.arg_u32(0), i.arg_u32(1) as u16)),
+                // Also sets isVisible=1 (AnmManager.cpp:1064).
+                16 => {
+                    self.pending_random = Some((i.arg_u32(0), i.arg_u32(1) as u16));
+                    self.hidden = false;
+                }
+                // SetVisibility: isVisible = args[0].
+                29 => self.hidden = i.arg_u32(0) == 0,
                 _ => {}
             }
             self.pc += 1;

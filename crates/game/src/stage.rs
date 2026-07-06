@@ -762,10 +762,14 @@ fn sprite_cmd_from(
     if anim.flip_x {
         std::mem::swap(&mut u0, &mut u1);
     }
+    let (mut v0, mut v1) = (sy / th, (sy + sp.height) / th);
+    if anim.flip_y {
+        std::mem::swap(&mut v0, &mut v1);
+    }
     Some(DrawCmd {
         tex: script.tex,
         dst: [cx - w / 2.0, cy - h / 2.0, w, h],
-        src: [u0, sy / th, u1, (sy + sp.height) / th],
+        src: [u0, v0, u1, v1],
         tint: [1.0, 1.0, 1.0, anim.alpha],
         rot,
         additive,
