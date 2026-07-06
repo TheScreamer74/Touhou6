@@ -3225,8 +3225,11 @@ impl Stage {
                     return; // an ended/spriteless sub-vm is inactive (anmFileIndex < 0)
                 }
                 let Some(script) = self.enemy_scripts.get(&e.sub_scripts[s]) else { return };
+                // op26 SetAutoRotate: the sub-vm faces the enemy's angle
+                // (EnemyManager.cpp:794), like the primary vm's rotateAnm flag.
+                let rot = if sv.auto_rotate { e.angle } else { sv.rotation };
                 if let Some(cmd) =
-                    sprite_cmd_from(sv, script, ex + sv.pos[0], ey + sv.pos[1], sv.rotation, sv.additive)
+                    sprite_cmd_from(sv, script, ex + sv.pos[0], ey + sv.pos[1], rot, sv.additive)
                 {
                     cmds.push(cmd);
                 }

@@ -53,6 +53,9 @@ pub struct AnmRunner {
     pub corner: bool,
     /// Horizontal mirror (opcode 7).
     pub flip_x: bool,
+    /// SetAutoRotate (opcode 26): the draw rotates this sprite to its owner's
+    /// angle instead of using the runner's own rotation.
+    pub auto_rotate: bool,
     /// op13/14 blend mode: true = additive (One) glow, e.g. the etama4 particle
     /// glows and laser base balls. Drawn with SrcAlpha/One instead of alpha.
     pub additive: bool,
@@ -84,6 +87,7 @@ impl AnmRunner {
             fade: None,
             corner: false,
             flip_x: false,
+            auto_rotate: false,
             additive: false,
             positioned: false,
         };
@@ -257,6 +261,9 @@ impl AnmRunner {
                 23 => self.corner = true,
                 13 => self.additive = true,
                 14 => self.additive = false,
+                // SetAutoRotate: enemy sub-vm sprites with this flag are drawn
+                // rotated to the owning enemy's angle (EnemyManager.cpp:792).
+                26 => self.auto_rotate = i.arg_u32(0) != 0,
                 _ => {}
             }
             self.pc += 1;
