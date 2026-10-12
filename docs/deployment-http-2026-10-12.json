@@ -1,0 +1,29 @@
+[
+  {
+    "path": "th06/build.json",
+    "response": "200 application/json",
+    "bytes": 47,
+    "sha256": "19f821ab18fdbe3d41fb193f62d69b2491b05664a5395d5d3015db4861625fba",
+    "build": {
+      "version": "full-game-20261012-eef7cca16643"
+    }
+  },
+  {
+    "path": "th06/pkg/th06_bg.wasm?v=full-game-20261012-eef7cca16643",
+    "response": "200 application/wasm",
+    "bytes": 9395830,
+    "sha256": "eef7cca166435eadb1912e42800bdb087b4e030e876c037d38cefb387de4dc7b"
+  },
+  {
+    "path": "th04/",
+    "response": "200 text/html",
+    "bytes": 7128,
+    "sha256": "8bf9aa3531942e79a5970343dc95c009c842a085fbc55e706ed4e4035921f69a"
+  },
+  {
+    "path": "/",
+    "response": "200 text/html",
+    "bytes": 4097,
+    "sha256": "341c8f76804c4bd387fb83ef4dc7e173a56e0ced104602ad2d0376c1fdae4327"
+  }
+]
