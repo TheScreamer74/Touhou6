@@ -44,9 +44,8 @@ impl Options {
         Some(Self {
             life_count: b[1],
             bomb_count: b[2],
-            // The RGBA renderer cannot reproduce the original R5G6B5 buffer.
-            color_16bit: false,
-            music_mode: b[4].min(1),
+            color_16bit: b[3] != 0,
+            music_mode: b[4],
             play_sounds: b[5] != 0,
             windowed: b[6] != 0,
             default_difficulty: b[7],
@@ -65,6 +64,7 @@ pub struct OptionsMenu {
     timer: u16,
     input: MenuInput,
     key_config: Option<crate::key_config::KeyConfig>,
+    pub midi_available: bool,
 }
 impl OptionsMenu {
     pub fn new(art: MenuArt) -> Self {
@@ -74,6 +74,7 @@ impl OptionsMenu {
             timer: 0,
             input: MenuInput::default(),
             key_config: None,
+            midi_available: false,
         }
     }
     pub fn begin(&mut self) {
@@ -84,8 +85,9 @@ impl OptionsMenu {
         self.art.interrupt_all(3);
     }
     pub fn update(&mut self, input: &Input, options: &mut Options) -> OptionsAction {
-        options.color_16bit = false;
-        options.music_mode = options.music_mode.min(1);
+        if !self.midi_available {
+            options.music_mode = options.music_mode.min(1);
+        }
         self.timer = self.timer.saturating_add(1);
         self.input.tick(input);
         self.art.tick();
@@ -121,9 +123,12 @@ impl OptionsMenu {
             match self.cursor {
                 0 => options.life_count = (options.life_count as i32 + delta + 5) as u8 % 5,
                 1 => options.bomb_count = (options.bomb_count as i32 + delta + 4) as u8 % 4,
-                2 => return OptionsAction::None,
-                // WAV and OFF are supported by both backends. MIDI requires a synthesizer.
-                3 => options.music_mode = (options.music_mode + 1) % 2,
+                2 => options.color_16bit = !options.color_16bit,
+                3 => {
+                    let count = if self.midi_available { 3 } else { 2 };
+                    options.music_mode =
+                        (options.music_mode as i32 + delta + count) as u8 % count as u8;
+                }
                 4 => options.play_sounds = !options.play_sounds,
                 5 => options.windowed = !options.windowed,
                 _ => return OptionsAction::None,
@@ -164,7 +169,7 @@ impl OptionsMenu {
         for (row, start, count, selected) in [
             (0, 14, 5, options.life_count as usize),
             (1, 19, 4, options.bomb_count as usize),
-            (2, 23, 2, 0),
+            (2, 23, 2, options.color_16bit as usize),
             (4, 25, 2, options.play_sounds as usize),
             (5, 75, 2, options.windowed as usize),
             (3, 77, 3, options.music_mode as usize),
@@ -191,7 +196,7 @@ impl OptionsMenu {
                     alpha = 128.0 / 255.0;
                 }
             }
-            if idx == 10 || idx == 24 || idx == 79 {
+            if idx == 79 && !self.midi_available {
                 offset = [0.0; 2];
                 alpha = 96.0 / 255.0;
             }
@@ -216,15 +221,15 @@ mod tests {
         assert_eq!(Options::parse(&bad), None);
     }
     #[test]
-    fn old_sixteen_bit_setting_is_normalized_to_supported_renderer() {
+    fn sixteen_bit_setting_is_preserved_for_original_color_compositor() {
         let mut old = Options::default().encode();
         old[3] = 1;
-        assert!(!Options::parse(&old).unwrap().color_16bit);
+        assert!(Options::parse(&old).unwrap().color_16bit);
     }
     #[test]
-    fn old_midi_setting_falls_back_to_available_wav_playback() {
+    fn midi_setting_is_preserved_for_available_synthesizer() {
         let mut old = Options::default().encode();
         old[4] = 2;
-        assert_eq!(Options::parse(&old).unwrap().music_mode, 1);
+        assert_eq!(Options::parse(&old).unwrap().music_mode, 2);
     }
 }

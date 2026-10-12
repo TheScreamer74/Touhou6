@@ -32,13 +32,15 @@ whole-game binary or visual equivalence; see [validation](docs/REVERSE_ENGINEERI
 |---|---|
 | Stages | Stages 1–6 and Extra, including enemies, bosses, dialogue and 3D backgrounds |
 | Difficulty | Easy, Normal, Hard, Lunatic and Extra; difficulty-specific script masks and rank limits |
-| Characters | Reimu A/B and Marisa A/B, their shot tiers and bombs |
+| Characters | Reimu A/B and Marisa A/B; original shot tables, homing, needles, retained missile explosions, laser pulses, orbs and four bombs |
+| Projectiles | Original spawn/cancel animations, rectangle collision, graze rules, laser lifecycle and graze timing, particle effects and score popups |
 | Run flow | Stage progression, pause, continues, game over, Practice and clear results |
 | Endings | Six END routes selected by character, difficulty and continues, followed by the staff roll |
 | Records | High scores, clear/spell-card records and original `score.dat` persistence |
 | Replays | T6RP recording, save/load slots and original replay parsing/playback |
 | Menus | Difficulty/character selection, Result, Practice, Replay, Music Room and Options |
-| Audio | 17 BGM tracks, loop points and sound effects; WAV playback and web Ogg decoding |
+| Audio | 17 BGM tracks and original loop markers; WAV/web Ogg playback, MIDI synthesis with a supplied SoundFont, original sound-effect variants and gains |
+| Display | 32-bit and original R5G6B5 mode; supplied Japanese font or bundled fallback |
 | Input | Keyboard and gamepad, configurable controller mappings |
 | Web | Hosted asset manifest or local folder selection, local file cache, fullscreen and score/replay import/export |
 
@@ -92,20 +94,29 @@ The C++ oracles compare the real decompilation's interpreter calculations with
 the Rust port; the [oracle guide](oracle/README.md) identifies the locked source
 revision, input settings and comparison precision.
 
-Some gameplay details still differ from the original: player-shot collision
-uses simplified hit tests, Marisa A missile explosions and Marisa B beams do
-not reproduce every damage rule, and bullet cancellation/graze effects and
-laser graze timing remain partial. Replay roundtrips establish the port's own
-determinism; playback equivalence to the Windows game has not been established.
-The [dated report](docs/REVERSE_ENGINEERING.md) records these limits and the
-actual oracle results.
+Player attacks now use all 193 original table entries and the original damage
+rectangles, retained Marisa A explosions, Marisa B laser timers and reversible
+orb focus transitions. Focused C++ comparisons also cover enemy bullet/laser
+collision, cancellation, graze cadence and state transitions. Real assets
+exercise all four complete bomb cycles, impact animations and laser tiers.
+The replay regression completes all 96 legal stage/difficulty/shot routes and
+compares every recorded/playback frame with invulnerability enabled. The
+96 routes cover 1,375,027 live frames plus 1,375,027 replay frames (2,750,054
+observations). These roundtrips verify the port's internal determinism with
+real assets; they do not establish Windows playback identity. The [dated report](docs/REVERSE_ENGINEERING.md)
+records the separately executed binary comparisons and their actual coverage.
 
-The current renderer uses 32-bit color. Original 16-bit display mode and MIDI
-synthesis are unavailable. Japanese text uses the bundled Noto Sans JP font
-instead of Windows GDI/MS Gothic, so text rasterization differs. Browser audio,
-GPU availability and storage depend on the browser. Focused oracle and binary
-checks are evidence for the tested paths, rather than a claim of 100% fidelity
-across every character, difficulty, frame and visual effect.
+The R5G6B5 renderer reproduces limited texture/framebuffer precision, but driver
+rounding may differ from the original Direct3D hardware. MIDI timbre depends on
+the supplied SoundFont, just as the original depended on its MIDI device.
+Native builds accept `TH06_SOUNDFONT` or `gm.sf2` beside the DAT files; browser
+folder imports and hosted manifests can supply `gm.sf2`. Japanese text accepts
+`TH06_FONT` on native builds or a separately supplied `msgothic.ttc`/`msgothic.ttf`;
+the bundled Noto Sans JP remains the fallback. Font outlines alone do not
+reproduce Windows GDI rasterization. See [display/audio details](docs/PRESENTATION_FIDELITY.md).
+Browser audio, GPU availability and storage depend on the browser. Focused
+comparisons are evidence for their tested paths, rather than a claim of 100%
+fidelity across every character, difficulty, frame and visual effect.
 
 ## Architecture
 

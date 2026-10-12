@@ -43,7 +43,7 @@ impl MenuFont {
                 .and_then(|n| files.get(n.rsplit('/').next().unwrap()));
             let (rgba, w, h) = compose_rgba(&files[name], mask.map(|b| b.as_slice()));
             let tex = textures.len();
-            textures.push(engine.create_texture(&rgba, w, h));
+            textures.push(engine.create_texture_with_format(&rgba, w, h, entry.format));
             FontSheet {
                 tex,
                 size: [w as f32, h as f32],
@@ -123,6 +123,7 @@ impl MenuFont {
                         tint: if selected { [1.0; 4] } else { color },
                         rot: 0.0,
                         additive: false,
+                        color_add: false,
                     });
                 }
             }
@@ -176,7 +177,7 @@ impl MenuArt {
     ) -> Self {
         let (rgba, w, h) = compose_rgba(&files[background], None);
         let background = textures.len();
-        textures.push(engine.create_texture(&rgba, w, h));
+        textures.push(engine.create_texture_with_format(&rgba, w, h, 4));
         let mut vms = BTreeMap::new();
         for &(name, offset) in sheets {
             let anm = Anm0::parse(&files[name]).expect("menu ANM");
@@ -191,14 +192,14 @@ impl MenuArt {
                     .and_then(|n| files.get(n.rsplit('/').next().unwrap()));
                 let (rgba, w, h) = compose_rgba(&files[name], mask.map(|b| b.as_slice()));
                 let tex = textures.len();
-                textures.push(engine.create_texture(&rgba, w, h));
+                textures.push(engine.create_texture_with_format(&rgba, w, h, entry.format));
                 let highlight_tex = if name == "title01.png" || name == "title04.png" {
                     let alt = name.replace(".png", "s.png");
                     // title01s/title04s retain their base sheet's alpha mask.
                     files.get(&alt).map(|bytes| {
                         let (rgba, w, h) = compose_rgba(bytes, mask.map(|b| b.as_slice()));
                         let idx = textures.len();
-                        textures.push(engine.create_texture(&rgba, w, h));
+                        textures.push(engine.create_texture_with_format(&rgba, w, h, entry.format));
                         idx
                     })
                 } else {
@@ -351,6 +352,7 @@ impl MenuArt {
             tint: [tint[0], tint[1], tint[2], tint[3] * r.alpha],
             rot: r.rotation,
             additive: r.additive,
+            color_add: false,
         })
     }
     pub fn draw(
@@ -364,6 +366,7 @@ impl MenuArt {
             tint: [1.0; 4],
             rot: 0.0,
             additive: false,
+            color_add: false,
         }];
         for (&idx, vm) in &self.vms {
             let r = &vm.runner;
@@ -407,6 +410,7 @@ impl MenuArt {
                 tint: [tint[0], tint[1], tint[2], tint[3] * r.alpha],
                 rot: r.rotation,
                 additive: r.additive,
+                color_add: false,
             });
         }
         cmds

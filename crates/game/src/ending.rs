@@ -566,7 +566,7 @@ impl EndingAssets {
                 .ok_or_else(|| invalid(format!("ED.DAT: missing background {filename}")))?;
             let (rgba, width, height) = compose_rgba(bytes, None);
             let tex = textures.len();
-            textures.push(engine.create_texture(&rgba, width, height));
+            textures.push(engine.create_texture_with_format(&rgba, width, height, 4));
             resources.backgrounds.insert(
                 filename,
                 Image {
@@ -667,7 +667,7 @@ fn load_anm(
             compose_rgba(data, mask)
         };
         let tex = textures.len();
-        textures.push(engine.create_texture(&rgba, width, height));
+        textures.push(engine.create_texture_with_format(&rgba, width, height, entry.format));
         for sprite in entry.sprites {
             resources.sprites.insert(
                 base + sprite.index,
@@ -900,6 +900,7 @@ impl EndingPlayer {
                 tint: [1.0; 4],
                 rot: 0.0,
                 additive: false,
+                color_add: false,
             });
         }
         for slot in self.slots.iter().flatten() {
@@ -946,6 +947,7 @@ impl EndingPlayer {
                 ],
                 rot: 0.0,
                 additive: runner.additive,
+                color_add: false,
             });
         }
         let tint = self.vm.fade.draw();
@@ -957,6 +959,7 @@ impl EndingPlayer {
                 tint,
                 rot: 0.0,
                 additive: false,
+                color_add: false,
             });
         }
         cmds

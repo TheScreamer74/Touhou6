@@ -6,13 +6,18 @@ they do not launch the Windows executable or prove complete game equivalence.
 
 ## Locked reference and paths
 
-The C++ harnesses target
+The shell interpreter/rendering harnesses target
 [`happyhavoc/th06` commit bd90685fa40eaf2e16789dcf788843b304e6e02d](https://github.com/happyhavoc/th06/tree/bd90685fa40eaf2e16789dcf788843b304e6e02d).
 The downloaded source archive SHA256 is
 `f09629ea2d227bbc9430c03dc51f87e2cc408e6cf6337797f449fcfde225e3cf`.
 Later upstream revisions merged RNG/timer files and replaced `diffbuild.hpp`.
 An incompatible source layout fails with a readable profile error instead of
 silently substituting reference calculations.
+
+The player and projectile extraction harnesses accept their documented source
+profile and record the SHA256 of every original file they compile. Their
+manifests identify the actual supplied revision independently of the shell
+harnesses' locked source.
 
 Set paths explicitly when the old sibling `refs/` and `res/` folders do not
 exist. Paths may contain spaces.
@@ -51,6 +56,8 @@ reference binary; use it only with the same selected source.
 | `bg/compare.sh` | Real `Stage::OnUpdate`: background camera, facing, fog and script state per frame |
 | `vtx/compare.sh` | Real `Draw3` quad transforms and camera projection against the port's projected corners |
 | `vm/compare.sh` | Real ECL, EnemyManager and BulletManager execution: every active bullet's position, angle and speed to four decimals per frame |
+| `player/build.py` + `original_cpp` Rust tests | Original BulletData and Player attack functions: 193 table entries, 72 damage states, 40 shot-motion states, 40 reversible orb states, 128 input states, 12 bounds cases and 26 enemy damage-feedback ticks, with exact float bit patterns; see [player details](player/README.md) |
+| `projectiles/compare.sh` | Original player graze/cancel/laser functions and BulletManager laser state machine: 864 combinations over 85 frames, 73,440 observations; see [projectile details](projectiles/README.md) |
 
 ANM, BG, bullet and VM comparisons require identical formatted observations;
 no new numeric tolerance is introduced. The vertex harness retains its
@@ -65,6 +72,31 @@ Effect stubs preserve RNG draws, while presentation and audio are excluded.
 Runs on other difficulties, with input/damage, or over other frame windows
 need their own comparisons. A pass in one harness does not imply a pass in
 another.
+
+## Gameplay and replay regression with original assets
+
+```sh
+TH06_REFERENCE_DIR=/path/to/extracted/reference TH06_GOD=1 \
+  cargo test -p th06 --release \
+  original_assets_all_routes_and_replays_match_every_frame -- --ignored --nocapture
+```
+
+This separate asset-dependent suite runs all 96 legal stage/difficulty/shot
+routes through their MSG stage end. It records the input, encodes and parses
+the original T6RP format, then compares simulation and draw-state hashes on
+every playback frame. Invulnerability lets the automated player exercise the
+complete stages. This establishes internal determinism with the real assets;
+it does not compare those routes to the Windows executable.
+
+The final complete run exercised 1,375,027 live frames and the same number of
+playback frames, totaling 2,750,054 frame observations across the 96 routes.
+
+Additional asset-dependent tests exercise the four complete bomb cycles,
+item magnetization, retained shot-impact animations, all eight Marisa B laser
+tiers, and every enemy bullet type's spawn/cancellation animations. Ordinary
+tests cover fixed slot reuse, rectangle edge behavior, missile damage decay,
+orb focus reversals, graze caps, popup lifetimes, effect RNG order and shaken
+game-region bounds. Game archives must be supplied separately.
 
 See [the dated validation report](../docs/REVERSE_ENGINEERING.md) for actual
 executed cases, limitations and binary evidence.

@@ -1,14 +1,15 @@
 //! Japanese (Shift-JIS) text rasterisation — the port's stand-in for the
 //! decomp's `TextHelper::RenderTextToTexture` (which used a GDI MS-Gothic font
-//! via `TextOutA`). We can't use MS Gothic (proprietary) or GDI (Windows), so a
-//! pure-Rust rasteriser (`ab_glyph`) draws a bundled free Gothic (Noto Sans JP,
-//! SIL OFL) — a close substitute. Same recipe: a shadow pass at (+3,+2) then the
+//! via `TextOutA`). A legally supplied MS Gothic font can replace the bundled
+//! Noto Sans JP (SIL OFL); `ab_glyph` rasterisation still differs from GDI.
+//! Same recipe: a shadow pass at (+3,+2) then the
 //! main text, both AA. Shift-JIS bytes are decoded with `encoding_rs`.
 //!
 //! Output is a tight RGBA8 bitmap; the caller uploads it as a texture and draws
 //! it like any other sprite.
 
-use ab_glyph::{Font, FontRef, Glyph, PxScale, ScaleFont};
+use ab_glyph::{Font, FontArc, FontRef, Glyph, PxScale, ScaleFont};
+use std::sync::{OnceLock, RwLock};
 
 /// Bundled JP Gothic (Bold, to match the decomp's `FW_BOLD`).
 const FONT: &[u8] = include_bytes!("../assets/NotoSansJP-Bold.otf");
@@ -20,8 +21,36 @@ pub struct TextImage {
     pub rgba: Vec<u8>,
 }
 
-fn font() -> FontRef<'static> {
-    FontRef::try_from_slice(FONT).expect("bundled NotoSansJP is a valid font")
+static USER_FONT: OnceLock<RwLock<Option<FontArc>>> = OnceLock::new();
+
+/// Use an explicitly supplied, licensed font. MS Gothic's TTC face 0 is the
+/// fixed-pitch face selected by the original SHIFTJIS_CHARSET request. No
+/// proprietary font is bundled. This changes outlines, not GDI rasterisation.
+pub fn set_font(bytes: Option<Vec<u8>>) -> Result<(), String> {
+    let font = bytes
+        .map(|bytes| {
+            if bytes.len() > 64 * 1024 * 1024 {
+                return Err("Font exceeds 64 MiB".to_string());
+            }
+            FontArc::try_from_vec(bytes).map_err(|_| "Invalid TrueType/OpenType font".to_string())
+        })
+        .transpose()?;
+    *USER_FONT
+        .get_or_init(|| RwLock::new(None))
+        .write()
+        .map_err(|_| "Font lock failed")? = font;
+    Ok(())
+}
+
+fn font() -> FontArc {
+    USER_FONT
+        .get_or_init(|| RwLock::new(None))
+        .read()
+        .ok()
+        .and_then(|font| font.clone())
+        .unwrap_or_else(|| {
+            FontArc::new(FontRef::try_from_slice(FONT).expect("bundled NotoSansJP is a valid font"))
+        })
 }
 
 /// Decode Shift-JIS bytes to a String (lossy on invalid sequences).
@@ -112,6 +141,52 @@ pub fn render_shiftjis(
     shadow: Option<[u8; 3]>,
 ) -> TextImage {
     render(&decode_shiftjis(bytes), px, color, shadow)
+}
+
+/// TextHelper_RenderTextToTexture's fixed sprite canvas: fontHeight=15,
+/// a doubled source rectangle [0, 0, width*2-2, 28], triangle downsampling.
+/// `right_align` uses DrawStringFormat's Shift-JIS byte count, not font metrics.
+/// The optional font controls outlines; GDI coverage remains platform-specific.
+pub fn render_sprite_shiftjis(
+    bytes: &[u8],
+    width: u32,
+    height: u32,
+    right_align: bool,
+    color: [u8; 3],
+) -> TextImage {
+    let bytes = bytes.split(|byte| *byte == 0).next().unwrap_or_default();
+    let glyphs = render_shiftjis(bytes, 30.0, color, Some([0, 0, 0]));
+    let source_width = width.saturating_mul(2).saturating_sub(2).max(1);
+    let mut source = image::RgbaImage::new(source_width, 28);
+    let offset = if right_align {
+        (i64::from(width) - bytes.len() as i64 * 8) * 2
+    } else {
+        0
+    };
+    for y in 0..glyphs.height.min(28) {
+        for x in 0..glyphs.width {
+            let target = i64::from(x) + offset;
+            if target >= 0 && target < i64::from(source_width) {
+                let index = ((y * glyphs.width + x) * 4) as usize;
+                source.put_pixel(
+                    target as u32,
+                    y,
+                    image::Rgba(glyphs.rgba[index..index + 4].try_into().unwrap()),
+                );
+            }
+        }
+    }
+    let output = image::imageops::resize(
+        &source,
+        width.max(1),
+        height.max(1),
+        image::imageops::FilterType::Triangle,
+    );
+    TextImage {
+        width: output.width(),
+        height: output.height(),
+        rgba: output.into_raw(),
+    }
 }
 
 #[cfg(test)]

@@ -147,8 +147,15 @@ pub struct Bullet {
     pub pos: [f32; 2],
     pub angle: f32,
     pub speed: f32,
+    /// Cached velocity: acceleration modifies it independently of `speed`.
+    pub velocity: [f32; 2],
+    pub type_index: usize,
+    /// Original pre-executed bullet, spawn and cancellation ANM instances.
+    pub visuals: Option<crate::projectiles::BulletVisuals>,
     /// etama3 sprite index (type base + color offset).
     pub sprite: u32,
+    /// Template baseSpriteIndex stays fixed when the fireball animates.
+    pub base_sprite: u32,
     /// Colour offset within the bullet type's sprite group (the `spriteOffset`
     /// the decomp tracks; ex-instructions test/overwrite it, e.g. Sakuya's
     /// redirect sets it to 5).
@@ -198,6 +205,13 @@ pub struct Laser {
     pub duration: i32,
     pub despawn_duration: i32,
     pub hitbox_start: i32,
+    pub hitbox_end: i32,
+    pub flags: u16,
+    /// Local etama3 laser script: 9 line / 10 round beam.
+    pub script: u32,
+    /// Drawing state evaluated before the timer increments.
+    pub draw_width: f32,
+    pub draw_alpha: f32,
     pub state: u8, // 0 warmup, 1 active, 2 despawning
     pub timer: i32,
     pub color: i32,
@@ -230,6 +244,8 @@ pub struct Enemy {
     rank_amount2_low: i32,
     rank_amount2_high: i32,
     pub life: i32,
+    /// EnemyManager::unk_e41 suppresses damage flashes for four ticks.
+    damage_flash_timer: u8,
     pub max_life: i32,
     pub score: i32,
     boss_timer: i32,
@@ -342,6 +358,7 @@ impl Default for Enemy {
             rank_amount2_low: 0,
             rank_amount2_high: 0,
             life: 1,
+            damage_flash_timer: 0,
             max_life: 1,
             score: 100,
             boss_timer: 0,
@@ -411,6 +428,7 @@ pub enum WorldEvent {
     /// field is cleared (EnemyManager.cpp:408 — isCapturing=0, RemoveAllBullets).
     SpellTimeout,
     BulletCancel(Vec<[f32; 2]>),
+    ScorePopup([f32; 2], i64, [f32; 4]),
     BossSet(bool),
     DropItem([f32; 2], i32),
     /// ECL op125 STDUNPAUSE: release the background camera park (Stage::unpauseFlag).
@@ -458,6 +476,7 @@ pub struct World {
     /// Sprite width (px) per bullet type 0..9, from etama3.anm. Used (with
     /// height) by the off-screen IsInBounds cull.
     pub bullet_widths: [f32; 10],
+    pub bullet_templates: Vec<crate::projectiles::BulletVisuals>,
     /// EffectManager (#26, #17): live particle effects. Each runs its g_Effects
     /// update callback (which draws the gameplay RNG on its first tick) and an
     /// etama4 ANM script for the visual. `update_effects` runs them between the
@@ -556,6 +575,34 @@ fn g_effects(effect_idx: i32) -> (u32, EffCb) {
 }
 
 impl World {
+    pub fn reference_effects(&self, frame: i32) -> String {
+        use std::fmt::Write;
+        let mut out = String::new();
+        for (slot, effect) in self.effects.iter().enumerate() {
+            let Some(effect) = effect else { continue };
+            let callback = match effect.cb {
+                EffCb::None => 0,
+                EffCb::RandomSplash => 1,
+                EffCb::RandomSplashBig => 2,
+                EffCb::Still => 3,
+                EffCb::Attract => 5,
+                EffCb::AttractSlow => 6,
+                EffCb::SpellBubble => 4,
+            };
+            writeln!(
+                out,
+                "{frame},{slot},{},{callback},{},{:.9},{:.9},{:.9}",
+                effect.timer,
+                effect.runner.sprite.unwrap_or(u32::MAX),
+                effect.pos[0],
+                effect.pos[1],
+                effect.pos[2]
+            )
+            .unwrap();
+        }
+        out
+    }
+
     /// GameManager::IncreaseSubrank: add to subRank, carrying every 100 into a
     /// rank up, clamped to maxRank (GameManager.cpp:578).
     pub fn increase_subrank(&mut self, amount: i32) {
@@ -584,8 +631,9 @@ impl World {
 
     /// EffectManager::SpawnParticles (EffectManager.cpp:195) — allocate `count`
     /// effects of `effect_idx` at `pos`, each cycling `next_effect_index` to the
-    /// next free slot. No RNG here; the callbacks draw on their first OnUpdate
-    /// tick. `color` tints the etama4 sprite (white = unchanged).
+    /// next free slot. The initial ANM may draw a random sprite after allocation;
+    /// movement callbacks draw on their first OnUpdate tick. `color` tints the
+    /// etama4 sprite (white = unchanged).
     pub fn spawn_particles(&mut self, effect_idx: i32, pos: [f32; 3], count: i32, color: [f32; 4]) {
         let (script, cb) = g_effects(effect_idx);
         let Some(instrs) = self.eff_scripts.get(&script).cloned() else {
@@ -677,7 +725,7 @@ impl World {
         self.alloc_effect(eff);
     }
 
-    fn alloc_effect(&mut self, effect: Effect) -> Option<usize> {
+    fn alloc_effect(&mut self, mut effect: Effect) -> Option<usize> {
         for _ in 0..512 {
             let candidate = self.next_effect_index;
             self.next_effect_index = (candidate + 1) % 512;
@@ -688,6 +736,11 @@ impl World {
             {
                 if self.effects.len() <= candidate {
                     self.effects.resize_with(candidate + 1, || None);
+                }
+                if let Some((sprite, range)) = effect.runner.take_pending_random() {
+                    effect
+                        .runner
+                        .set_sprite(sprite + self.rng.u16_in_range(range) as u32);
                 }
                 self.effects[candidate] = Some(effect);
                 return Some(candidate);
@@ -703,7 +756,7 @@ impl World {
     pub fn despawn_all_bullets(&mut self) {
         for b in &mut self.bullets {
             if b.despawn_timer == 0 {
-                b.despawn_timer = 12;
+                b.begin_despawn();
             }
         }
         self.cancel_lasers(false, &mut Vec::new());
@@ -735,10 +788,19 @@ impl World {
             if award_points {
                 points.push(bullet.pos);
             }
+            self.events.push(WorldEvent::ScorePopup(
+                bullet.pos,
+                score,
+                if score >= 12800 {
+                    [1.0, 1.0, 0.0, 1.0]
+                } else {
+                    [1.0; 4]
+                },
+            ));
             total += score;
             score = (score + 10).min(12800);
             if bullet.despawn_timer == 0 {
-                bullet.despawn_timer = 12;
+                bullet.begin_despawn();
             }
         }
         if award_points {
@@ -754,11 +816,16 @@ impl World {
 
     fn cancel_lasers(&mut self, award_points: bool, points: &mut Vec<[f32; 2]>) {
         for laser in &mut self.lasers {
-            if !laser.in_use || laser.state >= 2 {
+            if !laser.in_use {
+                continue;
+            }
+            laser.hitbox_end = 0;
+            if laser.state >= 2 {
                 continue;
             }
             laser.state = 2;
             laser.timer = 0;
+            laser.hitbox_end = 0;
             if award_points {
                 let (sin, cos) = laser.angle.sin_cos();
                 let mut offset = laser.start_offset;
@@ -862,6 +929,10 @@ impl World {
                 EffCb::None => {}
             }
             e.runner.tick();
+            if let Some((sprite, range)) = e.runner.take_pending_random() {
+                e.runner
+                    .set_sprite(sprite + self.rng.u16_in_range(range) as u32);
+            }
             e.timer += 1;
             if e.runner.ended() {
                 *slot = None;
@@ -1536,6 +1607,11 @@ impl Enemy {
                     duration: instr.arg_i32(8),
                     despawn_duration: instr.arg_i32(9),
                     hitbox_start: instr.arg_i32(10),
+                    hitbox_end: instr.arg_i32(11),
+                    flags: instr.arg_i32(12) as u16,
+                    script: 9 + instr.arg_i16(0).max(0) as u32,
+                    draw_width: instr.arg_f32(6),
+                    draw_alpha: 1.0,
                     state: if instr.arg_i32(7) == 0 { 1 } else { 0 },
                     timer: 0,
                     color: instr.arg_i16(2) as i32,
@@ -1865,7 +1941,10 @@ impl Enemy {
                 // acceleration over 220 frames (ex flag 0x10).
                 for b in world.bullets.iter_mut() {
                     match param {
-                        0 => b.speed = 0.0,
+                        0 => {
+                            b.speed = 0.0;
+                            b.velocity = [0.0; 2];
+                        }
                         1 => {
                             b.ex_flags |= 0x10;
                             b.ex_int0 = 220;
@@ -1968,7 +2047,7 @@ impl Enemy {
                     let rng = &mut world.rng;
                     for b in world.bullets.iter_mut() {
                         if b.height >= 30.0 && b.sprite_offset != 5 && rng.u16().is_multiple_of(4) {
-                            let base = (b.sprite as i32 - b.sprite_offset).max(0) as u32;
+                            let base = b.base_sprite;
                             b.sprite_offset = 5;
                             b.sprite = base + 5;
                             let dx = b.pos[0] - player[0];
@@ -1983,6 +2062,7 @@ impl Enemy {
                                 // AngleFromPlayer (player -> bullet) + π/2 + rand(2π).
                                 dy.atan2(dx) + PI / 2.0 + rng.f32_in_range(TAU)
                             };
+                            b.velocity = [b.angle.cos() * b.speed, b.angle.sin() * b.speed];
                             left -= 1;
                             if left == 0 {
                                 break;
@@ -2139,6 +2219,11 @@ impl Enemy {
                                     duration: 90 - inner * 16,
                                     despawn_duration: 16,
                                     hitbox_start: 50,
+                                    hitbox_end: 16,
+                                    flags: 2,
+                                    script: 10,
+                                    draw_width: width,
+                                    draw_alpha: 1.0,
                                     state: 0, // start_time is always >= 60, so warmup
                                     timer: 0,
                                     color: sprite_offset,
@@ -2200,7 +2285,7 @@ impl Enemy {
                     if b.despawn_timer != 0 || b.height >= 30.0 || b.speed != 0.0 {
                         continue;
                     }
-                    let base = (b.sprite as i32 - b.sprite_offset).max(0) as u32;
+                    let base = b.base_sprite;
                     b.ex_flags |= 0x10;
                     b.sprite_offset = 2;
                     b.sprite = base + 2;
@@ -2224,7 +2309,7 @@ impl Enemy {
                     if b.despawn_timer != 0 || b.height >= 30.0 || b.speed != 0.0 {
                         continue;
                     }
-                    let base = (b.sprite as i32 - b.sprite_offset).max(0) as u32;
+                    let base = b.base_sprite;
                     b.ex_flags |= 0x10;
                     b.sprite_offset = 2;
                     b.sprite = base + 2;
@@ -2269,7 +2354,7 @@ impl Enemy {
                         let bullets_angle = (b.pos[1] - ey).atan2(b.pos[0] - ex);
                         b.angle = (bullets_angle - enemy_angle) * 2.2 + enemy_angle;
                         b.ex_accel = [b.angle.cos() * 0.01, b.angle.sin() * 0.01];
-                        let base = (b.sprite as i32 - b.sprite_offset).max(0) as u32;
+                        let base = b.base_sprite;
                         b.sprite_offset += 1;
                         b.sprite = base + b.sprite_offset as u32;
                     }
@@ -2602,19 +2687,34 @@ impl Enemy {
     /// Bounds bookkeeping; returns false when the enemy should despawn.
     /// `(w, h)` is the enemy's current `primaryVm.sprite` size in px — the decomp
     /// (EnemyManager.cpp:549) tests `GameManager::IsInBounds(pos, sprite->widthPx,
-    /// heightPx)`: the sprite rect must overlap [0,FIELD_W]x[0,FIELD_H]. `(0,0)`
+    /// heightPx)`: the sprite rect must overlap the current game region, which
+    /// screen shake may shrink. `(0,0)`
     /// before the first ANMSETMAIN sets a sprite — then the enemy is still off
     /// screen at spawn, so `has_been_in_bounds` is never set and it can't despawn.
     pub fn ready_for_damage(&self) -> bool {
         self.occupied && self.has_been_in_bounds && !self.invisible
     }
 
-    pub fn update_bounds(&mut self, w: f32, h: f32) -> bool {
+    /// EnemyManager_OnUpdate applies this after damage/death handling, even
+    /// for a non-interactable enemy. Only an actual HP decrease triggers ADD.
+    pub fn update_damage_feedback(&mut self, life_before: i32) -> bool {
+        if self.damage_flash_timer != 0 {
+            self.damage_flash_timer -= 1;
+            false
+        } else if life_before > self.life {
+            self.damage_flash_timer = 4;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn update_bounds(&mut self, w: f32, h: f32, region: [f32; 2]) -> bool {
         let (hw, hh) = (w / 2.0, h / 2.0);
-        let inside = self.pos[0] + hw >= 0.0
-            && self.pos[0] - hw <= FIELD_W
-            && self.pos[1] + hh >= 0.0
-            && self.pos[1] - hh <= FIELD_H;
+        let inside = !(hw + self.pos[0] < 0.0
+            || self.pos[0] - hw > region[0]
+            || hh + self.pos[1] < 0.0
+            || self.pos[1] - hh > region[1]);
         if !self.has_been_in_bounds && inside {
             self.has_been_in_bounds = true;
         }
@@ -2761,7 +2861,7 @@ enum Flow {
 /// Bullet type -> etama3 base sprite index (AnmIdx.hpp ANM_SPRITE_BULLET3_*:
 /// pellet, ring-ball, rice, ball, kunai, shard, big-ball, fireball, dagger,
 /// laser). Fireball is 118, not 110 — it is its own sprite group after big-ball.
-pub const BULLET_BASE_SPRITE: [u32; 10] = [14, 30, 46, 62, 78, 94, 110, 118, 122, 146];
+pub const BULLET_BASE_SPRITE: [u32; 10] = [14, 30, 46, 62, 78, 94, 110, 118, 122, 0];
 
 /// Faithful port of BulletManager::SpawnSingleBullet's aim-mode math.
 pub fn spawn_bullet_pattern(world: &mut World, props: &BulletProps) {
@@ -2922,7 +3022,22 @@ pub fn spawn_bullet_pattern(world: &mut World, props: &BulletProps) {
                     pos: props.pos,
                     angle,
                     speed,
+                    velocity: [angle.cos() * speed, angle.sin() * speed],
+                    type_index: bullet_type,
+                    visuals: world
+                        .bullet_templates
+                        .get(bullet_type)
+                        .cloned()
+                        .map(|mut visual| {
+                            visual.set_color(
+                                props.sprite_offset.max(0) as u32,
+                                world.bullet_heights[bullet_type],
+                                bullet_type,
+                            );
+                            visual
+                        }),
                     sprite: base + props.sprite_offset.max(0) as u32,
+                    base_sprite: base,
                     spawn_factor,
                     oob_count: 0,
                     sprite_offset: props.sprite_offset.max(0),
@@ -2951,6 +3066,43 @@ pub fn spawn_bullet_pattern(world: &mut World, props: &BulletProps) {
 mod tests {
     use super::*;
 
+    #[test]
+    #[ignore = "requires original decomp; build with TH06_DECOMP_SRC=... python3 oracle/player/build.py"]
+    fn original_cpp_enemy_damage_feedback_matches_sound_and_color_cadence() {
+        use std::fmt::Write;
+        let mut enemy = Enemy {
+            life: 100,
+            ..Default::default()
+        };
+        let mut actual = String::new();
+        for frame in 0..26 {
+            let before = enemy.life;
+            if frame < 10 || (12..24).contains(&frame) {
+                enemy.life -= 1;
+            } else if frame == 10 {
+                enemy.life += 10;
+            }
+            let flash = enemy.update_damage_feedback(before);
+            writeln!(
+                actual,
+                "{frame} {} {} {} {}",
+                enemy.life,
+                enemy.damage_flash_timer,
+                u8::from(flash),
+                if flash { 20 } else { -1 }
+            )
+            .unwrap();
+        }
+        let binary = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../oracle/player/build/player_reference");
+        let output = std::process::Command::new(binary)
+            .arg("flash")
+            .output()
+            .expect("build oracle/player/build.py first");
+        assert!(output.status.success());
+        assert_eq!(actual, String::from_utf8(output.stdout).unwrap());
+    }
+
     fn world() -> World {
         World {
             rng: Rng::new(0x1234),
@@ -2976,12 +3128,54 @@ mod tests {
             spellcard_active: 0,
             bullet_heights: [16.0; 10],
             bullet_widths: [16.0; 10],
+            bullet_templates: Vec::new(),
             effects: Vec::new(),
             next_effect_index: 0,
             eff_scripts: HashMap::new(),
             random_item_spawn_index: 0,
             random_item_table_index: 0,
         }
+    }
+
+    #[test]
+    fn particle_random_sprite_draw_precedes_motion_rng_and_full_pool_draws_nothing() {
+        let mut world = world();
+        world.rng = Rng::new(34784);
+        world.eff_scripts.insert(
+            10,
+            vec![
+                AnmInstr {
+                    time: 0,
+                    opcode: 16,
+                    args: [11u32.to_le_bytes(), 4u32.to_le_bytes()].concat(),
+                    offset: 0,
+                },
+                AnmInstr {
+                    time: 0,
+                    opcode: 21,
+                    args: Vec::new(),
+                    offset: 12,
+                },
+            ],
+        );
+        world.spawn_particles(5, [100.0, 200.0, 0.0], 1, [1.0; 4]);
+        let mut expected = Rng::new(34784);
+        let sprite = 11 + expected.u16_in_range(4) as u32;
+        assert_eq!(
+            world.effects[0].as_ref().unwrap().runner.sprite,
+            Some(sprite)
+        );
+        assert_eq!(world.rng, expected);
+        expected.f32_zero_to_one();
+        expected.f32_zero_to_one();
+        world.update_effects();
+        assert_eq!(world.rng, expected);
+        assert_eq!(world.rng.seed(), 38085); // observed real EXE demo00 frame456
+        world.spawn_particles(5, [0.0; 3], 511, [1.0; 4]);
+        let full_rng = world.rng;
+        world.spawn_particles(5, [0.0; 3], 1, [1.0; 4]);
+        assert_eq!(world.rng, full_rng);
+        assert_eq!(world.effects.iter().flatten().count(), 512);
     }
 
     #[test]

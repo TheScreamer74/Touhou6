@@ -265,10 +265,14 @@ fn main() {
     let mut debug_score: Option<i64> = None;
     let mut difficulty = Difficulty::Normal;
     let mut replay_file: Option<String> = None;
+    let mut replay_dump: Option<String> = None;
+    let mut replay_details: Option<String> = None;
+    let mut replay_effects: Option<String> = None;
     let mut god = false;
     let mut autoplay = false;
     let mut probe_run = false;
     let mut ecl_dump = false;
+    let mut color_16bit = false;
     let mut warp: Option<bool> = None; // Some(false) = midboss, Some(true) = boss
     let mut game_dir = String::from("../TH06 ~ The Embodiment of Scarlet Devil/kouma");
     while let Some(arg) = args.next() {
@@ -322,10 +326,18 @@ fn main() {
                 };
             }
             "--replay" => replay_file = Some(args.next().expect("--replay <path.rpy>")),
+            "--replay-dump" => replay_dump = Some(args.next().expect("--replay-dump <out.csv>")),
+            "--replay-details" => {
+                replay_details = Some(args.next().expect("--replay-details <bullets.csv>"))
+            }
+            "--replay-effects" => {
+                replay_effects = Some(args.next().expect("--replay-effects <effects.csv>"))
+            }
             "--god" => god = true,
             "--autoplay" => autoplay = true,
             "--probe-run" => probe_run = true,
             "--ecl-dump" => ecl_dump = true,
+            "--color-16bit" => color_16bit = true,
             "--midboss" => warp = Some(false),
             "--boss" => warp = Some(true),
             "--game-dir" => game_dir = args.next().expect("--game-dir <path>"),
@@ -380,6 +392,21 @@ fn main() {
             .unwrap_or_default(),
         bgm,
         bgm_pos,
+        midi: md
+            .iter()
+            .filter(|(name, _)| name.ends_with(".mid"))
+            .map(|(name, bytes)| (name.clone(), bytes.clone()))
+            .collect(),
+        soundfont: std::env::var_os("TH06_SOUNDFONT")
+            .map(PathBuf::from)
+            .into_iter()
+            .chain([game_dir.join("gm.sf2")])
+            .find_map(|path| std::fs::read(path).ok()),
+        text_font: std::env::var_os("TH06_FONT")
+            .map(PathBuf::from)
+            .into_iter()
+            .chain([game_dir.join("msgothic.ttc"), game_dir.join("msgothic.ttf")])
+            .find_map(|path| std::fs::read(path).ok()),
     };
 
     th06::validate_game_files(&files).expect("validate game data");
@@ -390,6 +417,7 @@ fn main() {
         && record_split.is_none()
         && demo.is_none()
         && !probe_run
+        && replay_dump.is_none()
         && !ecl_dump;
     let (textures, mut game) = build_game(&engine, &files, with_audio);
 
@@ -401,6 +429,10 @@ fn main() {
     game.set_scores(load_scores(&scores_path));
     game.set_scores_path(scores_path);
     game.configure_storage(&game_dir.to_string_lossy());
+    if color_16bit {
+        game.options.color_16bit = true;
+        th06_engine::set_color_16bit(true);
+    }
     game.set_difficulty(difficulty);
     if let Some(path) = replay_file {
         let bytes = std::fs::read(path).expect("read replay");
@@ -411,6 +443,43 @@ fn main() {
             .position(Option::is_some)
             .expect("replay stage");
         game.start_replay(replay, index).expect("start replay");
+    }
+
+    if let Some(path) = replay_dump {
+        use std::io::Write;
+        let mut out =
+            std::io::BufWriter::new(std::fs::File::create(path).expect("create replay dump"));
+        let mut details = replay_details.map(|path| {
+            let mut file =
+                std::io::BufWriter::new(std::fs::File::create(path).expect("create bullet dump"));
+            writeln!(file, "frame,slot,x,y,angle,speed,vx,vy,state,timer").unwrap();
+            file
+        });
+        let mut effects = replay_effects.map(|path| {
+            let mut file =
+                std::io::BufWriter::new(std::fs::File::create(path).expect("create effect dump"));
+            writeln!(file, "frame,slot,timer,callback,sprite,x,y,z").unwrap();
+            file
+        });
+        writeln!(out, "frame,stage,x,y,lives,bombs,power,score,graze_stage,graze_total,rank,subrank,rng,bullets,lasers,items,particle_timer").unwrap();
+        for _ in 0..frames {
+            game.update(&Input::default());
+            let Some(state) = game.replay_reference_state() else {
+                break;
+            };
+            writeln!(out, "{state}").unwrap();
+            if let Some(file) = &mut details
+                && let Some(bullets) = game.replay_reference_bullets()
+            {
+                file.write_all(bullets.as_bytes()).unwrap();
+            }
+            if let Some(file) = &mut effects
+                && let Some(effects) = game.replay_reference_effects()
+            {
+                file.write_all(effects.as_bytes()).unwrap();
+            }
+        }
+        return;
     }
 
     // `--god` makes the player invulnerable (the collide() check reads this).

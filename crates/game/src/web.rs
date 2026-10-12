@@ -181,6 +181,15 @@ pub async fn start_game(files: js_sys::Object) -> Result<(), JsValue> {
         music_comments,
         bgm,
         bgm_pos,
+        midi: md
+            .iter()
+            .filter(|(name, _)| name.ends_with(".mid"))
+            .map(|(name, bytes)| (name.clone(), bytes.clone()))
+            .collect(),
+        soundfont: raw.remove("gm.sf2"),
+        text_font: raw
+            .remove("msgothic.ttc")
+            .or_else(|| raw.remove("msgothic.ttf")),
     };
 
     crate::validate_game_files(&game_files).map_err(|e| JsValue::from_str(&e))?;
@@ -216,23 +225,24 @@ pub async fn start_game(files: js_sys::Object) -> Result<(), JsValue> {
     };
     let (textures, mut game) = build_game(&engine, &game_files, true);
     game.configure_storage("");
-    if crate::save::load_bytes("score.dat").is_none() {
-        if let Some(bytes) = raw.get("score.dat") {
-            game.import_progress(bytes)
-                .map_err(|e| JsValue::from_str(&e))?;
-        }
+    if crate::save::load_bytes("score.dat").is_none()
+        && let Some(bytes) = raw.get("score.dat")
+    {
+        game.import_progress(bytes)
+            .map_err(|e| JsValue::from_str(&e))?;
     }
     for slot in 0..crate::replay::SLOTS {
         let path = crate::replay::path("replay", slot);
-        if crate::save::load_bytes(&path).is_none() {
-            if let Some(bytes) = raw.get(&format!("th6_{:02}.rpy", slot + 1)) {
-                game.import_replay(bytes, slot)
-                    .map_err(|e| JsValue::from_str(&e))?;
-            }
+        if crate::save::load_bytes(&path).is_none()
+            && let Some(bytes) = raw.get(&format!("th6_{:02}.rpy", slot + 1))
+        {
+            game.import_replay(bytes, slot)
+                .map_err(|e| JsValue::from_str(&e))?;
         }
     }
     drop(game_files);
     drop(raw);
+    game.prepare_audio().await;
     game.start_title_bgm();
     let mut displayed_error = None;
     let display_canvas = canvas.clone();

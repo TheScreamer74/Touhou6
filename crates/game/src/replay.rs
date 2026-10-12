@@ -32,6 +32,12 @@ pub enum Session {
 }
 
 impl Session {
+    /// Number of simulation/input frames consumed in the current stage.
+    pub fn frame(&self) -> i32 {
+        match self {
+            Self::Recording { frame, .. } | Self::Playback { frame, .. } => *frame,
+        }
+    }
     pub fn recording(character: u8, difficulty: u8, date: String) -> Self {
         Self::Recording {
             replay: Replay {

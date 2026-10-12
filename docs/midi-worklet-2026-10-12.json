@@ -1,0 +1,40 @@
+{
+  "date": "2026-10-12",
+  "test": "MIDI AudioWorklet continues real PCM during a main-thread stall",
+  "backend": "Codex in-app browser, AudioWorklet, isolated wasm-bindgen MidiSynth",
+  "track": "th06_09.mid (legally supplied original MD.DAT)",
+  "soundfont": "TimGM6mb, Debian timgm6mb-soundfont 1.3-5, separately supplied",
+  "sampleRate": 48000,
+  "renderQuantumFrames": 128,
+  "meterIntervalFrames": 12800,
+  "mainThreadStallMilliseconds": 2000,
+  "observationDelayMilliseconds": 100,
+  "before": {
+    "frames": 128000,
+    "energy": 153.4054543155455,
+    "audioTimeSeconds": 2.6693333333333333
+  },
+  "after": {
+    "frames": 230400,
+    "energy": 843.9942328799641,
+    "audioTimeSeconds": 4.802666666666667
+  },
+  "framesDuringObservation": 102400,
+  "pcmEnergyDuringObservation": 690.5887785644186,
+  "processorErrors": [],
+  "passed": true,
+  "reproduce": "Build web/pkg, serve repository root, open tools/midi-audio-probe.html, select a legal SF2 bank and original MIDI, start, then trigger the 2-second stall.",
+  "limits": "Measures continuous nonzero PCM synthesis in the audio thread. It does not certify speaker hardware, original Windows synth timbre or every browser. Meter granularity and 100 ms observation delay surround the 2-second stall.",
+  "persistedMidiColdStart": {
+    "procedure": "Options → MIDI → return to title → reload page → hosted play",
+    "workletCreatedLogTime": "09:59:09.690",
+    "bankReadyLogTime": "09:59:09.859",
+    "titlePlayingLogTime": "09:59:09.862",
+    "titleTrack": "th06_01.mid",
+    "scriptProcessorCreated": false,
+    "errors": [],
+    "warnings": [],
+    "passed": true,
+    "observedBy": "Root browser QA against readiness-fixed release package"
+  }
+}

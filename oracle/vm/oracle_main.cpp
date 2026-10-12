@@ -63,8 +63,8 @@ f32 AddNormalizeAngle(f32 a, f32 b) {
 void Rotate(D3DXVECTOR3* out, D3DXVECTOR3* in, f32 angle) {
     f32 c = cosf(angle), s = sinf(angle);
     f32 x = in->x, y = in->y;
-    out->x = x * c - y * s;
-    out->y = x * s + y * c;
+    out->x = x * c + y * s;
+    out->y = y * c - x * s;
     out->z = in->z;
 }
 void DebugPrint2(const char*, ...) {}

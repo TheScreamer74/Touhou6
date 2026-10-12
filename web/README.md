@@ -64,6 +64,15 @@ files (two little-endian u32 sample offsets each). Loose `.pos` files and
 `musiccmt.txt` are also supported. `ED.DAT` contains the six endings and the
 staff roll. `th06e_ST.DAT` supplies translated stage text when present.
 
+The actual original MIDI files are read from `MD.DAT`. To enable MIDI playback,
+add a separately licensed General MIDI SoundFont as `"gm.sf2": "assets/gm.sf2"`.
+The hosted build uses TimGM6mb; distribute its full GPL-2 license and attribution
+beside the bank. The bank is separate from the MIT engine source and is not
+committed here. MIDI renders in an isolated AudioWorklet; ScriptProcessor is the
+compatibility fallback. See [audio/display details](../docs/PRESENTATION_FIDELITY.md).
+Optional `msgothic.ttc`/`msgothic.ttf` files are recognized when supplied by the
+player; the default font is Noto Sans JP.
+
 Downloads use two concurrent streams, report progress, abort together on an
 error, and enforce a 64 MiB per-file / 1 GiB total input limit. The engine and
 decoded audio need additional memory. Hosted files use the HTTP cache rather
@@ -88,16 +97,16 @@ caches remain readable.
 
 ## Deployment and updates
 
-Upload `index.html`, `pkg/`, and optionally `assets.json` with its referenced
-files. Serve `.wasm` as `application/wasm`. To publish a new engine build, add
+Upload `index.html`, `midi-worklet.js`, `pkg/`, and optionally `assets.json`
+with its referenced files. Serve `.wasm` as `application/wasm`. To publish a new engine build, add
 `build.json` beside the page:
 
 ```json
 {"version":"git-commit-or-build-id"}
 ```
 
-The page fetches this small file without caching and uses its version in both
-the JS and WASM URLs. Change the version only after both generated files have
+The page fetches this small file without caching and uses its version in the
+JS, WASM and MIDI worklet URLs. Change the version only after both generated files have
 been uploaded. An engine update does not invalidate the personal asset cache,
 HTTP asset URLs, scores or replays. Serve `index.html` with revalidation or
 `Cache-Control: no-cache`; `build.json` alone cannot refresh an already cached
@@ -108,12 +117,14 @@ The page has no login. Any access restriction belongs on the host.
 
 ## Compatibility limits
 
-Music playback uses the original WAV tracks (or hosted Ogg conversions), not the
-legacy MIDI synthesizer. Rendering uses 32-bit color; the original 16-bit
-R5G6B5 option is disabled. Browser fullscreen depends on user activation and
+Music playback supports original WAV tracks (or hosted Ogg conversions) and
+original MIDI with a separately supplied SoundFont. Both 32-bit color and the
+original limited-precision R5G6B5 mode are supported. Browser fullscreen depends on user activation and
 browser permission; the F key and on-screen button request it directly.
-Japanese text uses the bundled Noto font instead of Windows GDI/MS Gothic.
+Japanese text defaults to Noto Sans JP; a player-supplied MS Gothic font is
+optional, with rasterization still differing from Windows GDI.
 
 Replay files use the original T6RP format. Deterministic recording/playback is
-regression-tested within this engine; accepting an original replay does not
-establish frame-for-frame equivalence with the Windows executable.
+regression-tested on all 96 routes. The bundled original stage-4 replay also
+matches all 3,720 observed scalar states against the original executable. That
+scoped comparison does not establish all-route or pixel/audio equivalence.

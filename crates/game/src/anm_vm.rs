@@ -22,6 +22,7 @@ struct Move {
     ease: Ease,
 }
 
+#[derive(Clone)]
 pub struct AnmRunner {
     instrs: Vec<Instr>,
     pc: usize,
@@ -72,6 +73,9 @@ pub struct AnmRunner {
     /// op13/14 blend mode: true = additive (One) glow, e.g. the etama4 particle
     /// glows and laser base balls. Drawn with SrcAlpha/One instead of alpha.
     pub additive: bool,
+    /// D3DTOP_ADD combines texture RGB with the VM color, preserving the
+    /// normal texture-alpha × VM-alpha calculation.
+    pub color_add: bool,
     /// True once the script set its own position (opcode 17) — distinguishes
     /// self-placing HUD labels from elements the game positions each frame.
     pub positioned: bool,
@@ -109,6 +113,7 @@ impl AnmRunner {
             auto_rotate: false,
             pending_random: None,
             additive: false,
+            color_add: false,
             positioned: false,
         };
         // SetAndExecuteScript executes frame zero immediately, including the

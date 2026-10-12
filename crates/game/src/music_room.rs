@@ -183,6 +183,7 @@ impl MusicRoom {
             tint,
             rot: 0.0,
             additive: false,
+            color_add: false,
         });
     }
 }

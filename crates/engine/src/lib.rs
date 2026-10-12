@@ -2,7 +2,9 @@
 //! headless render-to-image for verification plus a winit window mode.
 
 pub mod audio;
+mod color565;
 pub mod controls;
+pub mod midi;
 pub mod text;
 pub use controls::{controller_mapping, set_controller_mapping};
 
@@ -26,6 +28,11 @@ pub fn set_suspended(value: bool) {
     SUSPENDED.with(|flag| flag.set(value));
 }
 thread_local! {static WINDOWED_REQUEST:std::cell::Cell<Option<bool>>=const {std::cell::Cell::new(None)};}
+thread_local! {static COLOR_16BIT:std::cell::Cell<bool>=const {std::cell::Cell::new(false)};}
+/// Original R5G6B5 back buffer and original ANM 16-bit texture formats.
+pub fn set_color_16bit(value: bool) {
+    COLOR_16BIT.with(|flag| flag.set(value));
+}
 /// Apply the display option on the event-loop thread.
 pub fn set_windowed(value: bool) {
     WINDOWED_REQUEST.with(|request| request.set(Some(value)));
@@ -51,14 +58,16 @@ struct VOut {
     @builtin(position) pos: vec4f,
     @location(0) uv: vec2f,
     @location(1) tint: vec4f,
+    @location(2) @interpolate(flat) color_add: u32,
 };
 
 @vertex
-fn vs(@location(0) pos: vec2f, @location(1) uv: vec2f, @location(2) tint: vec4f) -> VOut {
+fn vs(@location(0) pos: vec2f, @location(1) uv: vec2f, @location(2) tint: vec4f, @location(3) color_add: u32) -> VOut {
     var out: VOut;
     out.pos = vec4f(pos, 0.0, 1.0);
     out.uv = uv;
     out.tint = tint;
+    out.color_add = color_add;
     return out;
 }
 
@@ -67,7 +76,10 @@ fn vs(@location(0) pos: vec2f, @location(1) uv: vec2f, @location(2) tint: vec4f)
 
 @fragment
 fn fs(in: VOut) -> @location(0) vec4f {
-    return textureSample(tex, samp, in.uv) * in.tint;
+    let sampled = textureSample(tex, samp, in.uv);
+    var color = sampled * in.tint;
+    if (in.color_add != 0u) { color = vec4f(min(sampled.rgb + in.tint.rgb, vec3f(1.0)), color.a); }
+    return color;
 }
 "#;
 
@@ -77,6 +89,7 @@ struct Vertex {
     pos: [f32; 2],
     uv: [f32; 2],
     tint: [f32; 4],
+    color_add: u32,
 }
 
 /// 3D background shader: an MVP transform plus per-pixel linear fog
@@ -177,10 +190,13 @@ pub struct DrawCmd {
     pub rot: f32,
     /// Additive (One) blend instead of alpha — glows/particles. Defaults false.
     pub additive: bool,
+    /// D3DTOP_ADD texture-stage RGB operation; alpha still modulates normally.
+    pub color_add: bool,
 }
 
 pub struct Texture {
     bind_group: wgpu::BindGroup,
+    bind_group_16bit: wgpu::BindGroup,
 }
 
 pub struct Engine {
@@ -197,6 +213,8 @@ pub struct Engine {
     shader: wgpu::ShaderModule,
     bg_shader: wgpu::ShaderModule,
     bg_uniform_layout: wgpu::BindGroupLayout,
+    color565: std::cell::RefCell<Option<color565::Renderer>>,
+    bind_layout_16bit: wgpu::BindGroupLayout,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -307,6 +325,7 @@ impl Engine {
             }],
         });
 
+        let bind_layout_16bit = color565::texture_layout(&device);
         Self {
             device,
             queue,
@@ -316,6 +335,8 @@ impl Engine {
             shader,
             bg_shader,
             bg_uniform_layout,
+            color565: std::cell::RefCell::new(None),
+            bind_layout_16bit,
         }
     }
 
@@ -555,7 +576,7 @@ impl Engine {
                 buffers: &[wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<Vertex>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x4],
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x4, 3 => Uint32],
                 }],
             },
             fragment: Some(wgpu::FragmentState {
@@ -577,6 +598,18 @@ impl Engine {
     }
 
     pub fn create_texture(&self, rgba: &[u8], width: u32, height: u32) -> Texture {
+        self.create_texture_with_format(rgba, width, height, 1)
+    }
+
+    /// ANM header format index: UNKNOWN/A8R8G8B8 become A4R4G4B4 in
+    /// 16-bit mode, R8G8B8 becomes R5G6B5 (AnmManager::LoadTexture).
+    pub fn create_texture_with_format(
+        &self,
+        rgba: &[u8],
+        width: u32,
+        height: u32,
+        original_format: u32,
+    ) -> Texture {
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: None,
             size: wgpu::Extent3d {
@@ -637,7 +670,11 @@ impl Engine {
                 },
             ],
         });
-        Texture { bind_group }
+        let bind_group_16bit = color565::texture(self, rgba, width, height, original_format);
+        Texture {
+            bind_group,
+            bind_group_16bit,
+        }
     }
 
     fn build_vertices(cmds: &[DrawCmd]) -> Vec<Vertex> {
@@ -672,6 +709,7 @@ impl Engine {
                     pos: [nx(px), ny(py)],
                     uv,
                     tint: c.tint,
+                    color_add: u32::from(c.color_add),
                 });
             }
         }
@@ -776,32 +814,48 @@ impl Engine {
         let vbuf = self.vertex_buffer(cmds);
 
         let mut encoder = self.device.create_command_encoder(&Default::default());
-        if let Some(scene) = bg {
-            let bg_pipeline = self.make_bg_pipeline(format);
-            let bg_pipeline_add = self.make_bg_pipeline_mode(format, true);
-            let depth = self.depth_texture(SCREEN_W, SCREEN_H);
-            self.encode_bg(
+        if COLOR_16BIT.with(std::cell::Cell::get) {
+            let mut renderer = self.color565.borrow_mut();
+            renderer
+                .get_or_insert_with(|| color565::Renderer::new(self))
+                .encode(
+                    self,
+                    &mut encoder,
+                    &view,
+                    format,
+                    (SCREEN_W, SCREEN_H),
+                    cmds,
+                    textures,
+                    bg,
+                );
+        } else {
+            if let Some(scene) = bg {
+                let bg_pipeline = self.make_bg_pipeline(format);
+                let bg_pipeline_add = self.make_bg_pipeline_mode(format, true);
+                let depth = self.depth_texture(SCREEN_W, SCREEN_H);
+                self.encode_bg(
+                    &mut encoder,
+                    &view,
+                    &depth,
+                    &bg_pipeline,
+                    &bg_pipeline_add,
+                    scene,
+                    textures,
+                    (SCREEN_W, SCREEN_H),
+                );
+            }
+            self.encode_pass(
                 &mut encoder,
                 &view,
-                &depth,
-                &bg_pipeline,
-                &bg_pipeline_add,
-                scene,
+                &pipeline,
+                &pipeline_add,
+                &vbuf,
+                cmds,
                 textures,
+                bg.is_some(),
                 (SCREEN_W, SCREEN_H),
             );
         }
-        self.encode_pass(
-            &mut encoder,
-            &view,
-            &pipeline,
-            &pipeline_add,
-            &vbuf,
-            cmds,
-            textures,
-            bg.is_some(),
-            (SCREEN_W, SCREEN_H),
-        );
 
         let bytes_per_row = SCREEN_W * 4; // 2560, already 256-aligned
         let readback = self.device.create_buffer(&wgpu::BufferDescriptor {
@@ -859,7 +913,10 @@ impl Engine {
             input: Input::default(),
             physical_keys: HashSet::new(),
             foreground: true,
+            #[cfg(not(target_arch = "wasm32"))]
             gamepad: controls::ControllerDevice::default(),
+            #[cfg(target_arch = "wasm32")]
+            gamepad: controls::ControllerDevice,
             previous_gamepad: 0,
             last_tick: Instant::now(),
             accumulator: Duration::ZERO,
@@ -1321,29 +1378,45 @@ impl ApplicationHandler for App {
                     .engine
                     .device
                     .create_command_encoder(&Default::default());
-                if let Some(scene) = &self.bg {
-                    self.engine.encode_bg(
+                if COLOR_16BIT.with(std::cell::Cell::get) {
+                    let mut renderer = self.engine.color565.borrow_mut();
+                    renderer
+                        .get_or_insert_with(|| color565::Renderer::new(&self.engine))
+                        .encode(
+                            &self.engine,
+                            &mut encoder,
+                            &view,
+                            self.surface_config.as_ref().unwrap().format,
+                            self.surface_size,
+                            &self.cmds,
+                            &tex_refs,
+                            self.bg.as_ref(),
+                        );
+                } else {
+                    if let Some(scene) = &self.bg {
+                        self.engine.encode_bg(
+                            &mut encoder,
+                            &view,
+                            depth,
+                            bg_pipeline,
+                            bg_pipeline_add,
+                            scene,
+                            &tex_refs,
+                            self.surface_size,
+                        );
+                    }
+                    self.engine.encode_pass(
                         &mut encoder,
                         &view,
-                        depth,
-                        bg_pipeline,
-                        bg_pipeline_add,
-                        scene,
+                        pipeline,
+                        pipeline_add,
+                        &vbuf,
+                        &self.cmds,
                         &tex_refs,
+                        self.bg.is_some(),
                         self.surface_size,
                     );
                 }
-                self.engine.encode_pass(
-                    &mut encoder,
-                    &view,
-                    pipeline,
-                    pipeline_add,
-                    &vbuf,
-                    &self.cmds,
-                    &tex_refs,
-                    self.bg.is_some(),
-                    self.surface_size,
-                );
                 self.engine.queue.submit([encoder.finish()]);
                 frame.present();
                 if let Some(w) = &self.window {

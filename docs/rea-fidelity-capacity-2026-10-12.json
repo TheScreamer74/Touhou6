@@ -1,0 +1,29 @@
+{
+  "status": "passed",
+  "generated_capacity": {
+    "artifact_bytes": 12582934,
+    "artifact_sha256": "ee2dcd1056653c7ac16626123d3f83ce860047fdd0bfab24064d3d004054f85a",
+    "wat_bytes": 37748771,
+    "wat_sha256": "752d94e674adc1236b6a0d469cd50f17563e9a161e1f9a46dcdc00172538344d",
+    "evidence_id": "ev_d98ba5d1d2464724264a19a6cdcdaa5047bd0b3e352f140cdd502423a761c589",
+    "sections": 1,
+    "imports": 0,
+    "exports": 0,
+    "output_budget_bytes": 268435456,
+    "wat_matches_independent_wabt": true,
+    "artifact_unchanged": true
+  },
+  "production": {
+    "artifact_bytes": 9577298,
+    "artifact_sha256": "3ac820702f24fdeca7dbdf17061f14d00392f10cc525334b42a2ec31aa3f95e6",
+    "wat_bytes": 124898828,
+    "wat_sha256": "c9c26f65db76e23adfff136a74fe73b81f67e445f6d1de844bc224b4ba7a86a8",
+    "evidence_id": "ev_a825b43672b8e0325b5b70d64e79b072eda3f8fbf8ae01d690b5e0fb84b4494b",
+    "sections": 13,
+    "imports": 696,
+    "exports": 36,
+    "output_budget_bytes": 268435456,
+    "wat_matches_independent_wabt": true,
+    "artifact_unchanged": true
+  }
+}

@@ -1,0 +1,57 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>TH06 MIDI audio-thread validation</title>
+<p>Local validation only: selected files remain in this tab. Build web/pkg and serve the repository root first.</p>
+<label>Legal SoundFont <input id="bank" type="file" accept=".sf2"></label>
+<label>Original MIDI <input id="track" type="file" accept=".mid"></label>
+<label>Requested sample rate <select id="rate"><option>48000</option><option>44100</option></select></label>
+<p><button id="start">Start MIDI validation</button> <button id="stall" disabled>Block main thread for 2 seconds</button></p>
+<pre id="result">Ready</pre>
+<pre id="receipt"></pre>
+<script type="module">
+import init from "../web/pkg/th06.js";
+const result = document.getElementById("result"), errors = [], samples = [];
+let context;
+document.getElementById("start").onclick = async () => {
+  try {
+    const bank = document.getElementById("bank").files[0], track = document.getElementById("track").files[0];
+    if (!bank || !track) throw new Error("Choose a SoundFont and original MIDI first.");
+    if (context) await context.close();
+    errors.length = 0; samples.length = 0;
+    document.getElementById("stall").disabled = true;
+    context = new AudioContext({ sampleRate: Number(document.getElementById("rate").value) });
+    await context.resume();
+    const response = await fetch("../web/pkg/th06_bg.wasm");
+    if (!response.ok) throw new Error("Build the web package first.");
+    const module = await WebAssembly.compile(await response.arrayBuffer());
+    await init({ module_or_path: module });
+    const source = `import {registerMidiProcessor} from ${JSON.stringify(new URL("../web/midi-worklet.js", location.href).href)};import {initSync,MidiSynth} from ${JSON.stringify(new URL("../web/pkg/th06.js", location.href).href)};registerMidiProcessor(initSync,MidiSynth);`;
+    const url = URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
+    try { await context.audioWorklet.addModule(url); } finally { URL.revokeObjectURL(url); }
+    await context.audioWorklet.addModule("./midi-meter-worklet.js");
+    const node = new AudioWorkletNode(context, "th06-midi", { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2], processorOptions: { module } });
+    const meter = new AudioWorkletNode(context, "th06-midi-meter", { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] });
+    node.connect(meter); meter.connect(context.destination);
+    meter.port.onmessage = ({ data }) => {
+      samples.push(data);
+      result.textContent = JSON.stringify({ state: context.state, sampleRate: context.sampleRate, errors, samples: samples.slice(-3) }, null, 2);
+      if (data.energy > 0) document.getElementById("stall").disabled = false;
+    };
+    node.onprocessorerror = () => { errors.push("processorerror"); result.textContent = JSON.stringify({ errors }); };
+    node.port.onmessage = ({ data }) => {
+      if (data.type === "error") errors.push(data.message);
+      result.textContent = JSON.stringify(data);
+    };
+    node.port.postMessage({ type: "bank", bytes: new Uint8Array(await bank.arrayBuffer()) });
+    node.port.postMessage({ type: "play", name: track.name, bytes: new Uint8Array(await track.arrayBuffer()) });
+  } catch (error) { errors.push(String(error)); result.textContent = JSON.stringify({ errors }); }
+};
+document.getElementById("stall").onclick = () => {
+  const before = samples.at(-1), start = performance.now();
+  while (performance.now() - start < 2000) { /* Deliberately stall only the UI thread. */ }
+  setTimeout(() => {
+    const after = samples.at(-1), frames = after.frames - before.frames, energy = after.energy - before.energy;
+    document.getElementById("receipt").textContent = JSON.stringify({ sampleRate: context.sampleRate, before, after, framesDuringObservation: frames, pcmEnergyDuringObservation: energy, errors, passed: frames >= context.sampleRate * 1.8 && energy > 0 && errors.length === 0 }, null, 2);
+  }, 100);
+};
+</script>

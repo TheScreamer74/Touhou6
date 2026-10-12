@@ -32,6 +32,7 @@ fn make_world() -> World {
         bomb_active: false,
         bullet_heights: [0.0; 10],
         bullet_widths: [0.0; 10],
+        bullet_templates: Vec::new(),
         effects: Vec::new(),
         eff_scripts: std::collections::HashMap::new(),
         random_item_spawn_index: 0,

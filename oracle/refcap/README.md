@@ -26,6 +26,37 @@ via `WINEDLLOVERRIDES="d3d8=n,b"`). It:
 Same input script → same frame-for-frame run, every time. Calibrate the menu
 navigation once; "stage N at capture frame F" is then stable.
 
+### Read-only replay state comparison
+
+`statefile replay-state.csv` logs the original ReplayManager frame ID, stage,
+player position, stocks, power, score, graze, rank, RNG seed and live projectile/
+item counts and the player hit-particle counter. It reads the size-checked 1.02h layouts and changes no game state.
+`stopafter 6500` terminates this isolated reference process after that Present.
+Use a separate copy of the supplied game and leave `god`, `practice` and
+`forcestage` disabled. With no scripted input, the original title starts its
+bundled `demo00.rpy` automatically. The trace can contain repeated demo sessions;
+the comparison script selects the first.
+
+```sh
+cargo run -p th06 --release -- --game-dir /path/to/game \
+  --replay /path/to/extracted/demo00.rpy --frames 4000 \
+  --replay-dump port-state.csv
+python3 scripts/verify_replay_reference.py replay-state.csv port-state.csv \
+  --output replay-comparison.json
+```
+
+Optional `detailfile bullets.csv` and `effectfile effects.csv` read live pool
+slots during the inclusive `detailstart` / `detailend` frame range. The port's
+`--replay-details bullets.csv` and `--replay-effects effects.csv` expose matching
+debug observations. Callback/sprite fields in the original effect trace are
+raw pointers; resolve them through the original layout/map before comparison.
+
+The one-tick-per-Present description below applies to ordinary gameplay.
+During skippable replay dialogue the original restarts its calculation chain
+until `ReplayManager.frameId % 3 == 2`, performing up to three ticks per Present.
+Compare by replay frame ID. A scalar match verifies the listed observations;
+it does not establish pixel identity, audio identity or every possible route.
+
 ## Use
 
 ```sh

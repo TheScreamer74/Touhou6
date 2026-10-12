@@ -12,7 +12,9 @@ capability was taken from the explicitly pinned source commit
 `b3dec005bcb89b5afe6e0aa41e5251f8a3a31de7`. Node 24.11.0, Ghidra 12.1.4,
 JDK 24.0.1 and WABT 1.0.42 were used. The macOS ARM64 Ghidra native decompiler
 was built from the official archive's included C++ source. No personal MCP
-configuration was changed, and no original Windows target was executed.
+configuration was changed. The original executable was subsequently run in an
+isolated Wine/Xvfb reference environment on the authorized server; see the replay
+comparison below.
 
 The original `102h.exe` supplied with the game has SHA256
 `7f38496b31b8625196900a69cd1bfed243cab1f9612073e7881dc354b876fd39`.
@@ -109,7 +111,8 @@ The downloaded source archive SHA256 is
 `f09629ea2d227bbc9430c03dc51f87e2cc408e6cf6337797f449fcfde225e3cf`.
 Source copying, existing rendering stubs and 64-bit pointer adaptations are
 local to generated build directories. Interpreter formulas and comparison
-tolerances were not rewritten. `Catk.characterShotType` in the engine stub was
+tolerances were not rewritten. The harness-only `utils::Rotate` stub was corrected
+to the original function's handedness before the projectile comparisons. `Catk.characterShotType` in the engine stub was
 corrected to the five-entry array declared by the reference.
 
 The standalone bullet battery compares 139 emitted projectiles over all nine
@@ -139,16 +142,55 @@ divergence under a partial harness, not a complete pass or proof of an ECL bug.
 The report fingerprints both executables, the ECL input and a working-tree
 source manifest whose before/after hashes matched during execution.
 
+## Original executable replay comparison
+
+The supplied, unmodified v1.02h executable runs in an isolated Wine 11.0 WoW64 /
+Xvfb environment on Ubuntu 22.04 x86_64. The Direct3D8 capture proxy reads manager
+state at Present; the reference uses deterministic timing and keyboard hooks,
+with god mode, practice unlocks and forced-stage patches disabled. Audio is
+disabled only in this reference copy's configuration. Original game assets and
+executables stay outside Git and outside the public release.
+
+All 3,720 observations of the original title's bundled Reimu A / Lunatic /
+stage-4 demo match the port: position (0.0002 px tolerance), score, stocks, power,
+graze, rank/subrank, RNG, projectile/item counts and hit-particle counter.
+Comparison uses ReplayManager frame IDs. The capture and CLI also handle
+dialogue calculation-chain restarts. This exposed and corrected missing effect sprite RNG, periodic rank
+phase, viewport-dependent culling and overlapping screen-shake chains. It checks
+these runtime observations for this replay, without claiming all-route Windows
+identity or a pixel/audio comparison.
+[Receipt](replay-reference-2026-10-12.json),
+[reproduction](../oracle/refcap/README.md).
+
+## Player, projectiles and effects
+
+The player attack pool now follows the original 80 slots and all 193 table
+entries. Collision uses inclusive rectangles; Marisa A missile explosions retain
+and weaken their damage, while Marisa B beams persist, pulse and use their actual
+ANM lifetimes. Focus orb transitions, homing, bomb damage, portraits, name bars,
+flash textures and bomb firing locks follow the original functions and resources.
+Five compiled source oracles compare table values, damage, movement, orb states
+and dynamic viewport bounds using exact float bits. See
+[the player harness](../oracle/player/README.md).
+
+Enemy projectiles preserve spawn/fade ANM lifetimes, cached velocity acceleration,
+first-tick timing, original laser state fallthrough and midpoint collision behavior.
+The source oracle compares 864 scenarios over 85 frames (73,440 observations),
+including graze cadence, rank, scoring, cancellation and laser alpha. Thirty
+original-asset spawn/fade combinations also pass. Graze popups, effect sprite RNG
+and screen-shake viewport dependencies are covered separately. See
+[the projectile harness](../oracle/projectiles/README.md).
+
 ## Complete route regression
 
-The final original-asset battery exercised all 96 legal stage/difficulty/shot
+The original-asset battery exercises all 96 legal stage/difficulty/shot
 combinations: stages 1–5 in Easy/Normal/Hard/Lunatic, stage 6 in Normal/Hard/Lunatic,
-and Extra with each of the four shots. An invulnerable automated player reached
-`MSG` termination / `NextStage` in every case. Each recorded T6RP was parsed and
-replayed; 1,482,262 replay frames matched the recorded simulation and draw-command
-hashes (2,964,524 simulation frames total). The hash includes RNG, enemies,
-projectiles, items, score and player death/spawn/invulnerability state. This is an
-internal determinism/coverage test, not comparison to the Windows executable.
+and Extra with each of the four shots. An invulnerable automated player reaches
+`MSG` termination / `NextStage` in every case. Each recorded T6RP is parsed and
+replayed, comparing every simulation and draw-command hash. This is an internal
+determinism/coverage test; it does not compare all 96 routes to Windows. The latest
+run checked 1,375,027 live and 1,375,027 replay frames (2,750,054 combined) in
+141.30 seconds. [Route receipt](routes-2026-10-12.json).
 
 Reproduce with extracted ST/CM/IN data as documented in the ignored test:
 
@@ -159,18 +201,23 @@ TH06_GOD=1 TH06_REFERENCE_DIR=/path/to/extracted-reference \
 
 ## Remaining fidelity limits
 
-| Area | Observed limitation |
+| Area | Scope and remaining limit |
 |---|---|
-| Player shots | Hits use a circular test and remove each shot on first impact; original `Player::CalcDamageToEnemy` uses boxes and retains Marisa A missile explosions with declining damage |
-| Marisa B beams | Collision and damage remain simplified columns |
-| Bullet cancellation | Bomb cancellation removes bullets immediately; the original cancellation/impact fade is not fully reproduced |
-| Graze | Original `ScoreGraze` rank +6, particles and caps are partial; laser graze is counted each frame instead of the original modulo-12 cadence |
-| Replay equivalence | Internal recording/playback determinism is tested; equivalence to Windows replay execution has not been established |
-| Presentation/audio | Noto Sans JP replaces GDI/MS Gothic; MIDI synthesis and 16-bit display mode are unavailable |
+| Replay equivalence | Internal recording/playback is checked on all 96 routes; original executable observations cover the bundled stage-4 replay only |
+| Japanese font | MS Gothic can be supplied separately; the hosted fallback is Noto Sans JP, and rasterization differs from Windows GDI |
+| MIDI timbre | Original MIDI messages and loop timing are supported; the hosted free TimGM6mb bank differs from proprietary Windows MIDI banks |
+| GPU output | Original 16-bit texture/back-buffer precision is implemented; driver-specific edge and conversion rounding can differ on Metal/WebGL2 |
 
-The integration browser check reported by the root task loaded 24 hosted assets
-(about 51 MB, including 17 Ogg tracks), started the game, exercised Options/SFX,
-and imported the original `CM/demo00.rpy`. This checks startup and those flows;
+Actual MIDI, its isolated browser audio thread, original SFX variants, the
+R5G6B5 renderer and their focused checks are documented in
+[presentation fidelity](PRESENTATION_FIDELITY.md). The Windows font/bank files are
+not part of the supplied game archive and are not bundled.
+
+The current browser check loads 25 hosted assets (including the separate MIDI
+bank), starts the game, enables 16-bit rendering and exercises Marisa B shots
+and Master Spark. A saved MIDI setting also starts through AudioWorklet after a
+real reload. The preceding build additionally checked replay import and durable
+score/replay storage. This checks startup and those flows;
 it is not a browser playthrough of every stage/character/difficulty.
 
 These checks do not compare every rendering effect, complete GUI behavior,

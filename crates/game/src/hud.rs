@@ -85,6 +85,7 @@ impl Hud {
                 tint: [1.0, 1.0, 1.0, alpha],
                 rot: 0.0,
                 additive: false,
+                color_add: false,
             });
         }
     }
@@ -121,6 +122,7 @@ impl Hud {
                 tint: [1.0, 1.0, 1.0, r.alpha],
                 rot: r.rotation,
                 additive: false,
+                color_add: false,
             });
         }
     }

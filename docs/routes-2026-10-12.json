@@ -1,0 +1,782 @@
+{
+  "test": "original_assets_all_routes_and_replays_match_every_frame",
+  "comparison": "Rust live versus Rust T6RP encoded/decoded playback with original assets; not Windows executable fidelity",
+  "profile": "release",
+  "god_mode": true,
+  "case_count": 96,
+  "live_frames": 1375027,
+  "replay_frames": 1375027,
+  "combined_frames": 2750054,
+  "elapsed_seconds": 141.3,
+  "log_sha256": "984a1384cb0346d8ddee46b4bd2336d903790a69399658c4d1a77d7f487f412e",
+  "cases": [
+    {
+      "stage": 1,
+      "difficulty": "Easy",
+      "shot": 0,
+      "frames": 8657,
+      "score": 1045740,
+      "replay_identical": true
+    },
+    {
+      "stage": 1,
+      "difficulty": "Easy",
+      "shot": 1,
+      "frames": 8972,
+      "score": 1093200,
+      "replay_identical": true
+    },
+    {
+      "stage": 1,
+      "difficulty": "Easy",
+      "shot": 2,
+      "frames": 8914,
+      "score": 1156270,
+      "replay_identical": true
+    },
+    {
+      "stage": 1,
+      "difficulty": "Easy",
+      "shot": 3,
+      "frames": 8530,
+      "score": 999080,
+      "replay_identical": true
+    },
+    {
+      "stage": 1,
+      "difficulty": "Normal",
+      "shot": 0,
+      "frames": 9219,
+      "score": 1774500,
+      "replay_identical": true
+    },
+    {
+      "stage": 1,
+      "difficulty": "Normal",
+      "shot": 1,
+      "frames": 9630,
+      "score": 1535750,
+      "replay_identical": true
+    },
+    {
+      "stage": 1,
+      "difficulty": "Normal",
+      "shot": 2,
+      "frames": 9346,
+      "score": 2051000,
+      "replay_identical": true
+    },
+    {
+      "stage": 1,
+      "difficulty": "Normal",
+      "shot": 3,
+      "frames": 9108,
+      "score": 1798020,
+      "replay_identical": true
+    },
+    {
+      "stage": 1,
+      "difficulty": "Hard",
+      "shot": 0,
+      "frames": 9271,
+      "score": 3003310,
+      "replay_identical": true
+    },
+    {
+      "stage": 1,
+      "difficulty": "Hard",
+      "shot": 1,
+      "frames": 8862,
+      "score": 3076780,
+      "replay_identical": true
+    },
+    {
+      "stage": 1,
+      "difficulty": "Hard",
+      "shot": 2,
+      "frames": 9399,
+      "score": 3494290,
+      "replay_identical": true
+    },
+    {
+      "stage": 1,
+      "difficulty": "Hard",
+      "shot": 3,
+      "frames": 9060,
+      "score": 2869740,
+      "replay_identical": true
+    },
+    {
+      "stage": 1,
+      "difficulty": "Lunatic",
+      "shot": 0,
+      "frames": 9291,
+      "score": 4164430,
+      "replay_identical": true
+    },
+    {
+      "stage": 1,
+      "difficulty": "Lunatic",
+      "shot": 1,
+      "frames": 9389,
+      "score": 3523780,
+      "replay_identical": true
+    },
+    {
+      "stage": 1,
+      "difficulty": "Lunatic",
+      "shot": 2,
+      "frames": 9373,
+      "score": 4353720,
+      "replay_identical": true
+    },
+    {
+      "stage": 1,
+      "difficulty": "Lunatic",
+      "shot": 3,
+      "frames": 9256,
+      "score": 3964260,
+      "replay_identical": true
+    },
+    {
+      "stage": 2,
+      "difficulty": "Easy",
+      "shot": 0,
+      "frames": 10848,
+      "score": 3830430,
+      "replay_identical": true
+    },
+    {
+      "stage": 2,
+      "difficulty": "Easy",
+      "shot": 1,
+      "frames": 10309,
+      "score": 3503920,
+      "replay_identical": true
+    },
+    {
+      "stage": 2,
+      "difficulty": "Easy",
+      "shot": 2,
+      "frames": 10021,
+      "score": 3498780,
+      "replay_identical": true
+    },
+    {
+      "stage": 2,
+      "difficulty": "Easy",
+      "shot": 3,
+      "frames": 10293,
+      "score": 4185820,
+      "replay_identical": true
+    },
+    {
+      "stage": 2,
+      "difficulty": "Normal",
+      "shot": 0,
+      "frames": 11948,
+      "score": 5587420,
+      "replay_identical": true
+    },
+    {
+      "stage": 2,
+      "difficulty": "Normal",
+      "shot": 1,
+      "frames": 11275,
+      "score": 4406180,
+      "replay_identical": true
+    },
+    {
+      "stage": 2,
+      "difficulty": "Normal",
+      "shot": 2,
+      "frames": 10718,
+      "score": 5182230,
+      "replay_identical": true
+    },
+    {
+      "stage": 2,
+      "difficulty": "Normal",
+      "shot": 3,
+      "frames": 11086,
+      "score": 6399770,
+      "replay_identical": true
+    },
+    {
+      "stage": 2,
+      "difficulty": "Hard",
+      "shot": 0,
+      "frames": 11728,
+      "score": 8030090,
+      "replay_identical": true
+    },
+    {
+      "stage": 2,
+      "difficulty": "Hard",
+      "shot": 1,
+      "frames": 11146,
+      "score": 7518200,
+      "replay_identical": true
+    },
+    {
+      "stage": 2,
+      "difficulty": "Hard",
+      "shot": 2,
+      "frames": 10678,
+      "score": 6855230,
+      "replay_identical": true
+    },
+    {
+      "stage": 2,
+      "difficulty": "Hard",
+      "shot": 3,
+      "frames": 11143,
+      "score": 9077150,
+      "replay_identical": true
+    },
+    {
+      "stage": 2,
+      "difficulty": "Lunatic",
+      "shot": 0,
+      "frames": 11899,
+      "score": 10518290,
+      "replay_identical": true
+    },
+    {
+      "stage": 2,
+      "difficulty": "Lunatic",
+      "shot": 1,
+      "frames": 11146,
+      "score": 12483020,
+      "replay_identical": true
+    },
+    {
+      "stage": 2,
+      "difficulty": "Lunatic",
+      "shot": 2,
+      "frames": 10879,
+      "score": 9799760,
+      "replay_identical": true
+    },
+    {
+      "stage": 2,
+      "difficulty": "Lunatic",
+      "shot": 3,
+      "frames": 11257,
+      "score": 12368330,
+      "replay_identical": true
+    },
+    {
+      "stage": 3,
+      "difficulty": "Easy",
+      "shot": 0,
+      "frames": 13747,
+      "score": 4478480,
+      "replay_identical": true
+    },
+    {
+      "stage": 3,
+      "difficulty": "Easy",
+      "shot": 1,
+      "frames": 12570,
+      "score": 5291300,
+      "replay_identical": true
+    },
+    {
+      "stage": 3,
+      "difficulty": "Easy",
+      "shot": 2,
+      "frames": 12000,
+      "score": 4087430,
+      "replay_identical": true
+    },
+    {
+      "stage": 3,
+      "difficulty": "Easy",
+      "shot": 3,
+      "frames": 12834,
+      "score": 5743100,
+      "replay_identical": true
+    },
+    {
+      "stage": 3,
+      "difficulty": "Normal",
+      "shot": 0,
+      "frames": 14840,
+      "score": 7674480,
+      "replay_identical": true
+    },
+    {
+      "stage": 3,
+      "difficulty": "Normal",
+      "shot": 1,
+      "frames": 13356,
+      "score": 8542590,
+      "replay_identical": true
+    },
+    {
+      "stage": 3,
+      "difficulty": "Normal",
+      "shot": 2,
+      "frames": 12652,
+      "score": 6006600,
+      "replay_identical": true
+    },
+    {
+      "stage": 3,
+      "difficulty": "Normal",
+      "shot": 3,
+      "frames": 13767,
+      "score": 7783380,
+      "replay_identical": true
+    },
+    {
+      "stage": 3,
+      "difficulty": "Hard",
+      "shot": 0,
+      "frames": 15406,
+      "score": 14909930,
+      "replay_identical": true
+    },
+    {
+      "stage": 3,
+      "difficulty": "Hard",
+      "shot": 1,
+      "frames": 13950,
+      "score": 15961390,
+      "replay_identical": true
+    },
+    {
+      "stage": 3,
+      "difficulty": "Hard",
+      "shot": 2,
+      "frames": 13269,
+      "score": 13316230,
+      "replay_identical": true
+    },
+    {
+      "stage": 3,
+      "difficulty": "Hard",
+      "shot": 3,
+      "frames": 14443,
+      "score": 15874090,
+      "replay_identical": true
+    },
+    {
+      "stage": 3,
+      "difficulty": "Lunatic",
+      "shot": 0,
+      "frames": 15360,
+      "score": 21218780,
+      "replay_identical": true
+    },
+    {
+      "stage": 3,
+      "difficulty": "Lunatic",
+      "shot": 1,
+      "frames": 14105,
+      "score": 20924510,
+      "replay_identical": true
+    },
+    {
+      "stage": 3,
+      "difficulty": "Lunatic",
+      "shot": 2,
+      "frames": 13193,
+      "score": 18661770,
+      "replay_identical": true
+    },
+    {
+      "stage": 3,
+      "difficulty": "Lunatic",
+      "shot": 3,
+      "frames": 14463,
+      "score": 22385250,
+      "replay_identical": true
+    },
+    {
+      "stage": 4,
+      "difficulty": "Easy",
+      "shot": 0,
+      "frames": 16313,
+      "score": 6898920,
+      "replay_identical": true
+    },
+    {
+      "stage": 4,
+      "difficulty": "Easy",
+      "shot": 1,
+      "frames": 15452,
+      "score": 6664320,
+      "replay_identical": true
+    },
+    {
+      "stage": 4,
+      "difficulty": "Easy",
+      "shot": 2,
+      "frames": 15064,
+      "score": 8114810,
+      "replay_identical": true
+    },
+    {
+      "stage": 4,
+      "difficulty": "Easy",
+      "shot": 3,
+      "frames": 15578,
+      "score": 7098580,
+      "replay_identical": true
+    },
+    {
+      "stage": 4,
+      "difficulty": "Normal",
+      "shot": 0,
+      "frames": 18352,
+      "score": 12473370,
+      "replay_identical": true
+    },
+    {
+      "stage": 4,
+      "difficulty": "Normal",
+      "shot": 1,
+      "frames": 17250,
+      "score": 13756450,
+      "replay_identical": true
+    },
+    {
+      "stage": 4,
+      "difficulty": "Normal",
+      "shot": 2,
+      "frames": 16480,
+      "score": 13341310,
+      "replay_identical": true
+    },
+    {
+      "stage": 4,
+      "difficulty": "Normal",
+      "shot": 3,
+      "frames": 17432,
+      "score": 13915720,
+      "replay_identical": true
+    },
+    {
+      "stage": 4,
+      "difficulty": "Hard",
+      "shot": 0,
+      "frames": 19482,
+      "score": 20609060,
+      "replay_identical": true
+    },
+    {
+      "stage": 4,
+      "difficulty": "Hard",
+      "shot": 1,
+      "frames": 18310,
+      "score": 20159240,
+      "replay_identical": true
+    },
+    {
+      "stage": 4,
+      "difficulty": "Hard",
+      "shot": 2,
+      "frames": 17540,
+      "score": 23469060,
+      "replay_identical": true
+    },
+    {
+      "stage": 4,
+      "difficulty": "Hard",
+      "shot": 3,
+      "frames": 18403,
+      "score": 20328940,
+      "replay_identical": true
+    },
+    {
+      "stage": 4,
+      "difficulty": "Lunatic",
+      "shot": 0,
+      "frames": 19469,
+      "score": 29391940,
+      "replay_identical": true
+    },
+    {
+      "stage": 4,
+      "difficulty": "Lunatic",
+      "shot": 1,
+      "frames": 18320,
+      "score": 28793970,
+      "replay_identical": true
+    },
+    {
+      "stage": 4,
+      "difficulty": "Lunatic",
+      "shot": 2,
+      "frames": 17477,
+      "score": 29376210,
+      "replay_identical": true
+    },
+    {
+      "stage": 4,
+      "difficulty": "Lunatic",
+      "shot": 3,
+      "frames": 18361,
+      "score": 27778390,
+      "replay_identical": true
+    },
+    {
+      "stage": 5,
+      "difficulty": "Easy",
+      "shot": 0,
+      "frames": 16578,
+      "score": 9449930,
+      "replay_identical": true
+    },
+    {
+      "stage": 5,
+      "difficulty": "Easy",
+      "shot": 1,
+      "frames": 15243,
+      "score": 8533310,
+      "replay_identical": true
+    },
+    {
+      "stage": 5,
+      "difficulty": "Easy",
+      "shot": 2,
+      "frames": 14374,
+      "score": 9220930,
+      "replay_identical": true
+    },
+    {
+      "stage": 5,
+      "difficulty": "Easy",
+      "shot": 3,
+      "frames": 15110,
+      "score": 9180290,
+      "replay_identical": true
+    },
+    {
+      "stage": 5,
+      "difficulty": "Normal",
+      "shot": 0,
+      "frames": 16565,
+      "score": 12107430,
+      "replay_identical": true
+    },
+    {
+      "stage": 5,
+      "difficulty": "Normal",
+      "shot": 1,
+      "frames": 15150,
+      "score": 9805340,
+      "replay_identical": true
+    },
+    {
+      "stage": 5,
+      "difficulty": "Normal",
+      "shot": 2,
+      "frames": 14342,
+      "score": 11071340,
+      "replay_identical": true
+    },
+    {
+      "stage": 5,
+      "difficulty": "Normal",
+      "shot": 3,
+      "frames": 15095,
+      "score": 10498410,
+      "replay_identical": true
+    },
+    {
+      "stage": 5,
+      "difficulty": "Hard",
+      "shot": 0,
+      "frames": 16439,
+      "score": 17325840,
+      "replay_identical": true
+    },
+    {
+      "stage": 5,
+      "difficulty": "Hard",
+      "shot": 1,
+      "frames": 15115,
+      "score": 15541740,
+      "replay_identical": true
+    },
+    {
+      "stage": 5,
+      "difficulty": "Hard",
+      "shot": 2,
+      "frames": 14183,
+      "score": 16019500,
+      "replay_identical": true
+    },
+    {
+      "stage": 5,
+      "difficulty": "Hard",
+      "shot": 3,
+      "frames": 14988,
+      "score": 14849650,
+      "replay_identical": true
+    },
+    {
+      "stage": 5,
+      "difficulty": "Lunatic",
+      "shot": 0,
+      "frames": 16633,
+      "score": 20637760,
+      "replay_identical": true
+    },
+    {
+      "stage": 5,
+      "difficulty": "Lunatic",
+      "shot": 1,
+      "frames": 15092,
+      "score": 17934430,
+      "replay_identical": true
+    },
+    {
+      "stage": 5,
+      "difficulty": "Lunatic",
+      "shot": 2,
+      "frames": 14339,
+      "score": 21349940,
+      "replay_identical": true
+    },
+    {
+      "stage": 5,
+      "difficulty": "Lunatic",
+      "shot": 3,
+      "frames": 15007,
+      "score": 17375580,
+      "replay_identical": true
+    },
+    {
+      "stage": 6,
+      "difficulty": "Normal",
+      "shot": 0,
+      "frames": 16961,
+      "score": 22897820,
+      "replay_identical": true
+    },
+    {
+      "stage": 6,
+      "difficulty": "Normal",
+      "shot": 1,
+      "frames": 14865,
+      "score": 25174920,
+      "replay_identical": true
+    },
+    {
+      "stage": 6,
+      "difficulty": "Normal",
+      "shot": 2,
+      "frames": 12967,
+      "score": 25692270,
+      "replay_identical": true
+    },
+    {
+      "stage": 6,
+      "difficulty": "Normal",
+      "shot": 3,
+      "frames": 14499,
+      "score": 25357970,
+      "replay_identical": true
+    },
+    {
+      "stage": 6,
+      "difficulty": "Hard",
+      "shot": 0,
+      "frames": 17266,
+      "score": 28347680,
+      "replay_identical": true
+    },
+    {
+      "stage": 6,
+      "difficulty": "Hard",
+      "shot": 1,
+      "frames": 14955,
+      "score": 31718510,
+      "replay_identical": true
+    },
+    {
+      "stage": 6,
+      "difficulty": "Hard",
+      "shot": 2,
+      "frames": 13811,
+      "score": 30522410,
+      "replay_identical": true
+    },
+    {
+      "stage": 6,
+      "difficulty": "Hard",
+      "shot": 3,
+      "frames": 14554,
+      "score": 32121550,
+      "replay_identical": true
+    },
+    {
+      "stage": 6,
+      "difficulty": "Lunatic",
+      "shot": 0,
+      "frames": 17103,
+      "score": 43343850,
+      "replay_identical": true
+    },
+    {
+      "stage": 6,
+      "difficulty": "Lunatic",
+      "shot": 1,
+      "frames": 15012,
+      "score": 42043430,
+      "replay_identical": true
+    },
+    {
+      "stage": 6,
+      "difficulty": "Lunatic",
+      "shot": 2,
+      "frames": 13910,
+      "score": 43622290,
+      "replay_identical": true
+    },
+    {
+      "stage": 6,
+      "difficulty": "Lunatic",
+      "shot": 3,
+      "frames": 14857,
+      "score": 44693510,
+      "replay_identical": true
+    },
+    {
+      "stage": 7,
+      "difficulty": "Extra",
+      "shot": 0,
+      "frames": 34731,
+      "score": 110264470,
+      "replay_identical": true
+    },
+    {
+      "stage": 7,
+      "difficulty": "Extra",
+      "shot": 1,
+      "frames": 32020,
+      "score": 110180240,
+      "replay_identical": true
+    },
+    {
+      "stage": 7,
+      "difficulty": "Extra",
+      "shot": 2,
+      "frames": 29885,
+      "score": 112634520,
+      "replay_identical": true
+    },
+    {
+      "stage": 7,
+      "difficulty": "Extra",
+      "shot": 3,
+      "frames": 31489,
+      "score": 116627690,
+      "replay_identical": true
+    }
+  ]
+}

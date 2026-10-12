@@ -49,6 +49,17 @@ recover Rust variable names, resolve every JavaScript association or establish
 Windows gameplay equivalence. Larger artifacts can still exceed the bounded
 budgets.
 
+## Final fidelity build
+
+The final `fidelity-20261012-3ac820702f24` module also passes the repaired REA
+adapter: 9,577,298 input bytes, all 13 sections and 124,898,828 bytes of complete
+WAT, matching independent WABT output byte for byte. Its SHA-256 is
+`3ac820702f24fdeca7dbdf17061f14d00392f10cc525334b42a2ec31aa3f95e6`.
+The generated 12 MiB capacity fixture passes again. The macOS process-ownership
+helper requires the system compiler outside the restricted sandbox; rerunning
+there succeeded without changing the configured REA limits.
+[Final receipt](rea-fidelity-capacity-2026-10-12.json).
+
 ## Ghidra verifier
 
 The snapshot lifecycle verifier required an obsolete sentence in an error

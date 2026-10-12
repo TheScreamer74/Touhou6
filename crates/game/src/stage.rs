@@ -19,6 +19,7 @@ use crate::ecl_vm::{
     BULLET_BASE_SPRITE, Bullet, Enemy, Rng, SpawnReq, World, WorldEvent, normalize_angle,
 };
 use crate::hud::Hud;
+use crate::player_shots::{MARISA_A_RANKS, MARISA_B_RANKS, REIMU_A_RANKS, REIMU_B_RANKS, ShotDef};
 use th06_engine::BgScene;
 
 pub const FIELD_W: f32 = 384.0;
@@ -114,17 +115,18 @@ pub const TEX_FACE_MARISA: usize = 10; // face01a (Marisa player portrait)
 // 11 stg1bg, 12 player01.
 pub const TEX_POWER_GRAD: usize = 13; // 2x1 power-bar gradient
 
-/// Sound effects by SoundIdx (SoundPlayer.cpp g_SFXList order). Indexing this
-/// with the raw idx the ECL/bullet code passes gives the right cue — the
-/// previous ad-hoc map had several wrong (e.g. idx 5 played power1, not tan00).
-pub const SFX_BY_IDX: [&str; 26] = [
-    "plst00", "enep00", "pldead00", "power0", "power1", "tan00", "tan01", "tan02", "ok00",
-    "cancel00", "select00", "gun00", "cat00", "lazer00", "lazer01", "enep01", "nep00", "damage00",
-    "item00", "kira00", "kira01", "kira02", "extend", "timeout", "graze", "powerup",
+/// SoundIdx -> g_SoundBufferIdxVol.bufferIdx -> g_SFXList. The original
+/// has 32 sound variants over 26 WAV buffers; ECL uses variant indices.
+pub const SFX_BY_IDX: [&str; 32] = [
+    "plst00", "plst00", "enep00", "enep00", "pldead00", "power0", "power1", "tan00", "tan01",
+    "tan02", "ok00", "cancel00", "select00", "gun00", "cat00", "tan00", "lazer00", "lazer01",
+    "enep01", "nep00", "damage00", "item00", "tan00", "tan01", "tan02", "kira00", "kira01",
+    "kira02", "extend", "timeout", "graze", "powerup",
 ];
 
 pub enum Event {
     Sfx(&'static str),
+    SfxIdx(u8),
     Bgm(&'static str),
     BgmFade(f32),
     BackToTitle,
@@ -204,26 +206,11 @@ pub struct Carry {
     pub starting_bombs: i32,
 }
 
-#[derive(Clone, Copy)]
-struct SpriteRef {
-    tex: usize,
-    rect: [f32; 4],
-}
-
-const fn spr(tex: usize, x: f32, y: f32, w: f32, h: f32) -> SpriteRef {
-    SpriteRef {
-        tex,
-        rect: [x, y, w, h],
-    }
-}
-
-/// Fallback shot sprite (player00 amulet) when a script can't be resolved.
-const AMULET: SpriteRef = spr(TEX_PLAYER, 129.0, 1.0, 14.0, 14.0);
-/// player00 sprite 66: the focus hitbox marker.
-const HITBOX_MARKER: SpriteRef = spr(TEX_PLAYER, 160.0, 0.0, 16.0, 16.0);
-
 struct Shot {
+    /// Original fixed Player::bullets[80] index: reused from the first free slot.
+    pool_index: usize,
     pos: [f32; 2],
+    size: [f32; 2],
     vel: [f32; 2],
     damage: i32,
     /// BULLET_TYPE_*: 0 straight, 1 homing orb (Reimu A), 2 gravity orb-missile
@@ -233,351 +220,25 @@ struct Shot {
     /// current character's sheet at draw, so each character shows their own
     /// shot sprite from the same id.
     anm_script: i32,
+    runner: AnmRunner,
+    collided: bool,
+    angle: f32,
+    motion: [f32; 2],
+    spawn: u8,
+    laser_slot: usize,
     age: u32,
     /// Current speed magnitude (Player.cpp `unk_134.y`), grown while homing.
     spd: f32,
 }
 
-/// One entry of a power-rank fire table (CharacterPowerBulletData).
-struct ShotDef {
-    /// Fires when `fireTimer % wait == frame` (frames 0..=30).
-    wait: i32,
-    frame: i32,
-    /// Spawn offset from the firing point.
-    motion: [f32; 2],
-    /// Direction in degrees, 0 = right, clockwise (so -90 = straight up).
-    dir_deg: f32,
-    vel: f32,
-    damage: i32,
-    /// 0 = player center, 1 = left orb, 2 = right orb.
-    spawn: u8,
-    /// Bullet type (see Shot::bt).
-    bt: u8,
+#[derive(Clone, Copy, PartialEq)]
+enum OrbState {
+    Hidden,
+    Unfocused,
+    Focusing,
+    Focused,
+    Unfocusing,
 }
-
-/// Reimu A constructor (motion.y = 0; bullet type from the homing flag).
-#[allow(clippy::too_many_arguments)] // Original data-table/function argument layout.
-const fn sd(
-    wait: i32,
-    frame: i32,
-    mx: f32,
-    dir_deg: f32,
-    vel: f32,
-    damage: i32,
-    spawn: u8,
-    homing: bool,
-) -> ShotDef {
-    ShotDef {
-        wait,
-        frame,
-        motion: [mx, 0.0],
-        dir_deg,
-        vel,
-        damage,
-        spawn,
-        bt: homing as u8,
-    }
-}
-
-/// General constructor with explicit motion.y and bullet type.
-#[allow(clippy::too_many_arguments)] // Original data-table/function argument layout.
-const fn sb(
-    wait: i32,
-    frame: i32,
-    mx: f32,
-    my: f32,
-    dir_deg: f32,
-    vel: f32,
-    damage: i32,
-    spawn: u8,
-    bt: u8,
-) -> ShotDef {
-    ShotDef {
-        wait,
-        frame,
-        motion: [mx, my],
-        dir_deg,
-        vel,
-        damage,
-        spawn,
-        bt,
-    }
-}
-
-/// ReimuA shot tiers (g_CharacterPowerDataReimuA in BulletData.cpp). Indexed
-/// by power rank (see `power_rank`).
-const REIMU_A_RANKS: [&[ShotDef]; 9] = [
-    // Rank 1
-    &[sd(5, 0, 0.0, -90.0, 12.0, 48, 0, false)],
-    // Rank 2
-    &[
-        sd(5, 0, 0.0, -90.0, 12.0, 48, 0, false),
-        sd(30, 0, 0.0, -120.0, 10.0, 14, 1, true),
-        sd(30, 0, 0.0, -60.0, 10.0, 14, 2, true),
-    ],
-    // Rank 3
-    &[
-        sd(5, 0, -4.0, -91.0, 12.0, 30, 0, false),
-        sd(5, 0, 4.0, -89.0, 12.0, 30, 0, false),
-        sd(30, 0, 0.0, -120.0, 10.0, 14, 1, true),
-        sd(30, 0, 0.0, -60.0, 10.0, 14, 2, true),
-    ],
-    // Rank 4
-    &[
-        sd(5, 0, 0.0, -96.0, 12.0, 24, 0, false),
-        sd(5, 0, 0.0, -90.0, 12.0, 30, 0, false),
-        sd(5, 0, 0.0, -84.0, 12.0, 24, 0, false),
-        sd(30, 0, 0.0, -120.0, 10.0, 14, 1, true),
-        sd(30, 0, 0.0, -60.0, 10.0, 14, 2, true),
-    ],
-    // Rank 5
-    &[
-        sd(5, 0, 0.0, -97.0, 12.0, 24, 0, false),
-        sd(5, 0, 0.0, -90.0, 12.0, 30, 0, false),
-        sd(5, 0, 0.0, -83.0, 12.0, 24, 0, false),
-        sd(15, 0, 0.0, -120.0, 10.0, 12, 1, true),
-        sd(15, 0, 0.0, -60.0, 10.0, 12, 2, true),
-    ],
-    // Rank 6
-    &[
-        sd(5, 0, 0.0, -97.0, 12.0, 24, 0, false),
-        sd(5, 0, 0.0, -90.0, 12.0, 29, 0, false),
-        sd(5, 0, 0.0, -83.0, 12.0, 24, 0, false),
-        sd(15, 0, 0.0, -120.0, 10.0, 9, 1, true),
-        sd(15, 0, 0.0, -60.0, 10.0, 9, 2, true),
-        sd(30, 0, 0.0, -150.0, 10.0, 12, 1, true),
-        sd(30, 0, 0.0, -30.0, 10.0, 12, 2, true),
-    ],
-    // Rank 7
-    &[
-        sd(5, 0, 0.0, -97.0, 12.0, 24, 0, false),
-        sd(5, 0, 0.0, -90.0, 12.0, 28, 0, false),
-        sd(5, 0, 0.0, -83.0, 12.0, 24, 0, false),
-        sd(30, 0, 0.0, -110.0, 10.0, 10, 1, true),
-        sd(30, 0, 0.0, -70.0, 10.0, 10, 2, true),
-        sd(30, 10, 0.0, -130.0, 10.0, 9, 1, true),
-        sd(30, 10, 0.0, -50.0, 10.0, 9, 2, true),
-        sd(30, 20, 0.0, -150.0, 10.0, 11, 1, true),
-        sd(30, 20, 0.0, -30.0, 10.0, 11, 2, true),
-    ],
-    // Rank 8
-    &[
-        sd(5, 0, 0.0, -97.0, 12.0, 24, 0, false),
-        sd(5, 0, 0.0, -90.0, 12.0, 28, 0, false),
-        sd(5, 0, 0.0, -83.0, 12.0, 24, 0, false),
-        sd(15, 0, 0.0, -110.0, 10.0, 8, 1, true),
-        sd(15, 0, 0.0, -70.0, 10.0, 8, 2, true),
-        sd(15, 5, 0.0, -130.0, 10.0, 8, 1, true),
-        sd(15, 5, 0.0, -50.0, 10.0, 8, 2, true),
-        sd(15, 10, 0.0, -150.0, 10.0, 8, 1, true),
-        sd(15, 10, 0.0, -30.0, 10.0, 8, 2, true),
-    ],
-    // Rank 9
-    &[
-        sd(5, 0, -8.0, -97.0, 12.0, 23, 0, false),
-        sd(5, 0, -8.0, -90.0, 12.0, 24, 0, false),
-        sd(5, 0, 8.0, -90.0, 12.0, 24, 0, false),
-        sd(5, 0, 8.0, -83.0, 12.0, 23, 0, false),
-        sd(16, 0, 0.0, -110.0, 10.0, 10, 1, true),
-        sd(16, 0, 0.0, -70.0, 10.0, 10, 2, true),
-        sd(16, 4, 0.0, -130.0, 10.0, 8, 1, true),
-        sd(16, 4, 0.0, -50.0, 10.0, 8, 2, true),
-        sd(16, 8, 0.0, -150.0, 10.0, 7, 1, true),
-        sd(16, 8, 0.0, -30.0, 10.0, 7, 2, true),
-        sd(16, 12, 0.0, -170.0, 10.0, 10, 1, true),
-        sd(16, 12, 0.0, -10.0, 10.0, 10, 2, true),
-    ],
-];
-
-/// ReimuB shot tiers (g_CharacterPowerDataReimuB). All straight bullets:
-/// a front spread (centre) plus fast needles from the orbs (motion.y -16).
-const REIMU_B_RANKS: [&[ShotDef]; 9] = [
-    // Rank 1
-    &[sd(5, 0, 0.0, -90.0, 12.0, 48, 0, false)],
-    // Rank 2
-    &[
-        sd(5, 0, 0.0, -90.0, 12.0, 48, 0, false),
-        sb(15, 0, 0.0, -16.0, -90.0, 22.0, 12, 1, 0),
-        sb(15, 0, 0.0, -16.0, -90.0, 22.0, 12, 2, 0),
-    ],
-    // Rank 3
-    &[
-        sd(5, 0, -4.0, -91.0, 12.0, 32, 0, false),
-        sd(5, 0, 4.0, -89.0, 12.0, 32, 0, false),
-        sb(10, 0, 0.0, -16.0, -90.0, 22.0, 12, 1, 0),
-        sb(10, 0, 0.0, -16.0, -90.0, 22.0, 12, 2, 0),
-    ],
-    // Rank 4
-    &[
-        sd(5, 0, -4.0, -91.0, 12.0, 30, 0, false),
-        sd(5, 0, 4.0, -89.0, 12.0, 30, 0, false),
-        sb(8, 0, 0.0, -16.0, -90.0, 22.0, 12, 1, 0),
-        sb(8, 0, 0.0, -16.0, -90.0, 22.0, 12, 2, 0),
-    ],
-    // Rank 5
-    &[
-        sd(5, 0, 0.0, -97.0, 12.0, 20, 0, false),
-        sd(5, 0, 0.0, -90.0, 12.0, 28, 0, false),
-        sd(5, 0, 0.0, -83.0, 12.0, 20, 0, false),
-        sb(8, 0, 0.0, -16.0, -90.0, 22.0, 12, 1, 0),
-        sb(8, 0, 0.0, -16.0, -90.0, 22.0, 12, 2, 0),
-    ],
-    // Rank 6
-    &[
-        sd(5, 0, 0.0, -97.0, 12.0, 16, 0, false),
-        sd(5, 0, 0.0, -90.0, 12.0, 27, 0, false),
-        sd(5, 0, 0.0, -83.0, 12.0, 16, 0, false),
-        sb(5, 0, 8.0, -16.0, -90.0, 22.0, 12, 1, 0),
-        sb(5, 0, 8.0, -16.0, -90.0, 22.0, 12, 2, 0),
-        sb(8, 0, -8.0, -16.0, -90.0, 22.0, 10, 1, 0),
-        sb(8, 0, -8.0, -16.0, -90.0, 22.0, 10, 2, 0),
-    ],
-    // Rank 7
-    &[
-        sd(5, 0, 0.0, -98.0, 12.0, 16, 0, false),
-        sd(5, 0, 0.0, -90.0, 12.0, 22, 0, false),
-        sd(5, 0, 0.0, -82.0, 12.0, 16, 0, false),
-        sb(3, 0, 8.0, -16.0, -90.0, 22.0, 10, 1, 0),
-        sb(3, 0, 8.0, -16.0, -90.0, 22.0, 10, 2, 0),
-        sb(5, 0, -8.0, -16.0, -90.0, 22.0, 10, 1, 0),
-        sb(5, 0, -8.0, -16.0, -90.0, 22.0, 10, 2, 0),
-    ],
-    // Rank 8
-    &[
-        sd(5, 0, 0.0, -106.0, 12.0, 9, 0, false),
-        sd(5, 0, 0.0, -98.0, 12.0, 17, 0, false),
-        sd(5, 0, 0.0, -90.0, 12.0, 20, 0, false),
-        sd(5, 0, 0.0, -82.0, 12.0, 17, 0, false),
-        sd(5, 0, 0.0, -74.0, 12.0, 9, 0, false),
-        sb(3, 0, 12.0, -16.0, -90.0, 22.0, 10, 1, 0),
-        sb(3, 0, 12.0, -16.0, -90.0, 22.0, 10, 2, 0),
-        sb(5, 0, -12.0, -16.0, -90.0, 22.0, 10, 1, 0),
-        sb(5, 0, -12.0, -16.0, -90.0, 22.0, 10, 2, 0),
-        sb(10, 0, 0.0, -16.0, -90.0, 22.0, 10, 1, 0),
-        sb(10, 0, 0.0, -16.0, -90.0, 22.0, 10, 2, 0),
-    ],
-    // Rank 9
-    &[
-        sd(5, 0, 0.0, -106.0, 12.0, 9, 0, false),
-        sd(5, 0, 0.0, -98.0, 12.0, 17, 0, false),
-        sd(5, 0, 0.0, -90.0, 12.0, 20, 0, false),
-        sd(5, 0, 0.0, -82.0, 12.0, 17, 0, false),
-        sd(5, 0, 0.0, -74.0, 12.0, 9, 0, false),
-        sb(3, 0, 12.0, -16.0, -90.0, 22.0, 10, 1, 0),
-        sb(3, 0, 12.0, -16.0, -90.0, 22.0, 10, 2, 0),
-        sb(3, 0, -12.0, -16.0, -90.0, 22.0, 10, 1, 0),
-        sb(3, 0, -12.0, -16.0, -90.0, 22.0, 10, 2, 0),
-        sb(5, 0, 0.0, -16.0, -90.0, 22.0, 10, 1, 0),
-        sb(5, 0, 0.0, -16.0, -90.0, 22.0, 10, 2, 0),
-    ],
-];
-
-/// MarisaA shot tiers: a fast front shot (motion.y -8) plus type-2 orb
-/// "missiles" (low speed, gravity-accelerated) fired from the orbs.
-const MARISA_A_RANKS: [&[ShotDef]; 9] = [
-    &[sb(5, 0, 0.0, -8.0, -90.0, 12.0, 48, 0, 0)],
-    &[
-        sb(5, 0, 0.0, -8.0, -90.0, 12.0, 36, 0, 0),
-        sb(30, 0, 0.0, 0.0, -90.0, 3.0, 18, 1, 2),
-        sb(30, 0, 0.0, 0.0, -90.0, 3.0, 18, 2, 2),
-    ],
-    &[
-        sb(5, 0, 0.0, -8.0, -90.0, 12.0, 32, 0, 0),
-        sb(30, 0, 0.0, 0.0, -95.0, 3.0, 16, 1, 2),
-        sb(30, 0, 0.0, 0.0, -85.0, 3.0, 16, 2, 2),
-        sb(30, 15, 0.0, 0.0, -85.0, 3.0, 10, 1, 2),
-        sb(30, 15, 0.0, 0.0, -95.0, 3.0, 10, 2, 2),
-    ],
-    &[
-        sb(5, 0, 0.0, -8.0, -90.0, 12.0, 32, 0, 0),
-        sb(15, 0, 0.0, 0.0, -95.0, 3.0, 15, 1, 2),
-        sb(15, 0, 0.0, 0.0, -85.0, 3.0, 15, 2, 2),
-        sb(15, 15, 0.0, 0.0, -85.0, 3.0, 10, 1, 2),
-        sb(15, 15, 0.0, 0.0, -95.0, 3.0, 10, 2, 2),
-    ],
-    &[
-        sb(5, 0, 0.0, -8.0, -90.0, 12.0, 32, 0, 0),
-        sb(15, 0, 0.0, 0.0, -95.0, 3.0, 16, 1, 2),
-        sb(15, 0, 0.0, 0.0, -85.0, 3.0, 16, 2, 2),
-        sb(15, 20, 0.0, 0.0, -85.0, 3.0, 11, 1, 2),
-        sb(15, 20, 0.0, 0.0, -95.0, 3.0, 11, 2, 2),
-    ],
-    &[
-        sb(5, 0, -8.0, -8.0, -90.0, 12.0, 16, 0, 0),
-        sb(5, 0, 8.0, -8.0, -90.0, 12.0, 16, 0, 0),
-        sb(10, 0, 0.0, 0.0, -95.0, 3.0, 16, 1, 2),
-        sb(10, 0, 0.0, 0.0, -85.0, 3.0, 16, 2, 2),
-        sb(15, 5, 0.0, 0.0, -85.0, 3.0, 10, 1, 2),
-        sb(15, 5, 0.0, 0.0, -95.0, 3.0, 10, 2, 2),
-    ],
-    &[
-        sb(5, 0, -8.0, -8.0, -90.0, 12.0, 13, 0, 0),
-        sb(5, 0, 8.0, -8.0, -90.0, 12.0, 13, 0, 0),
-        sb(10, 0, 0.0, 0.0, -98.0, 3.0, 16, 1, 2),
-        sb(10, 0, 0.0, 0.0, -82.0, 3.0, 16, 2, 2),
-        sb(10, 5, 0.0, 0.0, -82.0, 3.0, 10, 1, 2),
-        sb(10, 5, 0.0, 0.0, -98.0, 3.0, 10, 2, 2),
-    ],
-    &[
-        sb(5, 0, 0.0, 0.0, -94.0, 12.0, 8, 0, 0),
-        sb(5, 0, 0.0, 0.0, -90.0, 12.0, 12, 0, 0),
-        sb(5, 0, 0.0, 0.0, -86.0, 12.0, 8, 0, 0),
-        sb(10, 0, 0.0, 0.0, -98.0, 3.0, 15, 1, 2),
-        sb(10, 0, 0.0, 0.0, -82.0, 3.0, 15, 2, 2),
-        sb(10, 5, 0.0, 0.0, -82.0, 3.0, 10, 1, 2),
-        sb(10, 5, 0.0, 0.0, -98.0, 3.0, 10, 2, 2),
-        sb(15, 0, 0.0, 0.0, -78.0, 3.0, 9, 1, 2),
-        sb(15, 0, 0.0, 0.0, -102.0, 3.0, 9, 2, 2),
-    ],
-    &[
-        sb(5, 0, 0.0, 0.0, -94.0, 12.0, 8, 0, 0),
-        sb(5, 0, 0.0, 0.0, -90.0, 12.0, 12, 0, 0),
-        sb(5, 0, 0.0, 0.0, -86.0, 12.0, 8, 0, 0),
-        sb(10, 0, 0.0, 0.0, -98.0, 3.0, 14, 1, 2),
-        sb(10, 0, 0.0, 0.0, -82.0, 3.0, 14, 2, 2),
-        sb(10, 5, 0.0, 0.0, -82.0, 3.0, 10, 1, 2),
-        sb(10, 5, 0.0, 0.0, -98.0, 3.0, 10, 2, 2),
-        sb(10, 0, 0.0, 0.0, -75.0, 3.0, 10, 1, 2),
-        sb(10, 0, 0.0, 0.0, -105.0, 3.0, 10, 2, 2),
-    ],
-];
-
-/// MarisaB front shots (the orb LASERS are handled separately as vertical
-/// beams; see `marisa_beam_dmg`).
-const MARISA_B_RANKS: [&[ShotDef]; 9] = [
-    &[sb(5, 0, 0.0, -8.0, -90.0, 12.0, 48, 0, 0)],
-    &[sb(5, 0, 0.0, -8.0, -90.0, 12.0, 32, 0, 0)],
-    &[sb(5, 0, 0.0, -8.0, -90.0, 12.0, 32, 0, 0)],
-    &[
-        sb(5, 0, -8.0, -8.0, -92.0, 12.0, 22, 0, 0),
-        sb(5, 0, 8.0, -8.0, -88.0, 12.0, 22, 0, 0),
-    ],
-    &[
-        sb(5, 0, -8.0, -8.0, -92.0, 12.0, 22, 0, 0),
-        sb(5, 0, 8.0, -8.0, -88.0, 12.0, 22, 0, 0),
-    ],
-    &[
-        sb(5, 0, -8.0, -8.0, -92.0, 12.0, 20, 0, 0),
-        sb(5, 0, 8.0, -8.0, -88.0, 12.0, 20, 0, 0),
-    ],
-    &[
-        sb(5, 0, 0.0, 0.0, -95.0, 12.0, 15, 0, 0),
-        sb(5, 0, 0.0, 0.0, -90.0, 12.0, 20, 0, 0),
-        sb(5, 0, 0.0, 0.0, -85.0, 12.0, 15, 0, 0),
-    ],
-    &[
-        sb(5, 0, 0.0, 0.0, -95.0, 12.0, 15, 0, 0),
-        sb(5, 0, 0.0, 0.0, -90.0, 12.0, 20, 0, 0),
-        sb(5, 0, 0.0, 0.0, -85.0, 12.0, 15, 0, 0),
-    ],
-    &[
-        sb(5, 0, 0.0, 0.0, -100.0, 12.0, 12, 0, 0),
-        sb(5, 0, 0.0, 0.0, -95.0, 12.0, 15, 0, 0),
-        sb(5, 0, 0.0, 0.0, -90.0, 12.0, 20, 0, 0),
-        sb(5, 0, 0.0, 0.0, -85.0, 12.0, 15, 0, 0),
-        sb(5, 0, 0.0, 0.0, -80.0, 12.0, 12, 0, 0),
-    ],
-];
 
 /// Player character + shot type.
 #[derive(Clone, Copy, PartialEq)]
@@ -609,35 +270,6 @@ impl Character {
             Character::MarisaB => &MARISA_B_RANKS,
         }
     }
-
-    /// Sprite look for a shot of bullet type `bt`: 0 amulet, 1 needle, 2 missile.
-    /// Player-anm script id for a shot (BulletData anmScriptIdx). Straight
-    /// shots are ANM_SCRIPT_PLAYER_BULLET (64) for everyone; orb/special shots
-    /// differ per character. Resolved against each character's own sheet, so
-    /// the same id yields Reimu's amulet vs Marisa's star automatically.
-    fn shot_anm_script(self, bt: u8) -> i32 {
-        match (self, bt) {
-            (_, 0) => 64,                  // ANM_SCRIPT_PLAYER_BULLET (straight)
-            (Character::ReimuA, _) => 65,  // REIMU_A_ORB_BULLET
-            (Character::ReimuB, _) => 66,  // REIMU_B_ORB_BULLET
-            (Character::MarisaA, _) => 65, // MARISA_A_ORB_BULLET_1
-            (Character::MarisaB, _) => 69, // MARISA_B_ORB_LASER_1
-        }
-    }
-
-    /// Per-frame damage of each MarisaB orb laser at the given power (0 = no
-    /// beams). Beams appear from rank 2 (power >= 8).
-    fn marisa_beam_dmg(self, power: i32) -> i32 {
-        if self != Character::MarisaB || power < 8 {
-            return 0;
-        }
-        match power_rank(power) {
-            0..=4 => 3,
-            5..=6 => 4,
-            7 => 5,
-            _ => 6,
-        }
-    }
 }
 
 /// Power thresholds shared by all shot types (CharacterPowerData.power).
@@ -661,6 +293,31 @@ fn power_rank(power: i32) -> usize {
 struct BombRect {
     pos: [f32; 2],
     size: [f32; 2],
+}
+
+/// Independent ScreenEffect chain; equal-priority chains keep registration order.
+struct ScreenShake {
+    timer: i32,
+    length: i32,
+    start: f32,
+    end: f32,
+}
+
+/// Preserve CalcDamageToEnemy's corner arithmetic and inclusive edge tests.
+fn player_shot_in_bounds(pos: [f32; 2], size: [f32; 2], region: [f32; 2]) -> bool {
+    // GameManager::IsInBounds uses ordered rejection tests, so NaN positions
+    // remain alive until their ANM ends, as in the original homing code.
+    !(size[0] / 2.0 + pos[0] < 0.0
+        || pos[0] - size[0] / 2.0 > region[0]
+        || size[1] / 2.0 + pos[1] < 0.0
+        || pos[1] - size[1] / 2.0 > region[1])
+}
+
+fn attack_rect_overlap(a: [f32; 2], a_size: [f32; 2], b: [f32; 2], b_size: [f32; 2]) -> bool {
+    !(a[1] - a_size[1] / 2.0 > b[1] + b_size[1] / 2.0
+        || a[0] - a_size[0] / 2.0 > b[0] + b_size[0] / 2.0
+        || a[1] + a_size[1] / 2.0 < b[1] - b_size[1] / 2.0
+        || a[0] + a_size[0] / 2.0 < b[0] - b_size[0] / 2.0)
 }
 
 /// Falling collectible (ItemManager port). `kind` matches ItemType:
@@ -724,16 +381,6 @@ impl Item {
             target,
         }
     }
-}
-
-/// A short-lived visual puff (enemy death, item pickup, bullet cancel).
-struct Particle {
-    pos: [f32; 2],
-    vel: [f32; 2],
-    life: f32,
-    max_life: f32,
-    size: f32,
-    color: [f32; 3],
 }
 
 /// Spell card names in English, indexed by the ECL spell id (op93). Only
@@ -972,9 +619,10 @@ fn sprite_cmd_from(
         tex: script.tex,
         dst: [cx - w / 2.0, cy - h / 2.0, w, h],
         src: [u0, v0, u1, v1],
-        tint: [1.0, 1.0, 1.0, anim.alpha],
+        tint: [anim.color[0], anim.color[1], anim.color[2], anim.alpha],
         rot,
         additive,
+        color_add: anim.color_add,
     })
 }
 
@@ -996,6 +644,14 @@ pub fn build_enemy_scripts(entries: &[(&Entry, usize)]) -> HashMap<i32, ScriptRe
         }
     }
     out
+}
+
+struct BombBanner {
+    name_script: Vec<AnmInstr>,
+    portrait_script: Vec<AnmInstr>,
+    textures: [(usize, usize); 4],
+    name: Option<AnmRunner>,
+    portrait: Option<AnmRunner>,
 }
 
 pub struct Stage {
@@ -1025,8 +681,10 @@ pub struct Stage {
     character: Character,
     /// Texture slot for the player body sprite (player00 Reimu / player01 Marisa).
     player_tex: usize,
-    /// Per-frame damage of each MarisaB orb beam this frame (0 = no beams).
-    beam_dmg: i32,
+    /// Player::laserTimer (only slots 0 and 1 are used by the data tables).
+    laser_timers: [i32; 2],
+    /// Shared laser/bomb hit-particle cadence, Player::particleTimer.
+    player_particle_timer: u8,
     /// Active bomb kind: 0 Fantasy Seal, 1 Dream cross, 2 Stardust, 3 Master Spark.
     bomb_kind: u8,
     /// player00.anm: sprites + scripts, for the banking/idle animation.
@@ -1037,8 +695,11 @@ pub struct Stage {
     player_script_id: i32,
     /// Previous horizontal speed sign, to detect banking transitions.
     prev_hspeed: f32,
-    /// Focus blend 0..1 for the orb slide-in/out animation.
-    focus_anim: f32,
+    orb_state: OrbState,
+    orb_timer: u32,
+    orb_offsets: [f32; 2],
+    orbs_pos: [[f32; 2]; 2],
+    orb_runners: [AnmRunner; 2],
     pos: [f32; 2],
     lives: i32,
     bombs: i32,
@@ -1073,14 +734,10 @@ pub struct Stage {
     bomb_region_dmg: [i32; 32],
     /// ScreenEffect SHAKE (ScreenEffect.cpp). `arcade` is the current
     /// arcadeRegion [topLeftX, topLeftY, sizeW, sizeH]; baseline 32/16/384/448.
-    /// Recomputed each frame by `update_shake`, which — while a shake is active —
-    /// consumes two RNG draws (x, y) exactly like `ScreenEffect::ShakeScreen`.
+    /// Each registered shake consumes two u32 RNG draws (x, y) per active tick.
+    /// Overlapping Fantasy Seal explosions retain separate ScreenEffect chains.
     arcade: [f32; 4],
-    shake_active: bool,
-    shake_timer: i32,
-    shake_len: i32,
-    shake_p1: f32,
-    shake_p2: f32,
+    shakes: Vec<ScreenShake>,
     /// spellcardInfo.usedBomb: a bomb was fired while a spellcard was active.
     spell_used_bomb: bool,
     /// Bomb sprite anm runners (PlayerBombInfo.sprites[8][4], flattened to 32),
@@ -1118,10 +775,7 @@ pub struct Stage {
     shots: Vec<Shot>,
     items: Vec<Item>,
     next_item_index: usize,
-    particles: Vec<Particle>,
-    /// Cosmetic-only RNG for visual particle bursts (`spawn_burst`), kept
-    /// separate from the gameplay `world.rng` so effects never desync it (#26).
-    fx_rng: Rng,
+    score_popups: crate::score_popups::ScorePopups,
     score: i64,
     /// Displayed score, rolled toward `score` each frame (Gui guiScore).
     gui_score: i64,
@@ -1160,6 +814,8 @@ pub struct Stage {
     /// card's entry while its announce runs.
     spell_name_tex: HashMap<i32, (usize, f32, f32)>,
     spell_name_cur: Option<(usize, f32, f32)>,
+    spell_name_byte_len: usize,
+    bomb_banner: Option<BombBanner>,
     /// Pre-baked JP dialogue-line textures by TEXTDIALOGUE offset.
     dialogue_tex: HashMap<u32, (usize, f32, f32)>,
     /// Stage-name intro (text.anm script 0): pre-baked JP texture + live runner.
@@ -1185,7 +841,7 @@ pub struct Stage {
     /// 1-based stage number + the cumulative graze at stage start, for the
     /// clear bonus (Gui currentStage / grazeInStage).
     stage_num: i32,
-    graze_start: i64,
+    graze_in_stage: i64,
     msg: Msg,
     dialogue: Dialogue,
     background: Option<Background>,
@@ -1217,6 +873,48 @@ impl Stage {
         self.extra_boss_portrait = Some(asset);
     }
 
+    pub fn configure_bomb_banner(&mut self, text: &Entry, textures: [(usize, usize); 4]) {
+        self.bomb_banner = Some(BombBanner {
+            name_script: text
+                .scripts
+                .iter()
+                .find(|(id, _)| *id == 6)
+                .map(|(_, script)| script.clone())
+                .unwrap_or_default(),
+            portrait_script: self
+                .player_portraits
+                .first()
+                .and_then(|asset| asset.entry.scripts.iter().find(|(id, _)| *id == 1))
+                .map(|(_, script)| script.clone())
+                .unwrap_or_default(),
+            textures,
+            name: None,
+            portrait: None,
+        });
+    }
+
+    fn show_bomb_banner(&mut self) {
+        if let Some(banner) = &mut self.bomb_banner {
+            banner.name = Some(AnmRunner::new(banner.name_script.clone()));
+            let mut portrait = AnmRunner::new(banner.portrait_script.clone());
+            portrait.set_sprite(if matches!(self.bomb_kind, 0 | 3) {
+                1
+            } else {
+                3
+            });
+            banner.portrait = Some(portrait);
+        }
+        self.events.push(Event::Sfx("cat00"));
+    }
+
+    fn end_bomb_banner(&mut self) {
+        if let Some(banner) = &mut self.bomb_banner
+            && let Some(runner) = &mut banner.name
+        {
+            runner.interrupt(1);
+        }
+    }
+
     /// ReplayManager records dialogue frames as well as combat. Entering or
     /// leaving the pause menu consumes no simulation/input-recording frame.
     pub fn replay_frame_active(&self, input: &Input) -> bool {
@@ -1226,6 +924,10 @@ impl Stage {
                     self.state,
                     PlayerState::Alive | PlayerState::Dead(_) | PlayerState::Spawning(_)
                 ))
+    }
+
+    pub fn replay_accelerates_dialogue(&self) -> bool {
+        !self.paused && self.dialogue.active && self.dialogue.skippable
     }
 
     fn portrait_sprite(&self, index: u32) -> Option<(&PortraitAsset, &Sprite)> {
@@ -1245,6 +947,61 @@ impl Stage {
             }
         }
         None
+    }
+
+    /// Gui::DrawGameScene places the unscaled bar independently of the text
+    /// sprite's entrance scale. The names occupy fixed 256×16 ANM sprites.
+    fn draw_spell_banner(
+        &self,
+        runner: &AnmRunner,
+        tex: usize,
+        byte_len: usize,
+        bomb: bool,
+        cmds: &mut Vec<DrawCmd>,
+    ) {
+        if !runner.visible() {
+            return;
+        }
+        let x = runner.pos[0] + runner.pos_offset[0];
+        let y = runner.pos[1] + runner.pos_offset[1];
+        let len = byte_len as f32 * 15.0 / 2.0 + 16.0;
+        if let Some(([sx, sy, sw, sh], _, scale, alpha)) =
+            self.hud.script_state(if bomb { 23 } else { 24 })
+        {
+            let bar_x = x + if bomb {
+                len * 16.0 / 15.0 / 2.0 - 144.0
+            } else {
+                128.0 - len * 16.0 / 15.0 / 2.0
+            };
+            let width = sw * len / 14.0;
+            let height = sh * scale[1];
+            let ts = self.hud.tex_size();
+            cmds.push(DrawCmd {
+                tex: self.hud.tex(),
+                dst: [bar_x - width / 2.0, y - height / 2.0, width, height],
+                src: [sx / ts, sy / ts, (sx + sw) / ts, (sy + sh) / ts],
+                tint: [1.0, 1.0, 1.0, alpha],
+                rot: 0.0,
+                additive: false,
+                color_add: false,
+            });
+        }
+        let w = 256.0 * runner.scale[0];
+        let h = 16.0 * runner.scale[1];
+        cmds.push(DrawCmd {
+            tex,
+            dst: [x - w / 2.0, y - h / 2.0, w, h],
+            src: [0.0, 0.0, 1.0, 1.0],
+            tint: [
+                runner.color[0],
+                runner.color[1],
+                runner.color[2],
+                runner.alpha,
+            ],
+            rot: 0.0,
+            additive: runner.additive,
+            color_add: false,
+        });
     }
 
     fn draw_portrait(&self, runner: &AnmRunner, cmds: &mut Vec<DrawCmd>) {
@@ -1290,6 +1047,7 @@ impl Stage {
             ],
             rot: 0.0,
             additive: runner.additive,
+            color_add: false,
         });
     }
 
@@ -1336,6 +1094,7 @@ impl Stage {
                 tint,
                 rot: 0.0,
                 additive: false,
+                color_add: false,
             });
         } else {
             draw_text(cmds, pos, 16.0, tint, text);
@@ -1395,7 +1154,8 @@ impl Stage {
         let mut bullet_heights = [0.0f32; 10];
         let mut bullet_widths = [0.0f32; 10];
         for (t, &base) in BULLET_BASE_SPRITE.iter().enumerate() {
-            if let Some(sp) = etama.sprites.iter().find(|s| s.index == base) {
+            let sprites = if t == 9 { &eff.sprites } else { &etama.sprites };
+            if let Some(sp) = sprites.iter().find(|s| s.index == base) {
                 bullet_heights[t] = sp.height;
                 bullet_widths[t] = sp.width;
             }
@@ -1452,6 +1212,7 @@ impl Stage {
                 spellcard_active: 0,
                 bullet_heights,
                 bullet_widths,
+                bullet_templates: crate::projectiles::BulletVisuals::templates(etama, eff),
                 effects: Vec::new(),
                 next_effect_index: 0,
                 eff_scripts,
@@ -1472,7 +1233,8 @@ impl Stage {
             bullet_autorotate,
             character,
             player_tex,
-            beam_dmg: 0,
+            laser_timers: [0; 2],
+            player_particle_timer: 0,
             bomb_kind: 0,
             player_sprites: player
                 .sprites
@@ -1481,10 +1243,17 @@ impl Stage {
                 .collect(),
             player_tex_size: [player.width as f32, player.height as f32],
             player_runner: AnmRunner::new(idle),
+            orb_runners: [
+                AnmRunner::new(player_scripts.get(&128).cloned().unwrap_or_default()),
+                AnmRunner::new(player_scripts.get(&129).cloned().unwrap_or_default()),
+            ],
             player_scripts,
             player_script_id: 0,
             prev_hspeed: 0.0,
-            focus_anim: 0.0,
+            orb_state: OrbState::Hidden,
+            orb_timer: 0,
+            orb_offsets: [0.0; 2],
+            orbs_pos: [[0.0; 2]; 2],
             pos: [FIELD_W / 2.0, FIELD_H - 64.0],
             lives: starting_lives,
             bombs: starting_bombs,
@@ -1504,11 +1273,7 @@ impl Stage {
             bomb_regions: [BombRect::default(); 32],
             bomb_region_dmg: [0; 32],
             arcade: [FIELD_X, FIELD_Y, FIELD_W, FIELD_H],
-            shake_active: false,
-            shake_timer: 0,
-            shake_len: 0,
-            shake_p1: 0.0,
-            shake_p2: 0.0,
+            shakes: Vec::new(),
             spell_used_bomb: false,
             bomb_sprites: (0..32).map(|_| None).collect(),
             fire_timer: -1,
@@ -1537,8 +1302,7 @@ impl Stage {
             shots: Vec::new(),
             items: Vec::new(),
             next_item_index: 0,
-            particles: Vec::new(),
-            fx_rng: Rng::new(0x4321),
+            score_popups: crate::score_popups::ScorePopups::default(),
             score: 0,
             gui_score: 0,
             next_score_inc: 0,
@@ -1559,6 +1323,8 @@ impl Stage {
             spell_name: String::new(),
             spell_name_tex,
             spell_name_cur: None,
+            spell_name_byte_len: 0,
+            bomb_banner: None,
             dialogue_tex,
             stage_name_tex,
             // Start the stage-name intro immediately (Gui shows it at stage init).
@@ -1585,7 +1351,7 @@ impl Stage {
             stage_bgm: cfg.stage_bgm,
             boss_bgm: cfg.boss_bgm,
             stage_num: cfg.stage_num,
-            graze_start: 0,
+            graze_in_stage: 0,
             msg,
             dialogue: Dialogue::default(),
             background,
@@ -1626,8 +1392,8 @@ impl Stage {
         self.next_score_inc = 0;
         self.graze = c.graze;
         self.power_item_count = c.power_item_count;
-        // grazeInStage counts from the stage start (Gui clear bonus).
-        self.graze_start = c.graze;
+        // grazeInStage is an independent counter with its own 9999 cap.
+        self.graze_in_stage = 0;
         self.world.rank = c.rank;
         // GameManager_AddedCallback preserves rank/RNG, resets subRank per stage.
         self.world.sub_rank = 0;
@@ -1733,7 +1499,7 @@ impl Stage {
         self.next_score_inc = 0;
         self.lives = self.starting_lives;
         self.bombs = self.starting_bombs;
-        self.graze_start = self.graze;
+        self.graze_in_stage = 0;
         self.point_items = 0;
         self.world.power = 0;
         self.next_extend = 0;
@@ -1777,6 +1543,67 @@ impl Stage {
     /// Player centre [x, y] in field coords — for the headless dodging auto-player.
     pub fn player_pos(&self) -> [f32; 2] {
         self.pos
+    }
+
+    /// Scalar state for comparison with the unmodified 1.02h executable.
+    pub fn reference_state(&self) -> String {
+        format!(
+            "{},{:.6},{:.6},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+            self.stage_num,
+            self.pos[0],
+            self.pos[1],
+            self.lives,
+            self.bombs,
+            self.world.power,
+            self.score,
+            self.graze_in_stage,
+            self.graze,
+            self.world.rank,
+            self.world.sub_rank,
+            self.world.rng.seed(),
+            self.world.bullets.len(),
+            self.world.lasers.len(),
+            self.items.len(),
+            self.player_particle_timer
+        )
+    }
+
+    pub fn reference_bullets(&self, frame: i32) -> String {
+        use std::fmt::Write;
+        let mut out = String::new();
+        for b in &self.world.bullets {
+            let state = if b.despawn_timer > 0 {
+                5
+            } else if b.spawn_delay > 0 {
+                if b.ex_flags & 2 != 0 {
+                    2
+                } else if b.ex_flags & 4 != 0 {
+                    3
+                } else {
+                    4
+                }
+            } else {
+                1
+            };
+            writeln!(
+                out,
+                "{frame},{},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{state},{}",
+                b.pool_index,
+                b.pos[0],
+                b.pos[1],
+                b.angle,
+                b.speed,
+                b.velocity[0],
+                b.velocity[1],
+                b.timer
+            )
+            .unwrap();
+        }
+        out
+    }
+
+    pub fn reference_effects(&self, frame: i32) -> String {
+        self.world.reference_effects(frame)
     }
 
     /// Remaining bombs — the auto-player bombs to escape when cornered.
@@ -1854,6 +1681,7 @@ impl Stage {
             return self.draw();
         }
 
+        self.score_popups.tick();
         self.tick += 1;
         self.anim += 1;
         if !self.world.time_stopped {
@@ -1882,6 +1710,16 @@ impl Stage {
         }
         self.spell_bonus_timer = self.spell_bonus_timer.saturating_sub(1);
         self.bonus_score_timer = self.bonus_score_timer.saturating_sub(1);
+        if let Some(banner) = &mut self.bomb_banner {
+            for runner in [&mut banner.name, &mut banner.portrait] {
+                if let Some(vm) = runner {
+                    vm.tick();
+                    if !vm.visible() {
+                        *runner = None;
+                    }
+                }
+            }
+        }
         if let Some(r) = &mut self.spell_name_runner {
             r.tick();
             if !r.visible() {
@@ -1934,10 +1772,6 @@ impl Stage {
             self.update_items();
         }
         self.update_bullets();
-        self.update_particles();
-        if !self.world.time_stopped {
-            self.collide_bullets();
-        }
         self.drain_world_events();
         // Gui's MSG interpreter runs after enemy/bullet/item update. An
         // ECLRESUME therefore releases the next frame's timeline MSGWAIT.
@@ -1954,7 +1788,7 @@ impl Stage {
         {
             let bonus = stage_clear_bonus(
                 self.stage_num,
-                (self.graze - self.graze_start).max(0),
+                self.graze_in_stage,
                 self.world.power as i64,
                 self.point_items,
                 self.lives.max(0) as i64,
@@ -2091,15 +1925,14 @@ impl Stage {
     fn run_timeline(&mut self) {
         // Survival subrank tick (EnemyManager.cpp:161-172): every
         // (2400 - lives*240) frames of timeline time, +100 subrank (= +1 rank).
-        // Gated on no-dialogue like the decomp (run_timeline is only called when
-        // the dialogue is inactive). Fires at timeline_time 0, then each interval.
-        // The decomp checks timelineTime AFTER it has ticked for this frame (the
-        // Tick is at the end of EnemyManager::OnUpdate, the check near the start of
-        // the next), so it fires at timelineTime = interval, 2*interval, ...; the
-        // port's `timeline_time` here is one behind (incremented at the end of
-        // run_timeline), so use `+ 1` to fire on the same frame as the oracle.
+        // The zeroed original timer has not ticked at stage entry. Subsequent
+        // checks observe the current timeline time before this callback's Tick.
         let interval = 2400 - self.lives * 240;
-        if !self.dialogue.active && interval > 0 && (self.timeline_time + 1) % interval == 0 {
+        if !self.dialogue.active
+            && interval > 0
+            && self.timeline_time > 0
+            && self.timeline_time % interval == 0
+        {
             self.world.increase_subrank(100);
         }
         loop {
@@ -2119,6 +1952,7 @@ impl Stage {
             }
             let t = {
                 let Some(raw) = self.ecl.timeline_at(self.timeline_off) else {
+                    self.timeline_time += 1;
                     return;
                 };
                 let has_full = raw.args.len() >= 20;
@@ -2148,6 +1982,7 @@ impl Stage {
                 }
             };
             if t.time < 0 {
+                self.timeline_time += 1;
                 return;
             }
             if self.timeline_time < t.time {
@@ -2312,7 +2147,7 @@ impl Stage {
                     .map(|sp| (sp.width, sp.height))
                     .unwrap_or((0.0, 0.0))
             };
-            if !self.enemies[i].update_bounds(sw, sh) {
+            if !self.enemies[i].update_bounds(sw, sh, [self.arcade[2], self.arcade[3]]) {
                 self.enemies[i].despawn(&mut self.world);
                 i += 1;
                 continue;
@@ -2415,27 +2250,31 @@ impl Stage {
         };
         // MarisaB's Master Spark slows the player to 0.3 while bombing
         // (verticalMovementSpeedMultiplierDuringBomb); other bombs leave it 1.0.
-        let speed = if focus { focus_speed } else { ortho } * self.bomb_move_mult;
-        let mut d = [0.0f32, 0.0f32];
-        if input.held(Key::Left) {
-            d[0] -= 1.0;
-        }
-        if input.held(Key::Right) {
-            d[0] += 1.0;
-        }
-        if input.held(Key::Up) {
-            d[1] -= 1.0;
-        }
-        if input.held(Key::Down) {
-            d[1] += 1.0;
-        }
+        let mut speed = if focus { focus_speed } else { ortho };
+        // HandlePlayerInputs resolves opposing directions with Up and Right
+        // taking precedence, including the diagonal cases.
+        let d = [
+            if input.held(Key::Right) {
+                1.0
+            } else if input.held(Key::Left) {
+                -1.0
+            } else {
+                0.0
+            },
+            if input.held(Key::Up) {
+                -1.0
+            } else if input.held(Key::Down) {
+                1.0
+            } else {
+                0.0
+            },
+        ];
         if d[0] != 0.0 && d[1] != 0.0 {
-            let inv = 1.0 / 2.0f32.sqrt();
-            d[0] *= inv;
-            d[1] *= inv;
+            speed /= 2.0f32.sqrt();
         }
-        self.pos[0] = (self.pos[0] + d[0] * speed).clamp(8.0, FIELD_W - 8.0);
-        self.pos[1] = (self.pos[1] + d[1] * speed).clamp(16.0, FIELD_H - 16.0);
+        self.pos[0] = (self.pos[0] + d[0] * speed * self.bomb_move_mult).clamp(8.0, FIELD_W - 8.0);
+        self.pos[1] =
+            (self.pos[1] + d[1] * speed * self.bomb_move_mult).clamp(16.0, FIELD_H - 16.0);
 
         // Banking animation (HandlePlayerInputs): switch player ANM script on
         // the horizontal-speed sign transitions. Stopping scripts loop back
@@ -2454,40 +2293,100 @@ impl Stage {
         }
         self.prev_hspeed = hspeed;
 
-        // Orb slide blend toward focused (1) / unfocused (0) over 8 frames.
-        let target = if focus { 1.0 } else { 0.0 };
-        self.focus_anim += (target - self.focus_anim).clamp(-0.125, 0.125);
+        self.update_orbs(focus);
+    }
+
+    /// HandlePlayerInputs' five-state orb transition. Horizontal movement uses
+    /// squared easing; reversing focus also executes the opposite branch in
+    /// this callback, including its extra timer increment.
+    fn update_orbs(&mut self, focus: bool) {
+        if self.world.power < 8 {
+            self.orb_state = OrbState::Hidden;
+        } else if self.orb_state == OrbState::Hidden {
+            self.orb_state = OrbState::Unfocused;
+        }
+        self.orb_offsets = [0.0; 2];
+        match self.orb_state {
+            OrbState::Hidden => self.orb_timer = 0,
+            OrbState::Unfocused => {
+                self.orb_timer = 0;
+                self.orb_offsets = [24.0, 0.0];
+                if focus {
+                    self.orb_state = OrbState::Focusing;
+                    self.step_orb_transition(focus);
+                }
+            }
+            OrbState::Focused => {
+                self.orb_timer = 0;
+                self.orb_offsets = [8.0, -32.0];
+                if !focus {
+                    self.orb_state = OrbState::Unfocusing;
+                    self.step_orb_transition(focus);
+                }
+            }
+            OrbState::Focusing | OrbState::Unfocusing => self.step_orb_transition(focus),
+        }
+        let [horizontal, vertical] = self.orb_offsets;
+        self.orbs_pos = [
+            [self.pos[0] - horizontal, self.pos[1] + vertical],
+            [self.pos[0] + horizontal, self.pos[1] + vertical],
+        ];
+    }
+
+    fn step_orb_transition(&mut self, focus: bool) {
+        loop {
+            self.orb_timer += 1;
+            let mut fraction = self.orb_timer as f32 / 8.0;
+            let focusing = self.orb_state == OrbState::Focusing;
+            let y = if focusing {
+                (1.0 - fraction) * 32.0 - 32.0
+            } else {
+                32.0 * fraction - 32.0
+            };
+            fraction *= fraction;
+            if !focusing {
+                fraction = 1.0 - fraction;
+            }
+            self.orb_offsets = [-16.0 * fraction + 24.0, y];
+            if self.orb_timer >= 8 {
+                self.orb_state = if focusing {
+                    OrbState::Focused
+                } else {
+                    OrbState::Unfocused
+                };
+            }
+            if focusing == focus {
+                break;
+            }
+            self.orb_state = if focus {
+                OrbState::Focusing
+            } else {
+                OrbState::Unfocusing
+            };
+            self.orb_timer = 8 - self.orb_timer;
+        }
     }
 
     fn update_player_fire(&mut self, input: &Input) {
         // Shooting and bombing are disabled during dialogue (Player.cpp gates
         // both on !HasCurrentMsgIdx), but the player can still move and dodge.
-        let can_act = !self.dialogue.active;
+        let can_act = !self.dialogue.active && matches!(self.state, PlayerState::Alive);
 
         // Player.cpp StartFireBulletTimer / UpdateFireBulletsTimer: holding
         // Shoot (re)starts the idle fire timer, which then counts 0..=29 and
         // spawns the matching table entries each frame before resetting.
-        if can_act {
-            if input.held(Key::Shoot) && self.fire_timer < 0 {
-                self.fire_timer = 0;
-            }
-            if self.fire_timer >= 0 {
-                self.spawn_player_bullets(self.fire_timer);
-                self.fire_timer += 1;
-                if self.fire_timer >= 30 {
-                    self.fire_timer = -1;
-                }
-            }
-        } else {
-            self.fire_timer = -1;
+        if can_act && input.held(Key::Shoot) && self.fire_timer < 0 {
+            self.fire_timer = 0;
         }
-
-        // MarisaB orb beams: two vertical lasers while shooting at power >= 8.
-        self.beam_dmg = if can_act && input.held(Key::Shoot) {
-            self.character.marisa_beam_dmg(self.world.power)
-        } else {
-            0
-        };
+        if self.fire_timer >= 0 {
+            if !self.bomb_in_use || self.character != Character::MarisaB {
+                self.spawn_player_bullets(self.fire_timer);
+            }
+            self.fire_timer += 1;
+            if self.fire_timer >= 30 || !matches!(self.state, PlayerState::Alive) {
+                self.fire_timer = -1;
+            }
+        }
     }
 
     /// Player_OnUpdate: bomb handling happens before the death/spawn state
@@ -2517,7 +2416,7 @@ impl Stage {
                 }
                 self.state = PlayerState::Dead(elapsed + 1);
             } else if elapsed >= 30 {
-                self.pos = [FIELD_W / 2.0, FIELD_H - 64.0];
+                self.pos = [self.arcade[2] / 2.0, self.arcade[3] - 64.0];
                 self.invuln = 0;
                 self.set_player_script(0);
                 if self.lives <= 0 {
@@ -2549,21 +2448,21 @@ impl Stage {
         if matches!(self.state, PlayerState::Alive) {
             self.invuln = self.invuln.saturating_sub(1);
             self.update_player(input);
-        } else {
-            self.beam_dmg = 0;
-            self.fire_timer = -1;
         }
         self.player_runner.tick();
         self.update_shots();
-        self.last_enemy_hit = None;
-        if matches!(self.state, PlayerState::Alive) {
-            self.update_player_fire(input);
+        if self.orb_state != OrbState::Hidden {
+            for orb in &mut self.orb_runners {
+                orb.tick();
+            }
         }
+        self.last_enemy_hit = None;
+        self.update_player_fire(input);
         false
     }
 
     /// Fire a bomb (Player::OnUpdate bomb branch): mark it in use, reset the
-    /// timer, drop uncollected items (each calc's RemoveAllItems), then run the
+    /// timer, magnet uncollected items (ItemManager::RemoveAllItems), then run the
     /// calc once for frame 0. Bullets are no longer cleared wholesale — the
     /// per-bomb `bombProjectiles` cancel them region-by-region in `collide`.
     fn fire_bomb(&mut self) {
@@ -2576,7 +2475,9 @@ impl Stage {
         self.world.decrease_subrank(200); // Player.cpp:185: bombing drops rank ~2
         self.spell_capturing = false; // bombing forfeits the capture
         self.spell_used_bomb = self.spell_active; // spellcardInfo.usedBomb
-        self.items.clear(); // g_ItemManager.RemoveAllItems()
+        for item in &mut self.items {
+            item.state = 1; // ItemManager::MagnetAllItems
+        }
         self.bomb_kind = match self.character {
             Character::ReimuA => 0,
             Character::ReimuB => 1,
@@ -2590,6 +2491,7 @@ impl Stage {
         for s in &mut self.bomb_sprites {
             *s = None;
         }
+        self.show_bomb_banner();
         self.update_bomb(); // run the calc for frame 0
     }
 
@@ -2598,6 +2500,7 @@ impl Stage {
     fn end_bomb(&mut self) {
         self.bomb_in_use = false;
         self.bomb_move_mult = 1.0;
+        self.end_bomb_banner();
     }
 
     /// Per-frame bomb update: the per-frame rect clear already ran in `update`,
@@ -2615,61 +2518,56 @@ impl Stage {
         self.bombing = self.bomb_in_use as u32;
     }
 
-    /// ScreenEffect::RegisterChain(SCREEN_EFFECT_SHAKE, len, p1, p2). The port
-    /// tracks a single active shake (not a chain), so a new registration
-    /// replaces any running one.
+    /// ScreenEffect::RegisterChain allocates a new equal-priority calc chain.
+    /// Global.cpp inserts it after older chains, so the last processed chain
+    /// determines the viewport while every live chain still advances the RNG.
     fn register_shake(&mut self, len: i32, p1: f32, p2: f32) {
-        self.shake_active = true;
-        self.shake_timer = 0;
-        self.shake_len = len;
-        self.shake_p1 = p1;
-        self.shake_p2 = p2;
+        self.shakes.push(ScreenShake {
+            timer: 0,
+            length: len,
+            start: p1,
+            end: p2,
+        });
     }
 
-    /// ScreenEffect::ShakeScreen — recompute the arcade region each frame. While
-    /// a shake runs, `screenOffset` ramps p1→p2 over `len`, and two RNG rolls
-    /// (x, y) each pick: leave the region, shift+shrink it, or only shrink it.
-    /// The 2D playfield reads the region's top-left (a translate); the 3D bg
-    /// viewport reads its size (a shrink).
+    /// ScreenEffect::ShakeScreen. Each chain writes a complete region, including
+    /// a baseline reset when it expires, even if an older chain is still active.
     fn update_shake(&mut self) {
         self.arcade = [FIELD_X, FIELD_Y, FIELD_W, FIELD_H];
-        if !self.shake_active {
-            return;
-        }
-        // During Sakuya's time-stop the effect holds the region at baseline and
-        // neither ticks nor consumes RNG (ShakeScreen's isTimeStopped early-out).
         if self.world.time_stopped {
             return;
         }
-        self.shake_timer += 1;
-        if self.shake_timer >= self.shake_len {
-            self.shake_active = false;
-            return;
-        }
-        let off = (self.shake_timer as f32 * (self.shake_p2 - self.shake_p1))
-            / self.shake_len as f32
-            + self.shake_p1;
-        match self.world.rng.u32_in_range(3) {
-            1 => {
-                self.arcade[0] = FIELD_X + off;
-                self.arcade[2] = FIELD_W - off;
+        for shake in &mut self.shakes {
+            self.arcade = [FIELD_X, FIELD_Y, FIELD_W, FIELD_H];
+            shake.timer += 1;
+            if shake.timer >= shake.length {
+                continue;
             }
-            2 => self.arcade[2] = FIELD_W - off,
-            _ => {}
-        }
-        match self.world.rng.u32_in_range(3) {
-            1 => {
-                self.arcade[1] = FIELD_Y + off;
-                self.arcade[3] = FIELD_H - off;
+            let off = (shake.timer as f32 * (shake.end - shake.start)) / shake.length as f32
+                + shake.start;
+            match self.world.rng.u32_in_range(3) {
+                1 => {
+                    self.arcade[0] = FIELD_X + off;
+                    self.arcade[2] = FIELD_W - off;
+                }
+                2 => self.arcade[2] = FIELD_W - off,
+                _ => {}
             }
-            2 => self.arcade[3] = FIELD_H - off,
-            _ => {}
+            match self.world.rng.u32_in_range(3) {
+                1 => {
+                    self.arcade[1] = FIELD_Y + off;
+                    self.arcade[3] = FIELD_H - off;
+                }
+                2 => self.arcade[3] = FIELD_H - off,
+                _ => {}
+            }
         }
+        self.shakes.retain(|shake| shake.timer < shake.length);
     }
 
     /// BombData::BombReimuACalc — Fantasy Seal. A one-frame 256² central blast
     /// (`bombProjectiles[8]`) at the cast, then seals 1..=7 spawn over frames
-    /// 76..=172 (seal 0 is never spawned — the decomp's `&& (i = …)` short-
+    /// 80..=176 (seal 0 is never spawned — the decomp's `&& (i = …)` short-
     /// circuits on i==0, a ZUN quirk), each homing toward the lowest on-screen
     /// enemy and exploding into a 256²/200-damage burst once it has dealt 100
     /// damage or the bomb is in its last 30 frames.
@@ -2684,6 +2582,12 @@ impl Stage {
             self.bomb_duration = 300;
             self.invuln = 360;
             self.seal_state = [0; 8];
+            self.world.spawn_particles(
+                12,
+                [self.pos[0], self.pos[1], 0.0],
+                1,
+                [64.0 / 255.0, 64.0 / 255.0, 1.0, 1.0],
+            );
             // 256² central blast; cleared next frame, so it cancels bullets once.
             self.bomb_projectiles[8] = BombRect {
                 pos: self.pos,
@@ -2708,11 +2612,14 @@ impl Stage {
                         self.player_scripts[&(133 + k as i32)].clone(),
                     ));
                 }
-                self.events.push(Event::Sfx(SFX_BY_IDX[13])); // SOUND_BOMB_REIMU_A
+                self.events.push(Event::SfxIdx(13)); // SOUND_BOMB_REIMU_A
             }
         }
         // positionOfLastEnemyHit: the lowest on-screen enemy, else the player.
-        let pivot = self.last_enemy_hit.unwrap_or(self.pos);
+        let pivot = self
+            .last_enemy_hit
+            .filter(|pos| pos[0] > -100.0)
+            .unwrap_or(self.pos);
         for i in 0..8 {
             if self.seal_state[i] == 0 {
                 continue;
@@ -2727,7 +2634,10 @@ impl Stage {
                 ax = ax / len + self.seal_vel[i][0];
                 ay = ay / len + self.seal_vel[i][1];
                 len = (ax * ax + ay * ay).sqrt();
-                self.seal_speed[i] = len.min(10.0).max(1.0);
+                self.seal_speed[i] = if len > 10.0 { 10.0 } else { len };
+                if self.seal_speed[i] < 1.0 {
+                    self.seal_speed[i] = 1.0;
+                }
                 self.seal_vel[i] = [ax * self.seal_speed[i] / len, ay * self.seal_speed[i] / len];
 
                 self.bomb_regions[i] = BombRect {
@@ -2741,6 +2651,14 @@ impl Stage {
                 };
 
                 if self.bomb_dmg_accum[i] >= 100 || self.bomb_timer >= self.bomb_duration - 30 {
+                    let burst_pos = [self.seal_pos[i][0], self.seal_pos[i][1], 0.0];
+                    self.world.spawn_particles(6, burst_pos, 8, [1.0; 4]);
+                    self.world.spawn_particles(
+                        12,
+                        burst_pos,
+                        1,
+                        [64.0 / 255.0, 64.0 / 255.0, 1.0, 1.0],
+                    );
                     self.seal_state[i] = 2;
                     self.bomb_regions[i].size = [256.0, 256.0];
                     self.bomb_region_dmg[i] = 200;
@@ -2751,7 +2669,7 @@ impl Stage {
                             r.interrupt(1);
                         }
                     }
-                    self.events.push(Event::Sfx(SFX_BY_IDX[15])); // SOUND_F
+                    self.events.push(Event::SfxIdx(15)); // SOUND_F
                     self.register_shake(16, 8.0, 0.0); // ScreenEffect SHAKE (16,8,0)
                 }
             } else {
@@ -2783,7 +2701,7 @@ impl Stage {
         if self.bomb_timer == 0 {
             self.bomb_duration = 140;
             self.invuln = 200;
-            self.events.push(Event::Sfx(SFX_BY_IDX[6])); // SOUND_BOMB_REIMARI
+            self.events.push(Event::SfxIdx(6)); // SOUND_BOMB_REIMARI
             // ExecuteAnmIdx the 4 beam sprites (REIMU_B_BOMB_ARRAY = scripts 137+i);
             // their animated pos becomes each beam's posOffset.
             for i in 0..4 {
@@ -2847,7 +2765,7 @@ impl Stage {
                 let a = i as f32 * TAU / 8.0;
                 self.seal_vel[i] = [a.cos() * 2.0, a.sin() * 2.0];
             }
-            self.events.push(Event::Sfx(SFX_BY_IDX[6])); // SOUND_BOMB_REIMARI
+            self.events.push(Event::SfxIdx(6)); // SOUND_BOMB_REIMARI
             self.register_shake(120, 4.0, 1.0); // ScreenEffect SHAKE (120,4,1)
         } else {
             for i in 0..8 {
@@ -2889,7 +2807,7 @@ impl Stage {
                     Some(AnmRunner::new(self.player_scripts[&(8 + i as i32)].clone()));
                 self.seal_pos[i] = self.pos;
             }
-            self.events.push(Event::Sfx(SFX_BY_IDX[19])); // SOUND_BOMB_MARISA_B
+            self.events.push(Event::SfxIdx(19)); // SOUND_BOMB_MARISA_B
             self.bomb_move_mult = 0.3;
         } else {
             if self.bomb_timer == 60 {
@@ -2922,10 +2840,9 @@ impl Stage {
         self.invuln = 0;
         self.dying = DEATHBOMB_FRAMES;
         self.state = PlayerState::Dead(0);
-        self.beam_dmg = 0;
         let pos = [self.pos[0], self.pos[1], 0.0];
         self.world
-            .spawn_particles(12, pos, 1, [0.251, 0.251, 1.0, 1.0]);
+            .spawn_particles(12, pos, 1, [64.0 / 255.0, 64.0 / 255.0, 1.0, 1.0]);
         self.world.spawn_particles(6, pos, 16, [1.0, 1.0, 1.0, 1.0]);
         self.events.push(Event::Sfx("pldead00"));
     }
@@ -2962,51 +2879,65 @@ impl Stage {
         }
     }
 
-    /// HandlePlayerInputs orb offsets, blended over the focus animation:
-    /// unfocused (24, 0) slides to focused (8, -32).
     fn orb_positions(&self) -> [[f32; 2]; 2] {
-        let a = self.focus_anim;
-        let h = 24.0 - 16.0 * a;
-        let v = -32.0 * a;
-        [
-            [self.pos[0] - h, self.pos[1] + v],
-            [self.pos[0] + h, self.pos[1] + v],
-        ]
+        self.orbs_pos
     }
 
-    /// SpawnBullets / FireSingleBullet: fire every table entry of the current
-    /// character's power rank whose timing matches the fire timer.
+    /// FireSingleBullet/SpawnBullets, including the independent laser timers
+    /// and first-free allocation in the original 80-slot player bullet pool.
     fn spawn_player_bullets(&mut self, timer: i32) {
         let rank = self.character.ranks()[power_rank(self.world.power)];
         let orbs = self.orb_positions();
-        let orbs_shown = self.world.power >= 8;
-        let mut fired_main = false;
         for def in rank {
-            if timer % def.wait != def.frame {
+            let free = (0..80).find(|slot| !self.shots.iter().any(|shot| shot.pool_index == *slot));
+            let Some(pool_index) = free else { break };
+            if def.bt == 3 {
+                if self.laser_timers[def.frame as usize] != 0 {
+                    continue;
+                }
+                self.laser_timers[def.frame as usize] = def.wait;
+            } else if timer % def.wait != def.frame {
                 continue;
-            }
-            if def.spawn != 0 && !orbs_shown {
-                continue; // orb shots only exist at power >= 8
             }
             let base = match def.spawn {
                 1 => orbs[0],
                 2 => orbs[1],
                 _ => self.pos,
             };
-            let a = def.dir_deg.to_radians();
-            self.shots.push(Shot {
+            let mut runner = AnmRunner::new(
+                self.player_scripts
+                    .get(&def.script)
+                    .cloned()
+                    .unwrap_or_default(),
+            );
+            if let Some((sprite, range)) = runner.take_pending_random() {
+                runner.set_sprite(sprite + self.world.rng.u16_in_range(range) as u32);
+            }
+            let shot = Shot {
+                pool_index,
                 pos: [base[0] + def.motion[0], base[1] + def.motion[1]],
-                vel: [a.cos() * def.vel, a.sin() * def.vel],
+                size: def.size,
+                vel: [def.angle.cos() * def.speed, def.angle.sin() * def.speed],
                 damage: def.damage,
                 bt: def.bt,
-                anm_script: self.character.shot_anm_script(def.bt),
+                anm_script: def.script,
+                runner,
+                collided: false,
+                angle: def.angle,
+                motion: def.motion,
+                spawn: def.spawn,
+                laser_slot: def.frame as usize,
                 age: 0,
-                spd: def.vel,
-            });
-            fired_main |= def.bt == 0;
-        }
-        if fired_main {
-            self.events.push(Event::Sfx("plst00"));
+                spd: def.speed,
+            };
+            let insert_at = self
+                .shots
+                .binary_search_by_key(&pool_index, |shot| shot.pool_index)
+                .unwrap_err();
+            self.shots.insert(insert_at, shot);
+            if def.sound {
+                self.events.push(Event::Sfx("plst00"));
+            }
         }
     }
 
@@ -3025,7 +2956,10 @@ impl Stage {
                 vx = vx / len + s.vel[0];
                 vy = vy / len + s.vel[1];
                 len = (vx * vx + vy * vy).sqrt();
-                s.spd = len.min(10.0).max(1.0);
+                s.spd = if len > 10.0 { 10.0 } else { len };
+                if s.spd < 1.0 {
+                    s.spd = 1.0;
+                }
                 // Decomp (Player.cpp:522) divides by vecLength unconditionally.
                 s.vel = [vx * s.spd / len, vy * s.spd / len];
             }
@@ -3041,205 +2975,155 @@ impl Stage {
     }
 
     fn update_shots(&mut self) {
-        let target = self.last_enemy_hit;
+        for timer in &mut self.laser_timers {
+            if *timer != 0 {
+                *timer -= 1;
+            }
+        }
+        let target = self.last_enemy_hit.filter(|pos| pos[0] > -100.0);
+        let orbs = self.orb_positions();
         for s in &mut self.shots {
             match s.bt {
-                1 => Self::home_shot(s, target), // Reimu A homing orb
-                2 => s.vel[1] -= 0.3,            // Marisa A orb-missile gravity
+                1 if !s.collided => Self::home_shot(s, target),
+                2 if !s.collided => s.vel[1] -= 0.3,
+                3 => {
+                    if matches!(self.laser_timers[s.laser_slot], 70 | 1) {
+                        s.runner.interrupt(1);
+                    }
+                    let orb = orbs[s.spawn as usize - 1];
+                    s.pos = [orb[0] + s.motion[0], orb[1] / 2.0];
+                    s.runner.scale[1] = s.pos[1] * 2.0 / 14.0;
+                    s.size[1] = s.pos[1] * 2.0;
+                }
                 _ => {}
             }
             s.pos[0] += s.vel[0];
             s.pos[1] += s.vel[1];
+            s.runner.tick();
+            if let Some((sprite, range)) = s.runner.take_pending_random() {
+                s.runner
+                    .set_sprite(sprite + self.world.rng.u16_in_range(range) as u32);
+            }
             s.age += 1;
         }
+        let [_, _, region_width, region_height] = self.arcade;
         self.shots.retain(|s| {
-            s.pos[1] > -50.0
-                && s.pos[1] < FIELD_H + 50.0
-                && s.pos[0] > -50.0
-                && s.pos[0] < FIELD_W + 50.0
+            if s.runner.ended() {
+                return false;
+            }
+            if s.bt == 3 {
+                return true;
+            }
+            let sprite = s
+                .runner
+                .sprite
+                .and_then(|sprite| self.player_sprites.get(&sprite));
+            let [width, height] = sprite.map_or(s.size, |sprite| [sprite.width, sprite.height]);
+            player_shot_in_bounds(s.pos, [width, height], [region_width, region_height])
         });
     }
 
+    /// Player::CalcDamageToEnemy: inclusive rectangle overlap, retained missile
+    /// explosions, persistent lasers, bomb weakening and original hit effects.
+    fn calc_player_damage(&mut self, pos: [f32; 3], hitbox: [f32; 2]) -> (i32, bool) {
+        let mut damage = 0;
+        for shot in &mut self.shots {
+            if shot.collided && shot.bt != 2 {
+                continue;
+            }
+            if !attack_rect_overlap(shot.pos, shot.size, [pos[0], pos[1]], hitbox) {
+                continue;
+            }
+            damage += if self.bomb_in_use {
+                (shot.damage / 3).max(1)
+            } else {
+                shot.damage
+            };
+            if shot.bt == 2 {
+                shot.damage = (shot.damage / 4).max(1);
+                let explosion_size = match shot.anm_script {
+                    65 => Some(32.0),
+                    66 => Some(42.0),
+                    67 | 68 => Some(48.0),
+                    _ => None,
+                };
+                if let Some(size) = explosion_size {
+                    shot.size = [size; 2];
+                }
+                if shot.age % 6 == 0 {
+                    self.world
+                        .spawn_particles(5, [shot.pos[0], shot.pos[1], 0.0], 1, [1.0; 4]);
+                }
+            }
+            if shot.bt != 3 {
+                if !shot.collided {
+                    shot.anm_script += 32;
+                    shot.runner = AnmRunner::new(
+                        self.player_scripts
+                            .get(&shot.anm_script)
+                            .cloned()
+                            .unwrap_or_default(),
+                    );
+                    if let Some((sprite, range)) = shot.runner.take_pending_random() {
+                        shot.runner
+                            .set_sprite(sprite + self.world.rng.u16_in_range(range) as u32);
+                    }
+                    self.world
+                        .spawn_particles(5, [shot.pos[0], shot.pos[1], 0.0], 1, [1.0; 4]);
+                }
+                shot.collided = true;
+                shot.vel[0] /= 8.0;
+                shot.vel[1] /= 8.0;
+            } else {
+                self.player_particle_timer = self.player_particle_timer.wrapping_add(1);
+                if self.player_particle_timer.is_multiple_of(8) {
+                    self.world
+                        .spawn_particles(5, [shot.pos[0], pos[1], pos[2]], 1, [1.0; 4]);
+                }
+            }
+        }
+        let mut hit_by_bomb = false;
+        for region in 0..self.bomb_regions.len() {
+            let rect = self.bomb_regions[region];
+            if rect.size[0] <= 0.0
+                || !attack_rect_overlap(rect.pos, rect.size, [pos[0], pos[1]], hitbox)
+            {
+                continue;
+            }
+            damage += self.bomb_region_dmg[region];
+            self.bomb_dmg_accum[region] += self.bomb_region_dmg[region];
+            self.player_particle_timer = self.player_particle_timer.wrapping_add(1);
+            if self.player_particle_timer.is_multiple_of(4) {
+                self.world.spawn_particles(3, pos, 1, [1.0; 4]);
+            }
+            hit_by_bomb |= self.bomb_in_use;
+        }
+        (damage, hit_by_bomb)
+    }
+
     fn update_bullets(&mut self) {
-        // Sakuya's time-stop: bullets and lasers freeze in place (the boss keeps
-        // moving and laying down new ones over the frozen field).
         if self.world.time_stopped {
             return;
         }
-        let player = self.world.player_pos;
-        for b in &mut self.world.bullets {
-            // BULLET_STATE_DESPAWNING (BulletManager.cpp:947): a fading bullet
-            // drifts at half velocity over the 12-frame donut anm, then is
-            // removed (no ex-behaviour, no cull). (#14)
-            if b.despawn_timer > 0 {
-                b.pos[0] += b.angle.cos() * b.speed * 0.5;
-                b.pos[1] += b.angle.sin() * b.speed * 0.5;
-                b.despawn_timer -= 1;
-                if b.despawn_timer == 0 {
-                    b.oob_count = i32::MAX; // swept by the retain below
-                }
-                continue;
-            }
-            b.timer += 1;
-            // Ex behaviors, ported from BulletManager::OnUpdate.
-            if b.ex_flags & 1 != 0 {
-                if b.timer <= 16 {
-                    // Spawn boost: extra speed decaying 5 -> 0 over 16 frames.
-                    let boost = 5.0 - b.timer as f32 * 5.0 / 16.0;
-                    b.pos[0] += b.angle.cos() * boost;
-                    b.pos[1] += b.angle.sin() * boost;
-                } else {
-                    b.ex_flags &= !1;
-                }
-            } else if b.ex_flags & 0x10 != 0 {
-                if b.timer >= b.ex_int0 {
-                    b.ex_flags &= !0x10;
-                } else {
-                    let vx = b.angle.cos() * b.speed + b.ex_accel[0];
-                    let vy = b.angle.sin() * b.speed + b.ex_accel[1];
-                    b.speed = (vx * vx + vy * vy).sqrt();
-                    b.angle = vy.atan2(vx);
-                }
-            } else if b.ex_flags & 0x20 != 0 {
-                if b.timer >= b.ex_int0 {
-                    b.ex_flags &= !0x20;
-                } else {
-                    b.angle += b.ex_f[1];
-                    b.speed += b.ex_f[0];
-                }
-            }
-            // Direction-change group (exFlags & 0x1c0): every `ex_int0` frames,
-            // up to `ex_int1` times, re-point the bullet and reset its speed;
-            // between changes the speed ramps down to a near-stop. The three
-            // modes differ only in how the new angle is chosen:
-            //   0x40  rotate by a fixed delta   (angle += rotation)
-            //   0x100 snap to an absolute angle (angle  = rotation)
-            //   0x80  re-aim at the player      (angle  = atan2(player) + rotation)
-            // 0x80 is Cirno's Perfect Freeze: shards freeze, then home.
-            let mut move_speed = b.speed;
-            let mode = b.ex_flags & 0x1c0;
-            if mode != 0 {
-                let interval = b.ex_int0;
-                let trigger = if interval > 0 {
-                    b.timer >= interval * (b.ex_count + 1)
-                } else {
-                    true
-                };
-                if trigger {
-                    b.ex_count += 1;
-                    if b.ex_count >= b.ex_int1 {
-                        b.ex_flags &= !mode;
-                    }
-                    b.angle = if mode & 0x40 != 0 {
-                        b.angle + b.ex_f[0]
-                    } else if mode & 0x100 != 0 {
-                        b.ex_f[0]
-                    } else {
-                        (player[1] - b.pos[1]).atan2(player[0] - b.pos[0]) + b.ex_f[0]
-                    };
-                    b.speed = b.ex_f[1];
-                    move_speed = b.speed;
-                } else {
-                    let t = b.timer as f32 - (interval * b.ex_count) as f32;
-                    move_speed = b.speed - t * b.speed / interval as f32;
-                }
-            } else if b.ex_flags & 0xc00 != 0 {
-                // Wall-bounce group (BulletManager.cpp:831): once the bullet is
-                // fully off the playfield, reflect its angle off the crossed
-                // edge(s), reset its speed to dirChangeSpeed (ex_f[1]) and count
-                // the bounce; clear the flag after dirChangeMaxTimes (ex_int1)
-                // bounces. 0x400 bounces all four edges; 0x800 skips the bottom.
-                let (hw, hh) = (b.width / 2.0, b.height / 2.0);
-                let in_bounds = b.pos[0] + hw >= 0.0
-                    && b.pos[0] - hw <= FIELD_W
-                    && b.pos[1] + hh >= 0.0
-                    && b.pos[1] - hh <= FIELD_H;
-                if !in_bounds {
-                    let bounce_bottom = b.ex_flags & 0x400 != 0;
-                    if b.pos[0] < 0.0 || b.pos[0] >= FIELD_W {
-                        b.angle = normalize_angle(-b.angle - std::f32::consts::PI);
-                    }
-                    if b.pos[1] < 0.0 || (bounce_bottom && b.pos[1] >= FIELD_H) {
-                        b.angle = -b.angle;
-                    }
-                    b.speed = b.ex_f[1];
-                    move_speed = b.speed;
-                    b.ex_count += 1;
-                    if b.ex_count >= b.ex_int1 {
-                        b.ex_flags &= !0xc00;
-                    }
-                }
-            }
-            let factor = if b.spawn_delay > 0 {
-                b.spawn_delay -= 1;
-                b.spawn_factor
-            } else {
-                1.0
-            };
-            b.pos[0] += b.angle.cos() * move_speed * factor;
-            b.pos[1] += b.angle.sin() * move_speed * factor;
-            // On the spawn->fired transition frame the decomp falls through into
-            // the FIRED case and applies a second, full-velocity move
-            // (BulletManager.cpp:698 then :895).
-            if factor != 1.0 && b.spawn_delay == 0 {
-                b.pos[0] += b.angle.cos() * move_speed;
-                b.pos[1] += b.angle.sin() * move_speed;
-            }
-            // Off-screen cull (BulletManager.cpp:896, only for FIRED bullets):
-            // GameManager::IsInBounds — the sprite (w x h, ~square) must overlap
-            // [0,FIELD_W] x [0,FIELD_H]. Normal bullets die on the first OOB frame;
-            // dir-change/bounce bullets (0x40/0x80/0x100/0x400/0x800) get 256.
-            if b.spawn_delay == 0 {
-                let (hw, hh) = (b.width / 2.0, b.height / 2.0);
-                let in_bounds = b.pos[0] + hw >= 0.0
-                    && b.pos[0] - hw <= FIELD_W
-                    && b.pos[1] + hh >= 0.0
-                    && b.pos[1] - hh <= FIELD_H;
-                let roamer = b.ex_flags & 0xdc0 != 0;
-                if in_bounds {
-                    b.oob_count = 0;
-                } else if !roamer && b.oob_count == 0 {
-                    b.oob_count = i32::MAX;
-                } else {
-                    b.oob_count += 1;
-                }
+        // BulletManager runs each slot's movement, graze, kill and ANM before
+        // the next slot. In particular a lethal hit changes the player state
+        // before a second nearby bullet reaches CheckGraze.
+        let mut bullets = std::mem::take(&mut self.world.bullets);
+        for bullet in &mut bullets {
+            if bullet.step(self.pos, [self.arcade[2], self.arcade[3]]) {
+                self.collide_bullet(bullet);
+                bullet.finish_fired_step();
             }
         }
-        self.world.bullets.retain(|b| b.oob_count < 256);
-
-        // Lasers (state machine from BulletManager::OnUpdate).
-        for l in &mut self.world.lasers {
-            if !l.in_use {
-                continue;
-            }
-            l.end_offset += l.speed;
-            if l.start_length < l.end_offset - l.start_offset {
-                l.start_offset = l.end_offset - l.start_length;
-            }
-            if l.start_offset < 0.0 {
-                l.start_offset = 0.0;
-            }
-            l.timer += 1;
-            match l.state {
-                0 => {
-                    if l.timer >= l.start_time {
-                        l.state = 1;
-                        l.timer = 0;
-                    }
-                }
-                1 => {
-                    if l.timer >= l.duration {
-                        l.state = 2;
-                        l.timer = 0;
-                    }
-                }
-                _ => {
-                    if l.timer >= l.despawn_duration {
-                        l.in_use = false;
-                    }
-                }
+        bullets.retain(|bullet| bullet.oob_count < 256);
+        self.world.bullets = bullets;
+        let mut lasers = std::mem::take(&mut self.world.lasers);
+        for laser in &mut lasers {
+            for collision in laser.step() {
+                self.collide_laser(collision);
             }
         }
+        self.world.lasers = lasers;
     }
 
     /// Half of the bullet's collision box (grazeSize/2), used for both the kill
@@ -3248,7 +3132,7 @@ impl Stage {
     /// and its anm script: <=8px -> 4; <=16px -> rice/shard 4, kunai 5, else 6;
     /// <=32px -> fireball 11, dagger 9, else 16; bigger -> 32.
     fn bullet_radius(&self, b: &Bullet) -> f32 {
-        let t = bullet_type_of(b.sprite);
+        let t = b.type_index;
         let graze_size = if b.height <= 8.0 {
             4.0
         } else if b.height <= 16.0 {
@@ -3275,6 +3159,7 @@ impl Stage {
         if !self.enemies[index].ready_for_damage() {
             return;
         }
+        let life_before = self.enemies[index].life;
         let (pos, hitbox, interactable, collidable, is_boss) = {
             let enemy = &self.enemies[index];
             (
@@ -3308,44 +3193,10 @@ impl Stage {
             }
         }
         if !interactable {
+            self.update_enemy_damage_feedback(index, life_before);
             return;
         }
-        let mut damage = 0;
-        for shot in &mut self.shots {
-            let radius = hitbox[0].max(hitbox[1]) / 2.0 + 6.0;
-            let dx = shot.pos[0] - pos[0];
-            let dy = shot.pos[1] - pos[1];
-            if dx * dx + dy * dy < radius * radius {
-                damage += if self.bomb_in_use {
-                    (shot.damage / 3).max(1)
-                } else {
-                    shot.damage
-                };
-                shot.pos[1] = -100.0;
-            }
-        }
-        self.shots.retain(|shot| shot.pos[1] > -90.0);
-        let mut hit_by_bomb = false;
-        for region in 0..self.bomb_regions.len() {
-            let rect = self.bomb_regions[region];
-            if rect.size[0] <= 0.0
-                || (rect.pos[0] - pos[0]).abs() > (rect.size[0] + hitbox[0]) / 2.0
-                || (rect.pos[1] - pos[1]).abs() > (rect.size[1] + hitbox[1]) / 2.0
-            {
-                continue;
-            }
-            damage += self.bomb_region_dmg[region];
-            self.bomb_dmg_accum[region] += self.bomb_region_dmg[region];
-            hit_by_bomb |= self.bomb_in_use;
-        }
-        if self.beam_dmg > 0
-            && self
-                .orb_positions()
-                .iter()
-                .any(|orb| (pos[0] - orb[0]).abs() < 10.0 && pos[1] <= orb[1])
-        {
-            damage += self.beam_dmg;
-        }
+        let (mut damage, hit_by_bomb) = self.calc_player_damage(pos, hitbox);
         damage = damage.min(70);
         self.score += (damage / 5 * 10) as i64;
         if self.world.spellcard_active != 0 {
@@ -3388,121 +3239,108 @@ impl Stage {
                 self.despawn_bullets(false);
             }
             self.enemies[index].on_death(&self.ecl, &mut self.world);
-            self.events.push(Event::Sfx("enep00"));
+            self.events.push(Event::SfxIdx(2 + (index % 2) as u8));
+        }
+        self.update_enemy_damage_feedback(index, life_before);
+    }
+
+    fn update_enemy_damage_feedback(&mut self, index: usize, life_before: i32) {
+        let flash = self.enemies[index].update_damage_feedback(life_before);
+        if let Some(anim) = self.anims.get_mut(index).and_then(Option::as_mut) {
+            anim.color_add = flash;
+        }
+        if flash {
+            self.events.push(Event::SfxIdx(20)); // SOUND_TOTAL_BOSS_DEATH
         }
     }
 
-    fn collide_bullets(&mut self) {
-        // Bomb projectiles cancel bullets every frame, regardless of player state
-        // (BulletManager.cpp:919-943: CheckGraze / CalcKillBoxCollision return 2 →
-        // the bullet despawns and drops a homing point item). A not-yet-grazed
-        // bullet is tested with its graze box (+20, CheckGraze); a grazed one with
-        // its kill box (CalcKillBoxCollision) — both cancel.
-        if self.bomb_projectiles.iter().any(|r| r.size[0] != 0.0) {
-            let projs = self.bomb_projectiles;
-            let radii: Vec<f32> = self
-                .world
-                .bullets
-                .iter()
-                .map(|b| self.bullet_radius(b))
-                .collect();
-            let mut cancelled: Vec<[f32; 2]> = Vec::new();
-            let mut i = 0;
-            self.world.bullets.retain(|b| {
-                let m = radii[i] + if b.grazed { 0.0 } else { 20.0 };
-                i += 1;
-                if b.despawn_timer > 0 {
-                    return true;
-                }
-                let (bl, bt) = (b.pos[0] - m, b.pos[1] - m);
-                let (br, bb) = (b.pos[0] + m, b.pos[1] + m);
-                for r in projs.iter() {
-                    if r.size[0] == 0.0 {
-                        continue;
-                    }
-                    let (pl, pt) = (r.pos[0] - r.size[0] / 2.0, r.pos[1] - r.size[1] / 2.0);
-                    let (pr, pb) = (r.pos[0] + r.size[0] / 2.0, r.pos[1] + r.size[1] / 2.0);
-                    if !(pl > br || pr < bl || pt > bb || pb < bt) {
-                        cancelled.push(b.pos);
-                        return false;
-                    }
-                }
-                true
-            });
-            for pos in cancelled {
-                self.spawn_item(Item::homing(pos, 6)); // ITEM_POINT_BULLET
+    fn collide_bullet(&mut self, bullet: &mut Bullet) {
+        let radius = self.bullet_radius(bullet);
+        let margin = radius + if bullet.grazed { 0.0 } else { 20.0 };
+        for projectile in self.bomb_projectiles {
+            if projectile.size[0] == 0.0 {
+                continue;
+            }
+            if (projectile.pos[0] - bullet.pos[0]).abs() <= projectile.size[0] / 2.0 + margin
+                && (projectile.pos[1] - bullet.pos[1]).abs() <= projectile.size[1] / 2.0 + margin
+            {
+                bullet.begin_despawn();
+                self.spawn_item(Item::homing(bullet.pos, 6));
+                return;
             }
         }
+        let dx = (bullet.pos[0] - self.pos[0]).abs();
+        let dy = (bullet.pos[1] - self.pos[1]).abs();
+        const PLAYER_HALF: f32 = 1.25;
+        if !bullet.grazed {
+            // CheckGraze excludes DEAD/SPAWNING, but ScoreGraze still emits
+            // score, subrank and particles during a bomb; only its counts stop.
+            if !matches!(self.state, PlayerState::Alive) {
+                return;
+            }
+            if dx > radius + PLAYER_HALF + 20.0 || dy > radius + PLAYER_HALF + 20.0 {
+                return;
+            }
+            self.score_graze(bullet.pos);
+            bullet.grazed = true;
+        }
+        // CalcKillBoxCollision always consumes a touching bullet, even while
+        // the player is invulnerable, dead, or spawning.
+        if dx <= radius + PLAYER_HALF && dy <= radius + PLAYER_HALF {
+            bullet.begin_despawn();
+            if matches!(self.state, PlayerState::Alive)
+                && self.invuln == 0
+                && self.bombing == 0
+                && std::env::var_os("TH06_GOD").is_none()
+            {
+                self.register_hit();
+            }
+        }
+    }
 
-        // Bullets / lasers / enemy bodies vs player. Player.cpp uses an AABB:
-        // a tiny hitbox (half-extent 1.25) for kills, expanded by 20 (bullets)
-        // or 48 (lasers) for grazes. Grazing is allowed during the post-respawn
-        // invulnerability, but never while dying or bombing.
-        const PH: f32 = 1.25;
-        let can_graze =
-            matches!(self.state, PlayerState::Alive) && self.dying == 0 && self.bombing == 0;
-        if !can_graze {
+    fn collide_laser(&mut self, laser: crate::projectiles::LaserCollision) {
+        let dx = self.pos[0] - laser.origin[0];
+        let dy = self.pos[1] - laser.origin[1];
+        let (sin, cos) = laser.angle.sin_cos();
+        let along = dx * cos + dy * sin;
+        let across = -dx * sin + dy * cos;
+        let half_x = laser.length / 2.0 + 1.25;
+        let half_y = laser.width / 2.0 + 1.25;
+        if (along - laser.center).abs() <= half_x && across.abs() <= half_y {
+            if matches!(self.state, PlayerState::Alive)
+                && self.invuln == 0
+                && self.bombing == 0
+                && std::env::var_os("TH06_GOD").is_none()
+            {
+                self.register_hit();
+            }
             return;
         }
-        let can_be_hit = self.invuln == 0;
-        let p = self.pos;
-        let radii: Vec<f32> = self
-            .world
-            .bullets
-            .iter()
-            .map(|b| self.bullet_radius(b))
-            .collect();
+        if laser.can_graze
+            && matches!(self.state, PlayerState::Alive)
+            && (along - laser.center).abs() <= half_x + 48.0
+            && across.abs() <= half_y + 48.0
+        {
+            self.score_graze(self.pos);
+        }
+    }
 
-        let mut kill = false;
-        let mut graze_count: i64 = 0;
-        for (b, &r) in self.world.bullets.iter_mut().zip(&radii) {
-            if b.despawn_timer > 0 {
-                continue;
-            }
-            let dx = (b.pos[0] - p[0]).abs();
-            let dy = (b.pos[1] - p[1]).abs();
-            if can_be_hit && dx < r + PH && dy < r + PH {
-                kill = true;
-            } else if !b.grazed && dx < r + PH + 20.0 && dy < r + PH + 20.0 {
-                b.grazed = true;
-                graze_count += 1;
-            }
+    /// Player::ScoreGraze. Total and stage counts have independent caps; all
+    /// side effects still run when either cap is reached or a bomb is active.
+    fn score_graze(&mut self, center: [f32; 2]) {
+        if self.bombing == 0 {
+            self.graze = (self.graze + 1).min(999999);
+            self.graze_in_stage = (self.graze_in_stage + 1).min(9999);
         }
-        for l in &self.world.lasers {
-            if !l.in_use {
-                continue;
-            }
-            let hitbox_live = match l.state {
-                0 => l.timer >= l.hitbox_start,
-                1 => true,
-                _ => false,
-            };
-            if !hitbox_live {
-                continue;
-            }
-            let (dx, dy) = (p[0] - l.pos[0], p[1] - l.pos[1]);
-            let (c, s) = (l.angle.cos(), l.angle.sin());
-            let along = dx * c + dy * s;
-            let across = (-dx * s + dy * c).abs();
-            let half = l.width / 4.0;
-            if can_be_hit && along >= l.start_offset && along <= l.end_offset && across < half + PH
-            {
-                kill = true;
-            } else if along >= l.start_offset - 48.0
-                && along <= l.end_offset + 48.0
-                && across < half + PH + 48.0
-            {
-                graze_count += 1; // lasers graze every frame, like the original
-            }
-        }
-        if graze_count > 0 {
-            self.graze += graze_count;
-            self.score += 500 * graze_count;
-            self.events.push(Event::Sfx("graze"));
-        }
-        if kill && std::env::var_os("TH06_GOD").is_none() {
-            self.register_hit();
-        }
+        let pos = [
+            (self.pos[0] + center[0]) / 2.0,
+            (self.pos[1] + center[1]) / 2.0,
+            0.0,
+        ];
+        self.world.spawn_particles(8, pos, 1, [1.0; 4]);
+        self.score += 500;
+        self.world.increase_subrank(6);
+        self.events.push(Event::SfxIdx(30));
     }
 
     fn start_dialogue(&mut self, idx: usize) {
@@ -3659,7 +3497,7 @@ impl Stage {
                 9 => {
                     let bonus = stage_clear_bonus(
                         self.stage_num,
-                        self.graze - self.graze_start,
+                        self.graze_in_stage,
                         self.world.power as i64,
                         self.point_items,
                         self.lives as i64,
@@ -3753,36 +3591,6 @@ impl Stage {
         }
     }
 
-    /// Burst of fading puffs, used for enemy deaths and pickups. Purely cosmetic:
-    /// it draws from a SEPARATE `fx_rng`, never the gameplay `world.rng`, so the
-    /// visual particle jitter can't desync the decomp-faithful RNG stream (#26).
-    /// The faithful gameplay effect RNG is handled by World::spawn_particles.
-    fn spawn_burst(&mut self, pos: [f32; 2], count: u32, speed: f32, color: [f32; 3], size: f32) {
-        for i in 0..count {
-            let a = i as f32 / count as f32 * std::f32::consts::TAU + self.fx_rng.f32_in_range(0.5);
-            let s = speed * (0.5 + self.fx_rng.f32_zero_to_one());
-            self.particles.push(Particle {
-                pos,
-                vel: [a.cos() * s, a.sin() * s],
-                life: 18.0,
-                max_life: 18.0,
-                size,
-                color,
-            });
-        }
-    }
-
-    fn update_particles(&mut self) {
-        for p in &mut self.particles {
-            p.pos[0] += p.vel[0];
-            p.pos[1] += p.vel[1];
-            p.vel[0] *= 0.86;
-            p.vel[1] *= 0.86;
-            p.life -= 1.0;
-        }
-        self.particles.retain(|p| p.life > 0.0);
-    }
-
     fn update_items(&mut self) {
         let player = self.pos;
         let alive = matches!(self.state, PlayerState::Alive);
@@ -3818,7 +3626,7 @@ impl Stage {
                 }
                 item.pos[0] += horizontal_velocity;
                 item.pos[1] += item.vy;
-                if item.pos[1] >= FIELD_H + 16.0 {
+                if item.pos[1] >= self.arcade[3] + 16.0 {
                     self.items.remove(index);
                     self.world.decrease_subrank(3);
                     continue;
@@ -3844,11 +3652,8 @@ impl Stage {
     }
 
     fn collect_item(&mut self, kind: i32, pos: [f32; 2]) {
-        let color = match kind {
-            1 | 6 => [0.5, 0.7, 1.0], // point / point-bullet = blue
-            3 | 5 => [1.0, 0.6, 0.6], // bomb/life = red
-            _ => [1.0, 0.4, 0.4],     // power = red
-        };
+        let before_score = self.score;
+        let before_power = self.world.power;
         // Per-item subrank (ItemManager.cpp collect switch): small power +1,
         // point +30 (high) / +3, bomb +5, life +200; big/full power and
         // point-bullet give none.
@@ -3874,7 +3679,7 @@ impl Stage {
             6 => {
                 // ITEM_POINT_BULLET: (grazeInStage/3)*10 + 500, or 100 while
                 // a bomb is active.
-                let graze_in_stage = self.graze - self.graze_start;
+                let graze_in_stage = self.graze_in_stage;
                 self.score += if self.bombing > 0 {
                     100
                 } else {
@@ -3891,8 +3696,65 @@ impl Stage {
             5 => self.world.increase_subrank(200),
             _ => {}
         }
-        self.spawn_burst(pos, 4, 1.5, color, 6.0);
-        self.events.push(Event::Sfx("item00"));
+        let white = [1.0; 4];
+        let yellow = [1.0, 1.0, 0.0, 1.0];
+        let power_up = [8, 16, 32, 48, 64, 80, 96, 128]
+            .iter()
+            .any(|threshold| before_power < *threshold && self.world.power >= *threshold);
+        match kind {
+            0 | 2 => {
+                if power_up {
+                    self.score_popups.spawn(
+                        false,
+                        pos,
+                        -1,
+                        [128.0 / 255.0, 192.0 / 255.0, 1.0, 1.0],
+                    );
+                    self.events.push(Event::SfxIdx(31));
+                } else {
+                    let value = self.score - before_score;
+                    self.score_popups.spawn(
+                        false,
+                        pos,
+                        value,
+                        if value >= 12800 { yellow } else { white },
+                    );
+                }
+            }
+            1 => {
+                let maximum = match self.world.difficulty {
+                    2 => 150000,
+                    3 => 200000,
+                    4 => 300000,
+                    _ => 100000,
+                };
+                let value = self.score - before_score;
+                self.score_popups.spawn(
+                    false,
+                    pos,
+                    value,
+                    if value >= maximum { yellow } else { white },
+                );
+            }
+            4 => {
+                if before_power < 128 {
+                    self.score_popups.spawn(
+                        false,
+                        pos,
+                        -1,
+                        [128.0 / 255.0, 192.0 / 255.0, 1.0, 1.0],
+                    );
+                    self.events.push(Event::SfxIdx(31));
+                }
+                self.score_popups.spawn(false, pos, 1000, white);
+            }
+            5 => self.events.push(Event::SfxIdx(28)),
+            6 => self
+                .score_popups
+                .spawn(true, pos, self.score - before_score, white),
+            _ => {}
+        }
+        self.events.push(Event::SfxIdx(21));
     }
 
     /// ItemManager power-item collection: below max, +`amount` power and +10
@@ -3946,16 +3808,20 @@ impl Stage {
         let events: Vec<WorldEvent> = self.world.events.drain(..).collect();
         for ev in events {
             match ev {
+                WorldEvent::ScorePopup(pos, value, color) => {
+                    self.score_popups.spawn(false, pos, value, color)
+                }
                 WorldEvent::Sfx(idx) => {
-                    // SoundIdx indexes g_SFXList directly (SFX_BY_IDX).
-                    let name = SFX_BY_IDX.get(idx as usize).copied().unwrap_or("tan00");
-                    self.events.push(Event::Sfx(name));
+                    if let Ok(index) = u8::try_from(idx) {
+                        self.events.push(Event::SfxIdx(index));
+                    }
                 }
                 WorldEvent::SpellcardStart(id, sprite, raw) => {
                     self.spell_active = true;
                     // Original Japanese name: pre-baked texture + decoded string.
                     self.spell_name = th06_engine::text::decode_shiftjis(&raw);
                     self.spell_name_cur = self.spell_name_tex.get(&id).copied();
+                    self.spell_name_byte_len = raw.len();
                     self.spell_id = id;
                     if !self.is_replay
                         && let Some(record) = self.spellcard_records.get_mut(id as usize)
@@ -4053,20 +3919,60 @@ impl Stage {
         }
     }
 
-    /// Resolve a player-anm script id to its first sprite from the *current*
-    /// character's sheet (player00 Reimu / player01 Marisa), so the same shot
-    /// id renders that character's own bullet art.
-    fn shot_sprite_ref(&self, script_id: i32) -> Option<SpriteRef> {
-        let script = self.player_scripts.get(&script_id)?;
-        let idx = script
-            .iter()
-            .find(|i| i.opcode == 1)
-            .map(|i| i.arg_u32(0))?;
-        let sp = self.player_sprites.get(&idx)?;
-        Some(SpriteRef {
+    fn player_sprite_cmd(
+        &self,
+        runner: &AnmRunner,
+        pos: [f32; 2],
+        rotation: f32,
+    ) -> Option<DrawCmd> {
+        if !runner.visible() {
+            return None;
+        }
+        let sprite = self.player_sprites.get(&runner.sprite?)?;
+        let [tw, th] = self.player_tex_size;
+        let width = sprite.width * runner.scale[0].abs();
+        let height = sprite.height * runner.scale[1].abs();
+        let (mut u0, mut u1) = (sprite.x / tw, (sprite.x + sprite.width) / tw);
+        let (mut v0, mut v1) = (sprite.y / th, (sprite.y + sprite.height) / th);
+        if runner.flip_x ^ (runner.scale[0] < 0.0) {
+            std::mem::swap(&mut u0, &mut u1);
+        }
+        if runner.flip_y ^ (runner.scale[1] < 0.0) {
+            std::mem::swap(&mut v0, &mut v1);
+        }
+        Some(DrawCmd {
             tex: self.player_tex,
-            rect: [sp.x, sp.y, sp.width, sp.height],
+            dst: [
+                FIELD_X + pos[0] - if runner.corner { 0.0 } else { width / 2.0 },
+                FIELD_Y + pos[1] - if runner.corner { 0.0 } else { height / 2.0 },
+                width,
+                height,
+            ],
+            src: [u0, v0, u1, v1],
+            tint: [
+                runner.color[0],
+                runner.color[1],
+                runner.color[2],
+                runner.alpha,
+            ],
+            // Draw2/Draw3 work in D3D's Y-up world before its screen projection.
+            rot: -rotation,
+            additive: runner.additive,
+            color_add: false,
         })
+    }
+
+    fn draw_player_shots(&self, collided: bool, cmds: &mut Vec<DrawCmd>) {
+        for shot in self.shots.iter().filter(|shot| shot.collided == collided) {
+            let rotation = if shot.runner.auto_rotate {
+                std::f32::consts::FRAC_PI_2 - normalize_angle(shot.angle + std::f32::consts::PI)
+            } else {
+                shot.runner.rotation
+            };
+            if let Some(cmd) = self.player_sprite_cmd(&shot.runner, shot.pos, rotation) {
+                cmds.push(cmd);
+            }
+        }
     }
 
     /// Draw one bomb sprite runner (player sheet) centred at screen (cx,cy).
@@ -4081,6 +3987,9 @@ impl Stage {
         scale: Option<[f32; 2]>,
     ) -> Option<DrawCmd> {
         let r = self.bomb_sprites[slot].as_ref()?;
+        if !r.visible() {
+            return None;
+        }
         let sp = self.player_sprites.get(&r.sprite?)?;
         let [tw, th] = self.player_tex_size;
         let s = scale.unwrap_or(r.scale);
@@ -4096,8 +4005,9 @@ impl Stage {
             dst: [cx - w / 2.0, cy - h / 2.0, w, h],
             src: [u0, sy / th, u1, (sy + sp.height) / th],
             tint: [r.color[0], r.color[1], r.color[2], r.alpha],
-            rot,
+            rot: -rot,
             additive: r.additive,
+            color_add: false,
         })
     }
 
@@ -4119,191 +4029,7 @@ impl Stage {
             ));
         }
 
-        // Enemies via their ANM state. The decomp (EnemyManager::OnDraw) draws
-        // sub-vms 0-3, then the primary vm, then sub-vms 4-7, each at the enemy's
-        // position plus the runner's own position offset.
-        for (i, e) in self.enemies.iter().enumerate() {
-            if !e.occupied || e.invisible {
-                continue;
-            }
-            let (ex, ey) = (FIELD_X + e.pos[0], FIELD_Y + e.pos[1]);
-            let draw_sub = |s: usize, cmds: &mut Vec<DrawCmd>| {
-                let Some(sv) = &self.sub_anims[i][s] else {
-                    return;
-                };
-                if !sv.visible() {
-                    return; // an ended/spriteless sub-vm is inactive (anmFileIndex < 0)
-                }
-                let Some(script) = self.enemy_scripts.get(&e.sub_scripts[s]) else {
-                    return;
-                };
-                // op26 SetAutoRotate: the sub-vm faces the enemy's angle
-                // (EnemyManager.cpp:794), like the primary vm's rotateAnm flag.
-                let rot = if sv.auto_rotate { e.angle } else { sv.rotation };
-                if let Some(cmd) = sprite_cmd_from(
-                    sv,
-                    script,
-                    ex + sv.pos_offset[0],
-                    ey + sv.pos_offset[1],
-                    rot,
-                    sv.additive,
-                ) {
-                    cmds.push(cmd);
-                }
-            };
-            for s in 0..4 {
-                draw_sub(s, &mut cmds);
-            }
-            if let Some(anim) = &self.anims[i]
-                && let Some(script) = self.enemy_scripts.get(&e.anm_script)
-            {
-                // op120 ANMFLAGROTATION: face the movement angle when flagged.
-                let rot = if e.rotate_anm { e.angle } else { anim.rotation };
-                if let Some(cmd) = sprite_cmd_from(
-                    anim,
-                    script,
-                    ex + anim.pos_offset[0],
-                    ey + anim.pos_offset[1],
-                    rot,
-                    anim.additive,
-                ) {
-                    cmds.push(cmd);
-                }
-            }
-            for s in 4..8 {
-                draw_sub(s, &mut cmds);
-            }
-        }
-
-        // (Boss health bar / timer / spell name are drawn in draw_hud, over the
-        // field, from front.anm sprites — Gui::DrawGameScene.)
-
-        // Items (etama3 sprites 0..6, index = item kind). Point-bullet items
-        // (kind 6) fall back to the point-item sprite if the sheet lacks one.
-        let [btw, bth] = self.bullet_tex_size;
-        for it in &self.items {
-            let sp = match self.bullet_sprites.get(&(it.kind as u32)) {
-                Some(sp) => sp,
-                None if it.kind == 6 => match self.bullet_sprites.get(&1) {
-                    Some(sp) => sp,
-                    None => continue,
-                },
-                None => continue,
-            };
-            cmds.push(DrawCmd {
-                tex: TEX_BULLET,
-                dst: [
-                    FIELD_X + it.pos[0] - sp.width / 2.0,
-                    FIELD_Y + it.pos[1] - sp.height / 2.0,
-                    sp.width,
-                    sp.height,
-                ],
-                src: [
-                    sp.x / btw,
-                    sp.y / bth,
-                    (sp.x + sp.width) / btw,
-                    (sp.y + sp.height) / bth,
-                ],
-                tint: [1.0, 1.0, 1.0, 1.0],
-                rot: 0.0,
-                additive: false,
-            });
-        }
-
-        // Player shots: each shot's anm script id is resolved against the
-        // current character's own sheet, so Reimu shows amulets and Marisa her
-        // stars/missiles from the same ids. Tall sprites (needles/lasers) are
-        // oriented along their travel direction.
-        for s in &self.shots {
-            let sr = self.shot_sprite_ref(s.anm_script).unwrap_or(AMULET);
-            let mut cmd = sprite_at(sr, s.pos, 0.95);
-            if sr.rect[3] > sr.rect[2] * 1.4 {
-                cmd.rot = s.vel[1].atan2(s.vel[0]) + std::f32::consts::FRAC_PI_2;
-            }
-            cmds.push(cmd);
-        }
-
-        // MarisaB orb beams behind the player.
-        if self.beam_dmg > 0 {
-            for o in self.orb_positions() {
-                cmds.push(DrawCmd {
-                    tex: TEX_WHITE,
-                    dst: [FIELD_X + o[0] - 5.0, FIELD_Y, 10.0, o[1]],
-                    src: [0.25, 0.25, 0.75, 0.75],
-                    tint: [0.7, 0.5, 1.0, 0.55 + 0.2 * (self.anim as f32 * 0.5).sin()],
-                    rot: 0.0,
-                    additive: false,
-                });
-            }
-        }
-
-        // Player: the player anm runner drives the idle/banking sprite.
-        if !matches!(self.state, PlayerState::GameOver) {
-            let (scale, alpha, additive) = match self.state {
-                PlayerState::Dead(elapsed) if self.dying == 0 => {
-                    let factor = elapsed.saturating_sub(1) as f32 / 30.0;
-                    (
-                        [1.0 - factor, 3.0 * factor + 1.0],
-                        ((255.0 - elapsed.saturating_sub(1) as f32 * 255.0 / 30.0) as u32 & 255)
-                            as f32
-                            / 255.0,
-                        true,
-                    )
-                }
-                PlayerState::Spawning(elapsed) => {
-                    let timer = elapsed.saturating_sub(1);
-                    let factor = 1.0 - timer as f32 / 30.0;
-                    (
-                        [1.0 - factor, 2.0 * factor + 1.0],
-                        ((timer * 255 / 30) & 255) as f32 / 255.0,
-                        true,
-                    )
-                }
-                _ => ([1.0, 1.0], 1.0, false),
-            };
-            {
-                let [ptw, pth] = self.player_tex_size;
-                let sp = self
-                    .player_runner
-                    .sprite
-                    .and_then(|i| self.player_sprites.get(&i))
-                    .unwrap_or_else(|| &self.player_sprites[&0]);
-                let (mut u0, mut u1) = (sp.x / ptw, (sp.x + sp.width) / ptw);
-                if self.player_runner.flip_x {
-                    std::mem::swap(&mut u0, &mut u1);
-                }
-                cmds.push(DrawCmd {
-                    tex: self.player_tex,
-                    dst: [
-                        FIELD_X + self.pos[0] - sp.width * scale[0] / 2.0,
-                        FIELD_Y + self.pos[1] - sp.height * scale[1] / 2.0,
-                        sp.width * scale[0],
-                        sp.height * scale[1],
-                    ],
-                    src: [u0, sp.y / pth, u1, (sp.y + sp.height) / pth],
-                    tint: [1.0, 1.0, 1.0, alpha],
-                    rot: 0.0,
-                    additive,
-                });
-            }
-            // Floating option orbs (appear at power >= 8).
-            if self.world.power >= 8
-                && matches!(self.state, PlayerState::Alive | PlayerState::Cleared(_))
-            {
-                for o in self.orb_positions() {
-                    let mut orb = sprite_at(AMULET, o, 0.8);
-                    orb.tint = [1.0, 0.6, 0.7, 0.95];
-                    cmds.push(orb);
-                }
-            }
-            // Focus hitbox marker: fades/spins in while focusing.
-            if self.focus_anim > 0.01 {
-                let mut m = sprite_at(HITBOX_MARKER, self.pos, 0.95);
-                m.tint = [1.0, 1.0, 1.0, self.focus_anim];
-                m.rot = self.anim as f32 * 0.1;
-                cmds.push(m);
-            }
-        }
+        self.draw_player_shots(false, &mut cmds);
 
         // BombData::DarkenViewport: a black square over the playfield whose alpha
         // ramps 0..176 over the first 60 frames, holds at 176, then ramps back to
@@ -4320,7 +4046,7 @@ impl Stage {
             };
             cmds.push(rect(
                 [FIELD_X, FIELD_Y, FIELD_W, FIELD_H],
-                [0.0, 0.0, 0.0, level / 255.0],
+                [0.0, 0.0, 0.0, level as i32 as f32 / 255.0],
             ));
         }
 
@@ -4415,29 +4141,234 @@ impl Stage {
             }
         }
 
-        // Death / pickup puffs (under bullets, additive-looking glow).
-        for p in &self.particles {
-            let a = (p.life / p.max_life).clamp(0.0, 1.0);
-            let s = p.size * (1.5 - a); // expand as it fades
+        // Player: the player anm runner drives the idle/banking sprite.
+        if !matches!(self.state, PlayerState::GameOver) {
+            let (scale, alpha, additive) = match self.state {
+                PlayerState::Dead(elapsed) if self.dying == 0 => {
+                    let factor = elapsed.saturating_sub(1) as f32 / 30.0;
+                    (
+                        [1.0 - factor, 3.0 * factor + 1.0],
+                        ((255.0 - elapsed.saturating_sub(1) as f32 * 255.0 / 30.0) as u32 & 255)
+                            as f32
+                            / 255.0,
+                        true,
+                    )
+                }
+                PlayerState::Spawning(elapsed) => {
+                    let timer = elapsed.saturating_sub(1);
+                    let factor = 1.0 - timer as f32 / 30.0;
+                    (
+                        [1.0 - factor, 2.0 * factor + 1.0],
+                        ((timer * 255 / 30) & 255) as f32 / 255.0,
+                        true,
+                    )
+                }
+                _ => ([1.0, 1.0], 1.0, false),
+            };
+            {
+                let [ptw, pth] = self.player_tex_size;
+                let sp = self
+                    .player_runner
+                    .sprite
+                    .and_then(|i| self.player_sprites.get(&i))
+                    .unwrap_or_else(|| &self.player_sprites[&0]);
+                let (mut u0, mut u1) = (sp.x / ptw, (sp.x + sp.width) / ptw);
+                if self.player_runner.flip_x {
+                    std::mem::swap(&mut u0, &mut u1);
+                }
+                let flash = matches!(self.state, PlayerState::Alive)
+                    && self.invuln > 0
+                    && self.invuln % 8 < 2;
+                cmds.push(DrawCmd {
+                    tex: self.player_tex,
+                    dst: [
+                        FIELD_X + self.pos[0] - sp.width * scale[0] / 2.0,
+                        FIELD_Y + self.pos[1] - sp.height * scale[1] / 2.0,
+                        sp.width * scale[0],
+                        sp.height * scale[1],
+                    ],
+                    src: [u0, sp.y / pth, u1, (sp.y + sp.height) / pth],
+                    tint: if flash {
+                        [64.0 / 255.0, 64.0 / 255.0, 64.0 / 255.0, alpha]
+                    } else {
+                        [1.0, 1.0, 1.0, alpha]
+                    },
+                    rot: 0.0,
+                    additive,
+                    color_add: flash,
+                });
+            }
+            if self.orb_state != OrbState::Hidden
+                && matches!(self.state, PlayerState::Alive | PlayerState::Cleared(_))
+            {
+                for (orb, runner) in self.orb_positions().into_iter().zip(&self.orb_runners) {
+                    if let Some(cmd) = self.player_sprite_cmd(runner, orb, runner.rotation) {
+                        cmds.push(cmd);
+                    }
+                }
+            }
+        }
+
+        // Enemies via their ANM state. The decomp (EnemyManager::OnDraw) draws
+        // sub-vms 0-3, then the primary vm, then sub-vms 4-7, each at the enemy's
+        // position plus the runner's own position offset.
+        for (i, e) in self.enemies.iter().enumerate() {
+            if !e.occupied || e.invisible {
+                continue;
+            }
+            let (ex, ey) = (FIELD_X + e.pos[0], FIELD_Y + e.pos[1]);
+            let draw_sub = |s: usize, cmds: &mut Vec<DrawCmd>| {
+                let Some(sv) = &self.sub_anims[i][s] else {
+                    return;
+                };
+                if !sv.visible() {
+                    return; // an ended/spriteless sub-vm is inactive (anmFileIndex < 0)
+                }
+                let Some(script) = self.enemy_scripts.get(&e.sub_scripts[s]) else {
+                    return;
+                };
+                // op26 SetAutoRotate: the sub-vm faces the enemy's angle
+                // (EnemyManager.cpp:794), like the primary vm's rotateAnm flag.
+                let rot = if sv.auto_rotate { e.angle } else { sv.rotation };
+                if let Some(cmd) = sprite_cmd_from(
+                    sv,
+                    script,
+                    ex + sv.pos_offset[0],
+                    ey + sv.pos_offset[1],
+                    rot,
+                    sv.additive,
+                ) {
+                    cmds.push(cmd);
+                }
+            };
+            for s in 0..4 {
+                draw_sub(s, &mut cmds);
+            }
+            if let Some(anim) = &self.anims[i]
+                && let Some(script) = self.enemy_scripts.get(&e.anm_script)
+            {
+                // op120 ANMFLAGROTATION: face the movement angle when flagged.
+                let rot = if e.rotate_anm { e.angle } else { anim.rotation };
+                if let Some(cmd) = sprite_cmd_from(
+                    anim,
+                    script,
+                    ex + anim.pos_offset[0],
+                    ey + anim.pos_offset[1],
+                    rot,
+                    anim.additive,
+                ) {
+                    cmds.push(cmd);
+                }
+            }
+            for s in 4..8 {
+                draw_sub(s, &mut cmds);
+            }
+        }
+
+        // (Boss health bar / timer / spell name are drawn in draw_hud, over the
+        // field, from front.anm sprites — Gui::DrawGameScene.)
+
+        self.draw_player_shots(true, &mut cmds);
+
+        let [tw, th] = self.bullet_tex_size;
+        // Laser ANM dimensions and state are computed before advancing the
+        // clock, just as BulletManager::OnUpdate/OnDraw. The base glow remains
+        // visible during despawn when its original offset condition permits.
+        for laser in &self.world.lasers {
+            if !laser.in_use {
+                continue;
+            }
+            let length = (laser.end_offset - laser.start_offset).max(0.0);
+            let width = laser.draw_width.max(0.0);
+            let midpoint = laser.start_offset + length / 2.0;
+            let cx = FIELD_X + laser.pos[0] + laser.angle.cos() * midpoint;
+            let cy = FIELD_Y + laser.pos[1] + laser.angle.sin() * midpoint;
+            let color = laser.color.max(0) as u32;
+            let base = if laser.script == 9 { 146 } else { 62 };
+            if let Some(sprite) = self.bullet_sprites.get(&(base + color)) {
+                cmds.push(DrawCmd {
+                    tex: TEX_BULLET,
+                    dst: [cx - width / 2.0, cy - length / 2.0, width, length],
+                    src: [
+                        sprite.x / tw,
+                        sprite.y / th,
+                        (sprite.x + sprite.width) / tw,
+                        (sprite.y + sprite.height) / th,
+                    ],
+                    tint: [1.0, 1.0, 1.0, laser.draw_alpha],
+                    rot: laser.angle - std::f32::consts::FRAC_PI_2,
+                    additive: true,
+                    color_add: false,
+                });
+            }
+            if (laser.start_offset < 16.0 || laser.speed == 0.0)
+                && let Some(sprite) = self.bullet_sprites.get(
+                    &(140
+                        + crate::projectiles::SPAWN_COLORS_16
+                            .get(color as usize)
+                            .copied()
+                            .unwrap_or(0)),
+                )
+            {
+                let ox = FIELD_X + laser.pos[0] + laser.angle.cos() * laser.start_offset;
+                let oy = FIELD_Y + laser.pos[1] + laser.angle.sin() * laser.start_offset;
+                let mut scale = laser.width / 10.0 * ((16.0 - laser.start_offset) / 16.0);
+                if scale < 0.0 {
+                    scale = laser.width / 10.0;
+                }
+                let (width, height) = (sprite.width * scale, sprite.height * scale);
+                cmds.push(DrawCmd {
+                    tex: TEX_BULLET,
+                    dst: [ox - width / 2.0, oy - height / 2.0, width, height],
+                    src: [
+                        sprite.x / tw,
+                        sprite.y / th,
+                        (sprite.x + sprite.width) / tw,
+                        (sprite.y + sprite.height) / th,
+                    ],
+                    tint: [1.0; 4],
+                    rot: 0.0,
+                    additive: true,
+                    color_add: false,
+                });
+            }
+        }
+
+        // Items (etama3 sprites 0..6, index = item kind). Point-bullet items
+        // (kind 6) fall back to the point-item sprite if the sheet lacks one.
+        let [btw, bth] = self.bullet_tex_size;
+        for it in &self.items {
+            let sp = match self.bullet_sprites.get(&(it.kind as u32)) {
+                Some(sp) => sp,
+                None if it.kind == 6 => match self.bullet_sprites.get(&1) {
+                    Some(sp) => sp,
+                    None => continue,
+                },
+                None => continue,
+            };
             cmds.push(DrawCmd {
-                tex: TEX_WHITE,
+                tex: TEX_BULLET,
                 dst: [
-                    FIELD_X + p.pos[0] - s / 2.0,
-                    FIELD_Y + p.pos[1] - s / 2.0,
-                    s,
-                    s,
+                    FIELD_X + it.pos[0] - sp.width / 2.0,
+                    FIELD_Y + it.pos[1] - sp.height / 2.0,
+                    sp.width,
+                    sp.height,
                 ],
-                src: [0.25, 0.25, 0.75, 0.75],
-                tint: [p.color[0], p.color[1], p.color[2], a * 0.8],
+                src: [
+                    sp.x / btw,
+                    sp.y / bth,
+                    (sp.x + sp.width) / btw,
+                    (sp.y + sp.height) / bth,
+                ],
+                tint: [1.0, 1.0, 1.0, 1.0],
                 rot: 0.0,
                 additive: false,
+                color_add: false,
             });
         }
 
         // Particle effects (etama4) via each effect's ANM runner — death
-        // splashes, item-attract glows, etc. Drawn under the bullets. (NOTE: the
-        // glow sprites are additively blended in the original; the engine only
-        // does alpha tint, so glows read slightly dim — #17.)
+        // splashes, item-attract glows, etc., with original additive blending.
         let [etw, eth] = self.eff_tex_size;
         for e in self.world.effects.iter().flatten() {
             let Some(idx) = e.runner.sprite else { continue };
@@ -4478,6 +4409,7 @@ impl Stage {
                     tint,
                     rot: e.runner.rotation,
                     additive: e.runner.additive,
+                    color_add: false,
                 });
                 continue;
             }
@@ -4495,114 +4427,87 @@ impl Stage {
                 tint,
                 rot: e.runner.rotation,
                 additive: e.runner.additive,
+                color_add: false,
             });
         }
 
-        // Bullets from the original scripts. Directional types (auto-rotate
-        // flag in etama3.anm) face their travel angle; round types stay upright.
+        // BulletManager draws the original size/type groups in four passes.
+        // Spawn and cancellation states select their own ANM, not the bullet's
+        // normal sprite; huge bubbles use etama4 rather than etama3.
         let [tw, th] = self.bullet_tex_size;
-        for b in &self.world.bullets {
-            let Some(sp) = self.bullet_sprites.get(&b.sprite) else {
-                continue;
-            };
-            let rot = if self.bullet_autorotate[bullet_type_of(b.sprite)] {
-                // Decomp: rotation.z = pi/2 - angle, applied with the matrix
-                // [cos sin; -sin cos] (TranslateRotation). Our engine rotates with
-                // the opposite-handed [cos -sin; sin cos], so the equivalent angle
-                // is the negation: angle - pi/2.
-                b.angle - std::f32::consts::FRAC_PI_2
-            } else {
-                0.0
-            };
-            cmds.push(DrawCmd {
-                tex: TEX_BULLET,
-                dst: [
-                    FIELD_X + b.pos[0] - sp.width / 2.0,
-                    FIELD_Y + b.pos[1] - sp.height / 2.0,
-                    sp.width,
-                    sp.height,
-                ],
-                src: [
-                    sp.x / tw,
-                    sp.y / th,
-                    (sp.x + sp.width) / tw,
-                    (sp.y + sp.height) / th,
-                ],
-                tint: [1.0, 1.0, 1.0, 1.0],
-                rot,
-                additive: false,
-            });
+        for group in 0..4 {
+            for bullet in &self.world.bullets {
+                let kind = bullet.type_index;
+                let draw_group = if bullet.height > 16.0 {
+                    0
+                } else if bullet.height == 16.0 && matches!(kind, 1 | 3) {
+                    1
+                } else if bullet.height == 16.0 {
+                    2
+                } else {
+                    3
+                };
+                if draw_group != group {
+                    continue;
+                }
+                let visual = bullet.visual();
+                if visual.is_some_and(|runner| !runner.visible()) {
+                    continue;
+                }
+                let index = visual
+                    .and_then(|runner| runner.sprite)
+                    .unwrap_or(bullet.sprite);
+                let effect_texture = bullet.visuals.as_ref().is_some_and(|v| v.effect_texture);
+                let (sprites, tex, [sheet_w, sheet_h]) = if effect_texture {
+                    (&self.eff_sprites, self.eff_tex, self.eff_tex_size)
+                } else {
+                    (&self.bullet_sprites, TEX_BULLET, [tw, th])
+                };
+                let Some(sprite) = sprites.get(&index) else {
+                    continue;
+                };
+                let scale = visual.map_or([1.0; 2], |runner| runner.scale);
+                let width = sprite.width * scale[0].abs();
+                let height = sprite.height * scale[1].abs();
+                let rotate =
+                    visual.map_or(self.bullet_autorotate[kind], |runner| runner.auto_rotate);
+                let rotation = if rotate {
+                    bullet.angle - std::f32::consts::FRAC_PI_2
+                } else {
+                    visual.map_or(0.0, |runner| -runner.rotation)
+                };
+                let mut src = [
+                    sprite.x / sheet_w,
+                    sprite.y / sheet_h,
+                    (sprite.x + sprite.width) / sheet_w,
+                    (sprite.y + sprite.height) / sheet_h,
+                ];
+                if visual.is_some_and(|runner| runner.flip_x) {
+                    src.swap(0, 2);
+                }
+                if visual.is_some_and(|runner| runner.flip_y) {
+                    src.swap(1, 3);
+                }
+                cmds.push(DrawCmd {
+                    tex,
+                    dst: [
+                        FIELD_X + bullet.pos[0] - width / 2.0,
+                        FIELD_Y + bullet.pos[1] - height / 2.0,
+                        width,
+                        height,
+                    ],
+                    src,
+                    tint: [1.0, 1.0, 1.0, visual.map_or(1.0, |runner| runner.alpha)],
+                    rot: rotation,
+                    additive: visual.is_some_and(|runner| runner.additive),
+                    color_add: false,
+                });
+            }
         }
 
-        // Lasers: the real etama3 laser sprite (ANM_SPRITE_BULLET3_LASER = 146,
-        // + colour offset) stretched along the lit segment, plus the glowing
-        // base ball (SPAWN_BIG_BALL = 140) at the origin — like SpawnLaserPattern.
-        for l in &self.world.lasers {
-            if !l.in_use {
-                continue;
-            }
-            let len = (l.end_offset - l.start_offset).max(0.0);
-            if len <= 0.0 {
-                continue;
-            }
-            let width = match l.state {
-                0 => 1.2 + (l.width - 1.2) * (l.timer as f32 / l.start_time.max(1) as f32),
-                1 => l.width,
-                _ => l.width * (1.0 - l.timer as f32 / l.despawn_duration.max(1) as f32),
-            }
-            .max(0.0);
-            let mid = l.start_offset + len / 2.0;
-            let cx = FIELD_X + l.pos[0] + l.angle.cos() * mid;
-            let cy = FIELD_Y + l.pos[1] + l.angle.sin() * mid;
-            let color = l.color.max(0) as u32;
-            if let Some(sp) = self.bullet_sprites.get(&(146 + color)) {
-                // Beam: the laser sprite stretched to the lit length x width.
-                cmds.push(DrawCmd {
-                    tex: TEX_BULLET,
-                    dst: [cx - len / 2.0, cy - width / 2.0, len, width],
-                    src: [
-                        sp.x / tw,
-                        sp.y / th,
-                        (sp.x + sp.width) / tw,
-                        (sp.y + sp.height) / th,
-                    ],
-                    tint: [1.0, 1.0, 1.0, 1.0],
-                    rot: l.angle,
-                    additive: true, // laser beam glows (etama3 laser op13)
-                });
-            } else {
-                // Fallback (sprite missing): a tinted rect.
-                let tint = LASER_COLORS[(l.color as usize) % LASER_COLORS.len()];
-                cmds.push(DrawCmd {
-                    tex: TEX_WHITE,
-                    dst: [cx - len / 2.0, cy - width / 2.0, len, width],
-                    src: [0.25, 0.25, 0.75, 0.75],
-                    tint,
-                    rot: l.angle,
-                    additive: true,
-                });
-            }
-            // Glowing ball at the laser base, while it is warming up or active.
-            if l.state < 2
-                && let Some(sp) = self.bullet_sprites.get(&(140 + color))
-            {
-                let ox = FIELD_X + l.pos[0] + l.angle.cos() * l.start_offset;
-                let oy = FIELD_Y + l.pos[1] + l.angle.sin() * l.start_offset;
-                let s = (width * 2.0).max(sp.width);
-                cmds.push(DrawCmd {
-                    tex: TEX_BULLET,
-                    dst: [ox - s / 2.0, oy - s / 2.0, s, s],
-                    src: [
-                        sp.x / tw,
-                        sp.y / th,
-                        (sp.x + sp.width) / tw,
-                        (sp.y + sp.height) / th,
-                    ],
-                    tint: [1.0, 1.0, 1.0, 1.0],
-                    rot: 0.0,
-                    additive: true, // SpawnLaserPattern sets vm1 blendMode = One
-                });
-            }
+        if let Some(asset) = &self.pause_asset {
+            self.score_popups
+                .draw(&mut cmds, &asset.entry, asset.tex, [FIELD_X, FIELD_Y]);
         }
 
         // Boss attack timer at the field top-right, "%.2d" coloured by seconds
@@ -4632,6 +4537,12 @@ impl Stage {
             );
         }
 
+        if let Some(banner) = &self.bomb_banner
+            && let Some(runner) = &banner.portrait
+        {
+            self.draw_portrait(runner, &mut cmds);
+        }
+
         // Boss spellcard portrait (enemySpellcardPortrait): the boss face sprite
         // selected by spellcardSprite, slid in from (480,240) to (320,240) and
         // faded out by face*.anm script 3.
@@ -4639,47 +4550,16 @@ impl Stage {
             self.draw_portrait(r, &mut cmds);
         }
 
-        // Spellcard name announce: driven by text.anm script 7's VM (fly-in at
-        // (256,312) scale 3 -> shrink to 1 -> fly to (256,40) -> off). The name
-        // sprite is centre-anchored at the VM pos; the blue bar (front.anm
-        // script 24, enemySpellcardBackground) follows it, width strlen*15/2+16.
-        if let Some(r) = &self.spell_name_runner
-            && r.visible()
-            && let Some((slot, tw, th)) = self.spell_name_cur
+        if let Some(banner) = &self.bomb_banner
+            && let Some(runner) = &banner.name
         {
-            let scale = r.scale[0].max(0.01);
-            // The VM x is fixed at 256 until the fly-off; centre the name
-            // in the playfield, then follow the VM x once it flies off.
-            let cx = if r.pos[0] > 256.5 {
-                r.pos[0]
-            } else {
-                FIELD_X + FIELD_W / 2.0
-            };
-            let nw = tw * scale;
-            let nh = th * scale;
-            // Blue bar (front.anm 24) sized to the name texture + padding.
-            let bar_len = nw + 20.0 * scale;
-            if let Some(([sx, sy, sw, sh], _, bscale, _)) = self.hud.script_state(24) {
-                let ts = self.hud.tex_size();
-                let bh = sh * bscale[1];
-                cmds.push(DrawCmd {
-                    tex: self.hud.tex(),
-                    dst: [cx - bar_len / 2.0, r.pos[1] - bh / 2.0, bar_len, bh],
-                    src: [sx / ts, sy / ts, (sx + sw) / ts, (sy + sh) / ts],
-                    tint: [1.0, 1.0, 1.0, r.alpha],
-                    rot: 0.0,
-                    additive: false,
-                });
-            }
-            // Pre-baked JP name texture, centred at `cx`, scaled by the VM.
-            cmds.push(DrawCmd {
-                tex: slot,
-                dst: [cx - nw / 2.0, r.pos[1] - nh / 2.0, nw, nh],
-                src: [0.0, 0.0, 1.0, 1.0],
-                tint: [1.0, 1.0, 1.0, r.alpha],
-                rot: 0.0,
-                additive: false,
-            });
+            let (tex, len) = banner.textures[self.bomb_kind as usize];
+            self.draw_spell_banner(runner, tex, len, true, &mut cmds);
+        }
+        if let Some(runner) = &self.spell_name_runner
+            && let Some((tex, _, _)) = self.spell_name_cur
+        {
+            self.draw_spell_banner(runner, tex, self.spell_name_byte_len, false, &mut cmds);
         }
 
         // Stage-name intro (text.anm script 0): the STD stage title, lower-left,
@@ -4697,6 +4577,7 @@ impl Stage {
                 tint: [1.0, 1.0, 1.0, r.alpha],
                 rot: 0.0,
                 additive: false,
+                color_add: false,
             });
         }
 
@@ -4786,7 +4667,7 @@ impl Stage {
         {
             if self.lives < 8 {
                 self.lives += 1;
-                self.events.push(Event::Sfx("extend"));
+                self.events.push(Event::SfxIdx(28));
             }
             self.next_extend += 1;
             self.world.increase_subrank(200);
@@ -4838,6 +4719,7 @@ impl Stage {
                 tint: [1.0, 1.0, 1.0, alpha],
                 rot: 0.0,
                 additive: false,
+                color_add: false,
             });
         }
 
@@ -4857,6 +4739,7 @@ impl Stage {
                 tint: [1.0, 1.0, 1.0, alpha],
                 rot: 0.0,
                 additive: false,
+                color_add: false,
             });
         }
 
@@ -4938,6 +4821,7 @@ impl Stage {
                 tint: [1.0, 1.0, 1.0, 1.0],
                 rot: 0.0,
                 additive: false,
+                color_add: false,
             });
         }
         if power >= 128 {
@@ -5013,7 +4897,7 @@ impl Stage {
                 // Stage-clear bonus breakdown (Gui.cpp:88-172), drawn over the
                 // field at (GAME_REGION_LEFT+42, TOP+112).
                 let x = FIELD_X + 42.0;
-                let graze_in = (self.graze - self.graze_start).max(0);
+                let graze_in = self.graze_in_stage;
                 let (diff_text, _) = match self.world.difficulty {
                     0 => ("Easy Rank      * 0.5", 0),
                     2 => ("Hard Rank      * 1.2", 0),
@@ -5105,45 +4989,12 @@ impl Stage {
                     ],
                     rot: 0.0,
                     additive: false,
+                    color_add: false,
                 });
             }
         }
     }
 }
-
-/// etama3 bullet type (0..9) for a final sprite index, via the per-type base
-/// sprite ranges (`BULLET_BASE_SPRITE` is ascending).
-fn bullet_type_of(sprite: u32) -> usize {
-    let mut t = 0;
-    for (i, &base) in BULLET_BASE_SPRITE.iter().enumerate() {
-        if sprite >= base {
-            t = i;
-        } else {
-            break;
-        }
-    }
-    t
-}
-
-/// th06 bullet color palette, approximated (index = color offset).
-const LASER_COLORS: [[f32; 4]; 16] = [
-    [0.4, 0.4, 0.4, 0.8],
-    [0.9, 0.2, 0.2, 0.8],
-    [1.0, 0.4, 0.6, 0.8],
-    [0.7, 0.3, 0.9, 0.8],
-    [0.5, 0.3, 1.0, 0.8],
-    [0.3, 0.3, 1.0, 0.8],
-    [0.3, 0.6, 1.0, 0.8],
-    [0.3, 0.9, 1.0, 0.8],
-    [0.3, 1.0, 0.8, 0.8],
-    [0.3, 1.0, 0.4, 0.8],
-    [0.6, 1.0, 0.3, 0.8],
-    [0.8, 1.0, 0.3, 0.8],
-    [1.0, 1.0, 0.3, 0.8],
-    [1.0, 0.8, 0.3, 0.8],
-    [1.0, 0.6, 0.3, 0.8],
-    [1.0, 1.0, 1.0, 0.8],
-];
 
 /// Stage-clear bonus, an exact port of `Gui.cpp:935-963`:
 /// `(stage*1000 + grazeInStage*10 + power*100) * pointItems`, then (final stage
@@ -5216,6 +5067,7 @@ fn draw_num_scaled(cmds: &mut Vec<DrawCmd>, pos: [f32; 2], scale: f32, tint: [f3
                 tint,
                 rot: 0.0,
                 additive: false,
+                color_add: false,
             });
         }
         x += 14.0 * scale;
@@ -5247,6 +5099,7 @@ pub fn draw_text(cmds: &mut Vec<DrawCmd>, pos: [f32; 2], size: f32, tint: [f32; 
                 tint,
                 rot: 0.0,
                 additive: false,
+                color_add: false,
             });
         }
         x += size * 0.75;
@@ -5261,23 +5114,7 @@ fn rect(dst: [f32; 4], tint: [f32; 4]) -> DrawCmd {
         tint,
         rot: 0.0,
         additive: false,
-    }
-}
-
-fn sprite_at(s: SpriteRef, field_pos: [f32; 2], alpha: f32) -> DrawCmd {
-    let [x, y, w, h] = s.rect;
-    DrawCmd {
-        tex: s.tex,
-        dst: [
-            FIELD_X + field_pos[0] - w / 2.0,
-            FIELD_Y + field_pos[1] - h / 2.0,
-            w,
-            h,
-        ],
-        src: [x / 256.0, y / 256.0, (x + w) / 256.0, (y + h) / 256.0],
-        tint: [1.0, 1.0, 1.0, alpha],
-        rot: 0.0,
-        additive: false,
+        color_add: false,
     }
 }
 
@@ -5335,6 +5172,435 @@ mod tests {
         )
     }
 
+    fn attack_shot() -> Shot {
+        Shot {
+            pool_index: 0,
+            pos: [100.0; 2],
+            size: [12.0; 2],
+            vel: [2.0, -12.0],
+            damage: 48,
+            bt: 0,
+            anm_script: 64,
+            runner: AnmRunner::new(Vec::new()),
+            collided: false,
+            angle: 0.0,
+            motion: [0.0; 2],
+            spawn: 0,
+            laser_slot: 0,
+            age: 0,
+            spd: 0.0,
+        }
+    }
+
+    fn player_reference(mode: &str) -> String {
+        let binary = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../oracle/player/build/player_reference");
+        let output = std::process::Command::new(binary)
+            .arg(mode)
+            .output()
+            .expect("build oracle/player/build.py first");
+        assert!(output.status.success());
+        String::from_utf8(output.stdout).unwrap()
+    }
+
+    #[test]
+    fn player_opposing_keys_and_master_spark_diagonal_match_original_order() {
+        let mut s = stage(Difficulty::Normal, false, 1, 3);
+        s.character = Character::MarisaB;
+        s.pos = [100.0; 2];
+        s.bomb_move_mult = 0.3;
+        s.update_player(&Input::from_buttons(240, 0));
+        let speed = 5.0 / 2.0f32.sqrt();
+        assert_eq!(s.pos, [100.0 + speed * 0.3, 100.0 - speed * 0.3]);
+        assert_eq!(s.prev_hspeed, speed);
+    }
+
+    #[test]
+    #[ignore = "requires original decomp; build with TH06_DECOMP_SRC=... python3 oracle/player/build.py"]
+    fn original_cpp_player_movement_matches_all_input_focus_and_bomb_combinations() {
+        use std::fmt::Write;
+        let mut actual = String::new();
+        for scenario in 0..8 {
+            for directions in 0..16 {
+                let mut s = stage(Difficulty::Normal, false, 1, 3);
+                s.character = if scenario & 4 != 0 {
+                    Character::MarisaB
+                } else {
+                    Character::ReimuA
+                };
+                s.pos = [100.0; 2];
+                s.bomb_move_mult = if scenario & 2 != 0 { 0.3 } else { 1.0 };
+                s.player_scripts = (0..5).map(|id| (id, Vec::new())).collect();
+                s.update_player(&Input::from_buttons(
+                    directions * 16 + if scenario & 1 != 0 { 4 } else { 0 },
+                    0,
+                ));
+                writeln!(
+                    actual,
+                    "{scenario} {directions} {} {} {} {}",
+                    s.pos[0].to_bits(),
+                    s.pos[1].to_bits(),
+                    s.prev_hspeed.to_bits(),
+                    s.player_script_id
+                )
+                .unwrap();
+            }
+        }
+        assert_eq!(actual, player_reference("movement"));
+    }
+
+    #[test]
+    fn player_respawn_and_shot_bounds_use_the_shaken_game_region() {
+        let mut s = stage(Difficulty::Normal, false, 1, 3);
+        s.arcade = [FIELD_X + 4.0, FIELD_Y + 4.0, FIELD_W - 4.0, FIELD_H - 4.0];
+        s.state = PlayerState::Dead(30);
+        s.dying = 0;
+        s.update_player_lifecycle(&Input::default());
+        assert_eq!(s.pos, [190.0, 380.0]);
+        let mut shot = attack_shot();
+        shot.pos = [390.0, 100.0];
+        shot.vel = [0.0; 2];
+        shot.runner.set_sprite(0);
+        s.shots.push(shot);
+        s.update_shots();
+        assert!(s.shots.is_empty());
+        assert!(player_shot_in_bounds(
+            [390.0, 100.0],
+            [12.0; 2],
+            [384.0, 448.0]
+        ));
+        assert!(player_shot_in_bounds(
+            [f32::NAN, 100.0],
+            [12.0; 2],
+            [384.0, 448.0]
+        ));
+    }
+
+    #[test]
+    #[ignore = "requires original decomp; build with TH06_DECOMP_SRC=... python3 oracle/player/build.py"]
+    fn original_cpp_player_bounds_match_edges_shake_and_nan_positions() {
+        use std::fmt::Write;
+        let cases = [
+            [-6.0, 100.0, 12.0, 12.0, 384.0, 448.0],
+            [-6.001, 100.0, 12.0, 12.0, 384.0, 448.0],
+            [390.0, 100.0, 12.0, 12.0, 384.0, 448.0],
+            [390.001, 100.0, 12.0, 12.0, 384.0, 448.0],
+            [100.0, -6.0, 12.0, 12.0, 384.0, 448.0],
+            [100.0, -6.001, 12.0, 12.0, 384.0, 448.0],
+            [100.0, 454.0, 12.0, 12.0, 384.0, 448.0],
+            [100.0, 454.001, 12.0, 12.0, 384.0, 448.0],
+            [390.0, 100.0, 12.0, 12.0, 380.0, 444.0],
+            [100.0, 454.0, 12.0, 12.0, 380.0, 444.0],
+            [f32::NAN, 100.0, 12.0, 12.0, 384.0, 448.0],
+            [100.0, f32::NAN, 12.0, 12.0, 384.0, 448.0],
+        ];
+        let mut actual = String::new();
+        for (idx, [x, y, w, h, rw, rh]) in cases.into_iter().enumerate() {
+            let expected = player_shot_in_bounds([x, y], [w, h], [rw, rh]);
+            let mut enemy = Enemy::default();
+            enemy.pos = [100.0, 100.0, 0.0];
+            assert!(enemy.update_bounds(w, h, [rw, rh]));
+            enemy.pos = [x, y, 0.0];
+            assert_eq!(
+                enemy.update_bounds(w, h, [rw, rh]),
+                expected,
+                "enemy bounds {idx}"
+            );
+            writeln!(actual, "{idx} {}", i32::from(expected)).unwrap();
+        }
+        assert_eq!(actual, player_reference("bounds"));
+    }
+
+    #[test]
+    fn player_attack_boxes_are_inclusive_and_missile_explosions_keep_damaging() {
+        let mut s = stage(Difficulty::Normal, false, 1, 3);
+        s.shots.push(attack_shot());
+        assert_eq!(s.calc_player_damage([114.0, 114.0, 0.0], [16.0; 2]).0, 48);
+        assert!(s.shots[0].collided);
+        assert_eq!(s.calc_player_damage([114.0, 114.0, 0.0], [16.0; 2]).0, 0);
+        s.shots.clear();
+        let mut missile = attack_shot();
+        missile.bt = 2;
+        missile.anm_script = 66;
+        missile.damage = 18;
+        s.shots.push(missile);
+        let hits = (0..4)
+            .map(|_| s.calc_player_damage([100.0, 100.0, 0.0], [16.0; 2]).0)
+            .collect::<Vec<_>>();
+        assert_eq!(hits, [18, 4, 1, 1]);
+        assert_eq!(s.shots[0].size, [42.0; 2]);
+        assert_eq!(s.shots[0].anm_script, 98);
+        assert_eq!(s.shots[0].vel, [2.0 / 4096.0, -12.0 / 4096.0]);
+    }
+
+    #[test]
+    fn player_shot_pool_reuses_first_slot_and_beams_outlive_released_fire() {
+        let mut s = stage(Difficulty::Normal, false, 1, 3);
+        s.character = Character::MarisaB;
+        s.world.power = 8;
+        s.update_orbs(false);
+        s.spawn_player_bullets(0);
+        assert_eq!(s.shots.len(), 3);
+        assert_eq!(s.laser_timers, [120; 2]);
+        assert_eq!(s.shots.iter().filter(|shot| shot.bt == 3).count(), 2);
+        s.update_shots();
+        s.update_player_fire(&Input::default());
+        assert_eq!(s.shots.iter().filter(|shot| shot.bt == 3).count(), 2);
+        assert_eq!(s.laser_timers, [119; 2]);
+        s.shots.remove(0);
+        s.spawn_player_bullets(5);
+        assert_eq!(s.shots[0].pool_index, 0);
+        s.shots = (0..80)
+            .map(|pool_index| {
+                let mut shot = attack_shot();
+                shot.pool_index = pool_index;
+                shot
+            })
+            .collect();
+        s.spawn_player_bullets(0);
+        assert_eq!(s.shots.len(), 80);
+        s.shots.clear();
+        s.bomb_in_use = true;
+        s.fire_timer = 0;
+        s.state = PlayerState::Alive;
+        s.update_player_fire(&Input::from_buttons(1, 0));
+        assert!(s.shots.is_empty());
+        assert_eq!(s.fire_timer, 1);
+    }
+
+    #[test]
+    fn orb_focus_uses_squared_easing_and_original_reverse_transition() {
+        let mut s = stage(Difficulty::Normal, false, 1, 3);
+        s.world.power = 8;
+        s.update_orbs(true);
+        assert_eq!(s.orb_offsets, [23.75, -4.0]);
+        for _ in 0..3 {
+            s.update_orbs(true);
+        }
+        assert_eq!(s.orb_offsets, [20.0, -16.0]);
+        s.update_orbs(false);
+        assert_eq!(s.orb_offsets, [12.0, -16.0]);
+        for _ in 0..4 {
+            s.update_orbs(false);
+        }
+        assert_eq!(s.orb_offsets, [24.0, 0.0]);
+    }
+
+    #[test]
+    #[ignore = "requires original decomp; build with TH06_DECOMP_SRC=... python3 oracle/player/build.py"]
+    fn original_cpp_player_damage_matches_rectangles_explosions_beams_and_bombs() {
+        use std::fmt::Write;
+        let mut actual = String::new();
+        for scenario in 0..18 {
+            let mut s = stage(Difficulty::Normal, false, 1, 3);
+            for (script, effect) in [(6, 3u32), (10, 5u32)] {
+                s.world.eff_scripts.insert(
+                    script,
+                    vec![AnmInstr {
+                        time: 0,
+                        opcode: 1,
+                        args: effect.to_le_bytes().to_vec(),
+                        offset: 0,
+                    }],
+                );
+            }
+            let mut b = attack_shot();
+            let mut pos = [100.0, 100.0, 0.0];
+            match scenario {
+                1 => pos[0] = 114.0,
+                2 => pos[0] = 114.001,
+                3 => pos = [114.0, 114.0, 0.0],
+                4 => {
+                    b.size[1] = 48.0;
+                    pos[1] = 132.0;
+                    b.anm_script = 66;
+                }
+                5 => b.collided = true,
+                6 => {
+                    b.collided = true;
+                    b.bt = 1;
+                }
+                7..=10 => {
+                    b.bt = 2;
+                    b.anm_script = scenario - 7 + 65;
+                    b.damage = 18 - (scenario - 7);
+                    b.age = match scenario {
+                        7 => 0,
+                        8 => 1,
+                        9 => 6,
+                        _ => 5,
+                    };
+                }
+                11 => {
+                    b.bt = 2;
+                    b.collided = true;
+                    b.anm_script = 97;
+                    b.damage = 4;
+                    b.age = 6;
+                    b.size = [32.0; 2];
+                }
+                12 => {
+                    b.bt = 3;
+                    b.damage = 3;
+                    s.player_particle_timer = 7;
+                }
+                13 => s.bomb_in_use = true,
+                14 => {
+                    s.bomb_in_use = true;
+                    b.bt = 2;
+                    b.damage = 2;
+                    b.anm_script = 65;
+                }
+                15..=17 => {
+                    b.pos[0] = 500.0;
+                    s.bomb_regions[0] = BombRect {
+                        size: [32.0; 2],
+                        pos: [100.0; 2],
+                    };
+                    s.bomb_region_dmg[0] = 8;
+                    s.player_particle_timer = 3;
+                    s.bomb_in_use = scenario != 16;
+                    if scenario == 17 {
+                        pos[0] = 125.0;
+                    }
+                }
+                _ => {}
+            }
+            s.shots.push(b);
+            for hit in 0..4 {
+                let (damage, bomb) = s.calc_player_damage(pos, [16.0; 2]);
+                let b = &s.shots[0];
+                let effects = s
+                    .world
+                    .effects
+                    .iter()
+                    .flatten()
+                    .map(|effect| effect.runner.sprite.unwrap())
+                    .collect::<Vec<_>>();
+                write!(
+                    actual,
+                    "{scenario} {hit} {damage} {} {} {} {} {} {} {} {} {} {} {}",
+                    u8::from(bomb),
+                    s.player_particle_timer,
+                    if b.collided { 2 } else { 1 },
+                    b.damage,
+                    b.size[0].to_bits(),
+                    b.size[1].to_bits(),
+                    b.vel[0].to_bits(),
+                    b.vel[1].to_bits(),
+                    b.anm_script,
+                    s.bomb_dmg_accum[0],
+                    effects.len()
+                )
+                .unwrap();
+                for effect in effects {
+                    write!(actual, " {effect}").unwrap();
+                }
+                actual.push('\n');
+            }
+        }
+        assert_eq!(actual, player_reference("damage"));
+    }
+
+    #[test]
+    #[ignore = "requires original decomp; build with TH06_DECOMP_SRC=... python3 oracle/player/build.py"]
+    fn original_cpp_player_motion_matches_homing_gravity_and_anchored_beams() {
+        use std::fmt::Write;
+        let mut actual = String::new();
+        for scenario in 0..10 {
+            let mut s = stage(Difficulty::Normal, false, 1, 3);
+            let mut b = attack_shot();
+            b.bt = 1;
+            b.spd = 3.0;
+            b.vel = [0.0, -3.0];
+            match scenario {
+                0 => s.last_enemy_hit = Some([110.0, 80.0]),
+                1 => {
+                    s.last_enemy_hit = Some([110.0, 80.0]);
+                    b.age = 39;
+                }
+                2 => {
+                    s.last_enemy_hit = Some([110.0, 80.0]);
+                    b.age = 40;
+                }
+                3 => b.collided = true,
+                4 => b.bt = 2,
+                5 => {
+                    b.bt = 2;
+                    b.collided = true;
+                }
+                6..=9 => {
+                    b.bt = 3;
+                    b.spawn = 1;
+                    b.motion = [2.0, 0.0];
+                    s.orbs_pos[0] = [120.0, 320.0];
+                    s.laser_timers[0] = match scenario {
+                        6 => 71,
+                        7 => 2,
+                        8 => 1,
+                        _ => 0,
+                    };
+                }
+                _ => {}
+            }
+            s.shots.push(b);
+            for frame in 0..4 {
+                s.update_shots();
+                let b = &s.shots[0];
+                writeln!(
+                    actual,
+                    "{scenario} {frame} {} {} {} {} {} {} {} {} {}",
+                    b.pos[0].to_bits(),
+                    b.pos[1].to_bits(),
+                    b.vel[0].to_bits(),
+                    b.vel[1].to_bits(),
+                    b.spd.to_bits(),
+                    b.size[1].to_bits(),
+                    b.runner.scale[1].to_bits(),
+                    b.age,
+                    s.laser_timers[0]
+                )
+                .unwrap();
+            }
+        }
+        let reference = player_reference("update")
+            .lines()
+            .map(|line| line.rsplit_once(' ').unwrap().0.to_owned() + "\n")
+            .collect::<String>();
+        assert_eq!(actual, reference);
+    }
+
+    #[test]
+    #[ignore = "requires original decomp; build with TH06_DECOMP_SRC=... python3 oracle/player/build.py"]
+    fn original_cpp_orb_focus_matches_reversals_and_power_loss() {
+        use std::fmt::Write;
+        let mut s = stage(Difficulty::Normal, false, 1, 3);
+        let mut actual = String::new();
+        for frame in 0..40 {
+            let focus = frame < 4 || (frame >= 8 && frame % 5 < 2);
+            s.world.power = if (22..26).contains(&frame) { 0 } else { 8 };
+            s.update_orbs(focus);
+            let state = match s.orb_state {
+                OrbState::Hidden => 0,
+                OrbState::Unfocused => 1,
+                OrbState::Focusing => 2,
+                OrbState::Focused => 3,
+                OrbState::Unfocusing => 4,
+            };
+            writeln!(
+                actual,
+                "{frame} {state} {} {} {} {} {}",
+                s.orb_timer,
+                s.orbs_pos[0][0].to_bits(),
+                s.orbs_pos[0][1].to_bits(),
+                s.orbs_pos[1][0].to_bits(),
+                s.orbs_pos[1][1].to_bits()
+            )
+            .unwrap();
+        }
+        assert_eq!(actual, player_reference("orbs"));
+    }
+
     #[test]
     fn item_motion_applies_velocity_before_gravity_and_interpolates_at_timer_zero() {
         let mut s = stage(Difficulty::Normal, false, 1, 3);
@@ -5364,6 +5630,86 @@ mod tests {
     }
 
     #[test]
+    fn cropped_shake_region_removes_missed_item_at_sixteen_pixel_margin() {
+        let mut s = stage(Difficulty::Normal, false, 1, 3);
+        s.arcade[3] = 442.0;
+        let mut item = Item::fall([100.0, 455.0], 1);
+        item.vy = 3.0;
+        s.spawn_item(item);
+        s.update_items();
+        assert!(s.items.is_empty());
+
+        s.arcade[3] = FIELD_H;
+        let mut item = Item::fall([100.0, 455.0], 1);
+        item.vy = 3.0;
+        s.spawn_item(item);
+        s.update_items();
+        assert_eq!(s.items[0].pos[1], 458.0);
+    }
+
+    #[test]
+    fn overlapping_screen_shakes_consume_independent_rng_and_expire_in_order() {
+        let mut s = stage(Difficulty::Normal, false, 1, 3);
+        s.world.rng = Rng::new(16878);
+        s.register_shake(40, 2.0, 6.0);
+        s.register_shake(2, 8.0, 0.0);
+        s.update_shake();
+        assert_eq!(s.world.rng.seed(), 31427); // two chains, eight u16 draws
+        assert_eq!(s.shakes.len(), 2);
+        s.world.time_stopped = true;
+        s.update_shake();
+        assert_eq!(s.world.rng.seed(), 31427);
+        assert!(s.shakes.iter().all(|shake| shake.timer == 1));
+        s.world.time_stopped = false;
+        s.update_shake();
+        assert_eq!(s.shakes.len(), 1);
+        // The younger chain expires after the older chain writes its region.
+        assert_eq!(s.arcade, [FIELD_X, FIELD_Y, FIELD_W, FIELD_H]);
+    }
+
+    #[test]
+    #[ignore = "requires original ScreenEffect/Rng source output in TH06_SHAKE_REFERENCE"]
+    fn original_screen_shake_chains_match_source_with_overlap_and_time_stop() {
+        use std::fmt::Write;
+        let expected =
+            std::fs::read_to_string(std::env::var("TH06_SHAKE_REFERENCE").unwrap()).unwrap();
+        let mut actual = String::new();
+        for scenario in 0..8 {
+            let mut s = stage(Difficulty::Normal, false, 1, 3);
+            s.world.rng = Rng::new(16878 + scenario * 71);
+            for frame in 0..60 {
+                if frame == 0 {
+                    s.register_shake(40, 2.0, 6.0);
+                }
+                if frame == 2 {
+                    s.register_shake(16, 8.0, 0.0);
+                }
+                if frame == 4 {
+                    s.register_shake(
+                        if scenario & 1 != 0 { 7 } else { 16 },
+                        if scenario & 2 != 0 { 20.0 } else { 8.0 },
+                        0.0,
+                    );
+                }
+                s.world.time_stopped = scenario & 4 != 0 && (8..13).contains(&frame);
+                s.update_shake();
+                writeln!(
+                    actual,
+                    "{scenario} {frame} {} {} {} {} {} {}",
+                    s.world.rng.seed(),
+                    s.shakes.len(),
+                    s.arcade[0].to_bits(),
+                    s.arcade[1].to_bits(),
+                    s.arcade[2].to_bits(),
+                    s.arcade[3].to_bits()
+                )
+                .unwrap();
+            }
+        }
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
     fn new_player_shots_stay_at_spawn_position_until_next_player_callback() {
         let mut s = stage(Difficulty::Normal, false, 1, 3);
         s.update_player_lifecycle(&Input::from_buttons(1, 0));
@@ -5380,6 +5726,63 @@ mod tests {
     }
 
     #[test]
+    fn enemy_damage_flash_and_sound_use_actual_hp_loss_and_four_tick_cooldown() {
+        let mut s = stage(Difficulty::Normal, false, 1, 3);
+        let mut enemy = Enemy::default();
+        enemy.pos = [100.0, 100.0, 0.0];
+        enemy.life = 100;
+        enemy.collidable = false;
+        enemy.update_bounds(12.0, 12.0, [FIELD_W, FIELD_H]);
+        s.enemies.push(enemy);
+        s.anims.push(Some(AnmRunner::new(Vec::new())));
+        let mut shot = attack_shot();
+        shot.bt = 2;
+        shot.collided = true;
+        shot.anm_script = 97;
+        shot.damage = 1;
+        shot.age = 1;
+        s.shots.push(shot);
+        for frame in 0..11 {
+            s.events.clear();
+            s.collide_enemy(0);
+            let flash = frame % 5 == 0;
+            assert_eq!(
+                s.anims[0].as_ref().unwrap().color_add,
+                flash,
+                "frame {frame}"
+            );
+            assert_eq!(
+                s.events
+                    .iter()
+                    .filter(|event| matches!(event, Event::SfxIdx(20)))
+                    .count(),
+                usize::from(flash)
+            );
+        }
+        assert_eq!(s.enemies[0].life, 89);
+        s.enemies[0].damageable = false;
+        for _ in 0..5 {
+            s.events.clear();
+            s.collide_enemy(0);
+            assert!(!s.anims[0].as_ref().unwrap().color_add);
+            assert!(
+                !s.events
+                    .iter()
+                    .any(|event| matches!(event, Event::SfxIdx(20)))
+            );
+        }
+        s.enemies[0].damageable = true;
+        s.events.clear();
+        s.collide_enemy(0);
+        assert!(s.anims[0].as_ref().unwrap().color_add);
+        assert!(
+            s.events
+                .iter()
+                .any(|event| matches!(event, Event::SfxIdx(20)))
+        );
+    }
+
+    #[test]
     fn enemy_death_drops_before_bullet_callback_and_spell_disables_boss_cancel() {
         use crate::ecl_vm::{BulletProps, spawn_bullet_pattern};
         let mut s = stage(Difficulty::Normal, false, 1, 3);
@@ -5389,14 +5792,22 @@ mod tests {
         enemy.life = 1;
         enemy.item_drop = 1;
         enemy.is_boss = true;
-        enemy.update_bounds(16.0, 16.0);
+        enemy.update_bounds(16.0, 16.0, [FIELD_W, FIELD_H]);
         s.enemies.push(enemy);
         s.shots.push(Shot {
+            pool_index: 0,
             pos: [100.0, 100.0],
+            size: [12.0; 2],
             vel: [0.0; 2],
             damage: 70,
             bt: 0,
             anm_script: 0,
+            runner: AnmRunner::new(Vec::new()),
+            collided: false,
+            angle: 0.0,
+            motion: [0.0; 2],
+            spawn: 0,
+            laser_slot: 0,
             age: 0,
             spd: 0.0,
         });
@@ -5548,6 +5959,160 @@ mod tests {
     }
 
     #[test]
+    fn grazes_cap_independently_and_keep_score_rank_particles_during_bombs() {
+        let mut s = stage(Difficulty::Normal, false, 1, 3);
+        s.graze = 999998;
+        s.graze_in_stage = 9998;
+        s.world.sub_rank = 96;
+        for _ in 0..3 {
+            s.score_graze([100.0, 100.0]);
+        }
+        assert_eq!((s.graze, s.graze_in_stage, s.score), (999999, 9999, 1500));
+        assert_eq!((s.world.rank, s.world.sub_rank), (17, 14));
+        s.graze_in_stage = 0;
+        s.score_graze([100.0, 100.0]);
+        assert_eq!((s.graze, s.graze_in_stage), (999999, 1));
+        s.bombing = 1;
+        s.score_graze(s.pos);
+        assert_eq!((s.graze, s.graze_in_stage, s.score), (999999, 1, 2500));
+        assert_eq!(s.world.sub_rank, 26);
+    }
+
+    #[test]
+    fn touching_bullet_grazes_before_death_and_bomb_cancellation_keeps_fade() {
+        use crate::ecl_vm::{BulletProps, spawn_bullet_pattern};
+        let mut s = stage(Difficulty::Normal, false, 1, 3);
+        s.state = PlayerState::Alive;
+        let pos = s.pos;
+        spawn_bullet_pattern(
+            &mut s.world,
+            &BulletProps {
+                pos,
+                ..Default::default()
+            },
+        );
+        let mut bullet = s.world.bullets.remove(0);
+        s.collide_bullet(&mut bullet);
+        assert_eq!((s.graze, s.score), (1, 500));
+        assert!(bullet.grazed);
+        assert_eq!(bullet.despawn_timer, 12);
+        assert!(matches!(s.state, PlayerState::Dead(0)));
+        s.bomb_projectiles[0] = BombRect {
+            pos,
+            size: [8.0, 8.0],
+        };
+        spawn_bullet_pattern(
+            &mut s.world,
+            &BulletProps {
+                pos,
+                ..Default::default()
+            },
+        );
+        let mut bomb_bullet = s.world.bullets.remove(0);
+        s.collide_bullet(&mut bomb_bullet);
+        assert_eq!(bomb_bullet.despawn_timer, 12);
+        assert_eq!(s.items.len(), 1);
+        assert_eq!((s.graze, s.score), (1, 500));
+    }
+
+    #[test]
+    #[ignore = "requires laser-reference.txt from oracle/projectiles/build.sh"]
+    fn original_laser_states_and_collisions_match_decompiled_source() {
+        use crate::ecl_vm::Laser;
+        let file = std::env::var("TH06_LASER_REFERENCE").expect("set TH06_LASER_REFERENCE");
+        let reference = std::fs::read_to_string(file).expect("read C++ observations");
+        let mut lines = reference.lines();
+        let mut id = 0;
+        for flags in [0, 1] {
+            for start in [0, 20, 60] {
+                for duration in [0, 25] {
+                    for despawn in [0, 16] {
+                        for end in [0, 16] {
+                            for angle in [0.0f32, 0.7, std::f32::consts::FRAC_PI_2] {
+                                for location in [0, 1, 2] {
+                                    for bomb in [0, 1] {
+                                        let mut s = stage(Difficulty::Normal, false, 1, 3);
+                                        let (along, across) = (
+                                            if location == 2 { 215.0 } else { 110.0 },
+                                            if location == 0 { 0.0 } else { 30.0 },
+                                        );
+                                        s.pos = [
+                                            100.0 + angle.cos() * along - angle.sin() * across,
+                                            100.0 + angle.sin() * along + angle.cos() * across,
+                                        ];
+                                        s.state = PlayerState::Alive;
+                                        s.bombing = bomb;
+                                        s.invuln = if bomb == 1 { 120 } else { 0 };
+                                        let mut laser = Laser {
+                                            in_use: true,
+                                            pos: [100.0, 100.0],
+                                            angle,
+                                            speed: 0.5,
+                                            start_offset: 16.0,
+                                            end_offset: 200.0,
+                                            start_length: 200.0,
+                                            width: 24.0,
+                                            start_time: start,
+                                            duration,
+                                            despawn_duration: despawn,
+                                            hitbox_start: 10,
+                                            hitbox_end: end,
+                                            flags,
+                                            script: 9,
+                                            draw_width: 16.0,
+                                            draw_alpha: 1.0,
+                                            state: if start == 0 { 1 } else { 0 },
+                                            timer: 0,
+                                            color: 0,
+                                        };
+                                        for frame in 0..85 {
+                                            for collision in laser.step() {
+                                                s.collide_laser(collision);
+                                            }
+                                            let state = if matches!(s.state, PlayerState::Dead(_)) {
+                                                2
+                                            } else if bomb == 1 {
+                                                3
+                                            } else {
+                                                0
+                                            };
+                                            let line = format!(
+                                                "{} {} {} {} {} {} {} {} {} {} {:.6} {} {:.6} {:.6}",
+                                                id,
+                                                frame,
+                                                laser.state,
+                                                laser.timer,
+                                                u8::from(laser.in_use),
+                                                state,
+                                                s.graze,
+                                                s.score,
+                                                s.world.rank,
+                                                s.world.sub_rank,
+                                                laser.draw_width,
+                                                (laser.draw_alpha * 255.0).round() as u32,
+                                                laser.start_offset,
+                                                laser.end_offset
+                                            );
+                                            assert_eq!(
+                                                Some(line.as_str()),
+                                                lines.next(),
+                                                "original laser case {id}, frame {frame}"
+                                            );
+                                        }
+                                        id += 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(id, 864);
+        assert!(lines.next().is_none(), "extra original observations");
+    }
+
+    #[test]
     fn bullet_cancels_sample_lasers_and_bonus_counts_fading_bullets_only() {
         use crate::ecl_vm::{BulletProps, Laser, spawn_bullet_pattern};
         let mut s = stage(Difficulty::Normal, false, 1, 3);
@@ -5573,6 +6138,11 @@ mod tests {
             duration: 20,
             despawn_duration: 16,
             hitbox_start: 0,
+            hitbox_end: 0,
+            flags: 0,
+            script: 9,
+            draw_width: 8.0,
+            draw_alpha: 1.0,
             state: 1,
             timer: 10,
             color: 0,
@@ -5823,7 +6393,7 @@ mod tests {
         (
             stage.invuln,
             stage.bullet_grace_period,
-            stage.beam_dmg,
+            stage.player_particle_timer,
             stage.fire_timer,
         )
             .hash(&mut h);
@@ -5865,6 +6435,7 @@ mod tests {
         for cmd in cmds {
             cmd.tex.hash(&mut h);
             cmd.additive.hash(&mut h);
+            cmd.color_add.hash(&mut h);
             for value in cmd
                 .dst
                 .into_iter()
@@ -6012,6 +6583,170 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires original archives in TH06_REFERENCE_DIR; real player ANM lifecycle"]
+    fn original_assets_player_impacts_and_laser_pulses_end_on_original_anm_frames() {
+        let base =
+            std::env::var("TH06_REFERENCE_DIR").unwrap_or_else(|_| "/tmp/th06-reference".into());
+        for (character, kind, frames) in [
+            (Character::ReimuA, 0, 30),
+            (Character::ReimuB, 0, 30),
+            (Character::MarisaA, 2, 20),
+        ] {
+            let mut s = original_stage(&base, Difficulty::Normal, 1, character);
+            s.world.power = 128;
+            s.update_orbs(false);
+            s.spawn_player_bullets(0);
+            let keep = s.shots.iter().position(|shot| shot.bt == kind).unwrap();
+            let mut shot = s.shots.remove(keep);
+            shot.pos = [100.0; 2];
+            shot.vel = [0.0; 2];
+            s.shots.clear();
+            s.shots.push(shot);
+            assert!(s.calc_player_damage([100.0, 100.0, 0.0], [16.0; 2]).0 > 0);
+            assert!(s.shots[0].collided);
+            for frame in 1..frames {
+                s.update_shots();
+                assert_eq!(
+                    s.shots.len(),
+                    1,
+                    "{} impact freed at {frame}",
+                    character.label()
+                );
+            }
+            s.update_shots();
+            assert!(
+                s.shots.is_empty(),
+                "{} impact must end at {frames}",
+                character.label()
+            );
+        }
+        for (power, period) in [
+            (8, 120),
+            (16, 170),
+            (32, 200),
+            (48, 210),
+            (64, 230),
+            (80, 250),
+            (96, 270),
+            (128, 330),
+        ] {
+            let mut s = original_stage(&base, Difficulty::Normal, 1, Character::MarisaB);
+            s.world.power = power;
+            s.update_orbs(false);
+            s.spawn_player_bullets(0);
+            s.shots.retain(|shot| shot.bt == 3);
+            assert_eq!(s.shots.len(), 2);
+            assert_eq!(s.laser_timers, [period; 2]);
+            for frame in 1..period - 40 {
+                s.update_shots();
+                assert_eq!(s.shots.len(), 2, "power{power} lasers freed at {frame}");
+            }
+            s.update_shots();
+            assert!(
+                s.shots.is_empty(),
+                "power{power} lasers must end at {}",
+                period - 40
+            );
+            assert_eq!(s.laser_timers, [40; 2]);
+            for _ in 0..40 {
+                s.update_shots();
+            }
+            s.spawn_player_bullets(0);
+            assert_eq!(s.shots.iter().filter(|shot| shot.bt == 3).count(), 2);
+        }
+    }
+
+    #[test]
+    #[ignore = "requires original archives in TH06_REFERENCE_DIR; all four original bomb attack animations"]
+    fn original_assets_bombs_magnet_items_and_preserve_original_attack_windows() {
+        let base =
+            std::env::var("TH06_REFERENCE_DIR").unwrap_or_else(|_| "/tmp/th06-reference".into());
+        for (character, duration) in [
+            (Character::ReimuA, 300),
+            (Character::ReimuB, 140),
+            (Character::MarisaA, 250),
+            (Character::MarisaB, 300),
+        ] {
+            let mut s = original_stage(&base, Difficulty::Normal, 1, character);
+            s.update_player_lifecycle(&Input::default());
+            s.world.power = 128;
+            s.update_orbs(false);
+            s.spawn_item(Item::fall([100.0, 200.0], 0));
+            s.fire_bomb();
+            assert_eq!(s.items.len(), 1);
+            assert_eq!(
+                s.items[0].state,
+                1,
+                "{} must magnet existing items",
+                character.label()
+            );
+            assert_eq!(s.bomb_duration, duration);
+            assert!(s.bomb_in_use);
+            assert_eq!(
+                s.bomb_regions
+                    .iter()
+                    .filter(|rect| rect.size[0] > 0.0)
+                    .count(),
+                0
+            );
+            for frame in 1..duration {
+                s.update_player_lifecycle(&Input::default());
+                let regions = s
+                    .bomb_regions
+                    .iter()
+                    .filter(|rect| rect.size[0] > 0.0)
+                    .count();
+                match character {
+                    Character::ReimuA => {
+                        if frame < 80 {
+                            assert_eq!(regions, 0);
+                        }
+                        if frame == 80 {
+                            assert_eq!(s.seal_state[1], 1);
+                            assert_eq!(s.bomb_regions[1].size, [48.0; 2]);
+                            assert_eq!(s.bomb_region_dmg[1], 8);
+                            s.bomb_dmg_accum[1] = 100;
+                        }
+                        if frame == 81 {
+                            assert_eq!(s.seal_state[1], 2);
+                            assert_eq!(s.bomb_regions[1].size, [256.0; 2]);
+                            assert_eq!(s.bomb_region_dmg[1], 200);
+                            assert_eq!(s.bomb_projectiles[1].size, [256.0; 2]);
+                        }
+                    }
+                    Character::ReimuB => {
+                        assert_eq!(regions, if frame % 2 != 0 { 4 } else { 0 });
+                        assert_eq!(
+                            s.bomb_projectiles
+                                .iter()
+                                .filter(|rect| rect.size[0] > 0.0)
+                                .count(),
+                            4
+                        );
+                    }
+                    Character::MarisaA => assert_eq!(regions, if frame % 3 != 0 { 8 } else { 0 }),
+                    Character::MarisaB => {
+                        assert_eq!(regions, usize::from(frame % 4 != 0));
+                        if frame % 4 != 0 {
+                            assert_eq!(s.bomb_regions[0].pos, [192.0, 192.0]);
+                            assert_eq!(s.bomb_regions[0].size, [384.0, 384.0]);
+                        }
+                        assert_eq!(s.bomb_move_mult, 0.3);
+                    }
+                }
+                assert!(
+                    s.bomb_in_use,
+                    "{} ended early at frame {frame}",
+                    character.label()
+                );
+            }
+            s.update_player_lifecycle(&Input::default());
+            assert!(!s.bomb_in_use);
+            assert_eq!(s.bomb_move_mult, 1.0);
+        }
+    }
+
+    #[test]
     fn difficulty_rank_and_practice_initialization_match_game_manager() {
         for difficulty in Difficulty::ALL {
             let s = stage(difficulty, false, 1, 5);
@@ -6075,8 +6810,12 @@ mod tests {
             (2, 1, 3)
         );
         assert_eq!(
-            (next.graze_start, next.point_items, next.point_items_total),
-            (96, 0, 21)
+            (
+                next.graze_in_stage,
+                next.point_items,
+                next.point_items_total
+            ),
+            (0, 0, 21)
         );
     }
 
@@ -6093,7 +6832,7 @@ mod tests {
             assert!(s.continue_run());
             assert_eq!((s.score, s.gui_score), (retry, retry));
             assert_eq!((s.lives, s.bombs, s.world.power), (3, 2, 0));
-            assert_eq!((s.graze_start, s.point_items), (84, 0));
+            assert_eq!((s.graze_in_stage, s.point_items), (0, 0));
             assert_eq!((s.world.rank, s.world.sub_rank), (13, 19));
             assert_eq!(s.world.rng, rng);
         }

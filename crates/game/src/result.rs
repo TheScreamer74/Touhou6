@@ -879,6 +879,7 @@ fn draw_text_sprite(cmds: &mut Vec<DrawCmd>, sprite: &TextSprite, pos: [f32; 2],
         tint: [1.0, 1.0, 1.0, alpha],
         rot: 0.0,
         additive: false,
+        color_add: false,
     });
 }
 fn confirm(input: &Input) -> bool {

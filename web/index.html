@@ -133,7 +133,7 @@ function canonicalName(name) {
   const base = name.split(/[\\/]/).pop().toLowerCase();
   const archive = ARCHIVES.find(value => value.toLowerCase() === base);
   if (archive) return archive;
-  if (/^th06_(0[1-9]|1[0-7])\.(wav|ogg|pos)$/.test(base) || /^th6_(0[1-9]|1[0-5])\.rpy$/.test(base) || ["score.dat", "musiccmt.txt"].includes(base)) return base;
+  if (/^th06_(0[1-9]|1[0-7])\.(wav|ogg|pos)$/.test(base) || /^th6_(0[1-9]|1[0-5])\.rpy$/.test(base) || ["score.dat", "musiccmt.txt", "gm.sf2", "msgothic.ttc", "msgothic.ttf"].includes(base)) return base;
   return null;
 }
 function complete(map) {
@@ -217,8 +217,29 @@ function versioned(path) {
 }
 function loadRuntime() {
   if (!runtimePromise) runtimePromise = (async () => {
-    const runtime = await import(versioned("./pkg/th06.js"));
-    await runtime.default({ module_or_path: versioned("./pkg/th06_bg.wasm") });
+    const runtimeUrl = versioned("./pkg/th06.js");
+    const runtime = await import(runtimeUrl);
+    const response = await fetch(versioned("./pkg/th06_bg.wasm"));
+    if (!response.ok) throw new Error("Le moteur du jeu n’a pas pu être chargé.");
+    const compiledModule = typeof WebAssembly.compileStreaming === "function" && response.headers.get("Content-Type")?.split(";")[0] === "application/wasm"
+      ? await WebAssembly.compileStreaming(response)
+      : await WebAssembly.compile(await response.arrayBuffer());
+    await runtime.default({ module_or_path: compiledModule });
+    window.__th06CreateMidiWorklet = async context => {
+      if (!context.audioWorklet || !window.AudioWorkletNode) return null;
+      const source = `import { registerMidiProcessor } from ${JSON.stringify(versioned("./midi-worklet.js"))};\nimport { initSync, MidiSynth } from ${JSON.stringify(runtimeUrl)};\nregisterMidiProcessor(initSync, MidiSynth);`;
+      const url = URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
+      try {
+        await context.audioWorklet.addModule(url);
+        const node = new AudioWorkletNode(context, "th06-midi", { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2], processorOptions: { module: compiledModule } });
+        node.__th06Failed = false;
+        node.onprocessorerror = () => { node.__th06Failed = true; console.error("MIDI: audio processor failed; using compatibility playback."); };
+        node.port.onmessage = ({ data }) => {
+          if (data.type === "error") { node.__th06Failed = true; console.error("MIDI:", data.message); }
+        };
+        return node;
+      } finally { URL.revokeObjectURL(url); }
+    };
     runtimeApi = runtime;
     syncSuspension();
     return runtime;

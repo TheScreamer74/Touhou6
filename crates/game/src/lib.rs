@@ -12,11 +12,14 @@ pub mod key_config;
 pub mod menu_art;
 pub mod music_room;
 pub mod options;
+mod player_shots;
+pub mod projectiles;
 pub mod replay;
 pub mod replay_menu;
 pub mod result;
 pub mod retry_menu;
 pub mod save;
+mod score_popups;
 pub mod selection;
 pub mod stage;
 pub mod title;
@@ -57,6 +60,12 @@ pub struct GameFiles {
     /// track's `.pos` file (decomp SoundPlayer::LoadPos). Absent for tracks
     /// shipped without a `.pos`, in which case the whole track loops.
     pub bgm_pos: HashMap<String, (u32, u32)>,
+    /// Original MIDI files from MD.DAT (the game used a system MIDI device).
+    pub midi: HashMap<String, Vec<u8>>,
+    /// User-supplied or freely licensed General MIDI SoundFont, never game data.
+    pub soundfont: Option<Vec<u8>>,
+    /// Optional user-supplied MS Gothic TTC/TTF. No proprietary font is bundled.
+    pub text_font: Option<Vec<u8>>,
 }
 
 /// Reject incomplete uploads before texture creation can index missing entries.
@@ -151,7 +160,7 @@ pub fn validate_game_files(files: &GameFiles) -> Result<(), String> {
 
 /// Every sound effect (SoundPlayer.cpp g_SFXList order; index == SoundIdx).
 /// Loaded by basename from the archive; absent ones are simply skipped.
-use stage::SFX_BY_IDX as SFX_NAMES;
+use th06_engine::audio::SFX_FILES as SFX_NAMES;
 
 /// All BGM tracks used in the main game (title + 6 stages × field/boss).
 const BGM_NAMES: [&str; 17] = [
@@ -241,6 +250,7 @@ struct Assets {
     player_tex: usize,
     player_marisa: Anm0,
     player_marisa_tex: usize,
+    bomb_name_tex: [(usize, usize); 4],
     etama: Anm0,
     etama4: Anm0,
     etama4_tex: usize,
@@ -343,6 +353,7 @@ impl Assets {
             self.player_portraits[usize::from(character.is_marisa())].clone(),
             sd.boss_portraits.clone(),
         );
+        result.configure_bomb_banner(&self.text.entries[0], self.bomb_name_tex);
         result.set_dialogue_scripts(&self.text.entries[0]);
         result.set_pause_art(stage::PortraitAsset::new(
             stage::TEX_ASCII,
@@ -447,8 +458,27 @@ pub struct Game {
 /// Build the full set of GPU textures and a `Game` at the title screen.
 /// `with_audio` lets headless/screenshot callers skip audio device setup.
 pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<Texture>, Game) {
+    if let Err(error) = th06_engine::text::set_font(files.text_font.clone()) {
+        eprintln!("{error}; using bundled font");
+    }
     let anm = Anm0::parse(&files.tl["title01.anm"]).expect("parse title01.anm");
     let entry = &anm.entries[0];
+    let mut texture_formats = HashMap::new();
+    for (name, bytes) in files
+        .tl
+        .iter()
+        .chain(&files.cm)
+        .chain(&files.st)
+        .chain(&files.inn)
+    {
+        if name.ends_with(".anm")
+            && let Ok(anm) = Anm0::parse(bytes)
+        {
+            for entry in anm.entries {
+                texture_formats.insert(basename(&entry.name).to_string(), entry.format);
+            }
+        }
+    }
 
     // Upload a composed texture and return its slot; the optional alpha mask
     // is skipped when absent (some sheets ship without a `_a` mask).
@@ -460,7 +490,12 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
         let alpha = mask.and_then(|m| map.get(m)).map(|v| v.as_slice());
         let (rgba, w, h) = compose_rgba(&map[color], alpha);
         let slot = textures.len();
-        textures.push(engine.create_texture(&rgba, w, h));
+        textures.push(engine.create_texture_with_format(
+            &rgba,
+            w,
+            h,
+            texture_formats.get(color).copied().unwrap_or(1),
+        ));
         slot
     };
     // Fixed slots (referenced by stage.rs constants): 0 title bg, 1 title menu,
@@ -468,13 +503,13 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
     // 9 face00a (Reimu), 10 face01a (Marisa), 11 stg1bg, 12 player01.
     let mut textures = Vec::new();
     let (bg_rgba, bg_w, bg_h) = compose_rgba(&files.tl["title00.jpg"], None);
-    textures.push(engine.create_texture(&bg_rgba, bg_w, bg_h)); // 0
+    textures.push(engine.create_texture_with_format(&bg_rgba, bg_w, bg_h, 4)); // 0
     let alpha = entry
         .alpha_name
         .as_deref()
         .map(|n| files.tl[basename(n)].as_slice());
     let (rgba, w, h) = compose_rgba(&files.tl[basename(&entry.name)], alpha);
-    textures.push(engine.create_texture(&rgba, w, h)); // 1
+    textures.push(engine.create_texture_with_format(&rgba, w, h, entry.format)); // 1
     for (archive, color, mask) in [
         (&files.cm, "player00.png", Some("player00_a.png")),
         (&files.cm, "etama3.png", Some("etama3_a.png")),
@@ -484,7 +519,12 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
     ] {
         let alpha = mask.map(|m| archive[m].as_slice());
         let (rgba, w, h) = compose_rgba(&archive[color], alpha);
-        textures.push(engine.create_texture(&rgba, w, h)); // 2,3,4,5,6
+        textures.push(engine.create_texture_with_format(
+            &rgba,
+            w,
+            h,
+            texture_formats.get(color).copied().unwrap_or(1),
+        )); // 2,3,4,5,6
     }
     textures.push(engine.create_texture(&[255u8; 2 * 2 * 4], 2, 2)); // 7 white
     // 8: ascii font (alpha mask doubles as tintable glyph color).
@@ -492,7 +532,12 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
         &files.inn["ascii_a.png"],
         Some(files.inn["ascii_a.png"].as_slice()),
     );
-    textures.push(engine.create_texture(&rgba, w, h));
+    textures.push(engine.create_texture_with_format(
+        &rgba,
+        w,
+        h,
+        texture_formats.get("ascii.png").copied().unwrap_or(1),
+    ));
     // 9-10: player dialogue portraits (Reimu, Marisa).
     load(
         &files.cm,
@@ -538,6 +583,20 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
             .iter()
             .map(|suffix| portrait(&files.cm, &format!("face{c:02}{suffix}"), &mut textures))
             .collect()
+    });
+    let bomb_name_tex = [
+        "霊符「夢想封印」",
+        "夢符「封魔陣」",
+        "魔符「スターダストレヴァリエ」",
+        "恋符「マスタースパーク」",
+    ]
+    .map(|name| {
+        let (bytes, _, _) = encoding_rs::SHIFT_JIS.encode(name);
+        let img =
+            th06_engine::text::render_sprite_shiftjis(&bytes, 256, 16, false, [240, 240, 255]);
+        let slot = textures.len();
+        textures.push(engine.create_texture(&img.rgba, img.width, img.height));
+        (slot, bytes.len())
     });
     const BOSS_PORTRAITS: [&[&str]; TOTAL_STAGES] = [
         &["face03a", "face03b"],
@@ -605,13 +664,8 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
                 if raw.is_empty() || spell_name_tex.contains_key(&id) {
                     continue;
                 }
-                // ~18px name height at VM scale 1; white text, black shadow.
-                let img = th06_engine::text::render_shiftjis(
-                    &raw,
-                    18.0,
-                    [255, 240, 240],
-                    Some([0, 0, 0]),
-                );
+                let img =
+                    th06_engine::text::render_sprite_shiftjis(&raw, 256, 16, true, [255, 240, 240]);
                 let slot = textures.len();
                 textures.push(engine.create_texture(&img.rgba, img.width, img.height));
                 spell_name_tex.insert(id, (slot, img.width as f32, img.height as f32));
@@ -696,7 +750,7 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
         "title00.jpg",
         &title_sheets,
     ));
-    let options_menu = options::OptionsMenu::new(menu_art::MenuArt::load(
+    let mut options_menu = options::OptionsMenu::new(menu_art::MenuArt::load(
         engine,
         &files.tl,
         &mut textures,
@@ -750,6 +804,16 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
 
     let mut audio = if with_audio { Audio::new() } else { None };
     if let Some(a) = &mut audio {
+        if let Some(bank) = &files.soundfont
+            && let Err(error) = a.register_soundfont(bank)
+        {
+            eprintln!("{error}");
+        }
+        for (name, bytes) in &files.midi {
+            if let Err(error) = a.register_midi(name, bytes.clone()) {
+                eprintln!("{name}: {error}");
+            }
+        }
         for name in SFX_NAMES {
             if let Some(wav) = files.inn.get(&format!("{name}.wav")) {
                 a.register_sfx(name, wav.clone());
@@ -762,11 +826,13 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
         }
     }
 
+    options_menu.midi_available = audio.as_ref().is_some_and(Audio::midi_available);
     let assets = Assets {
         player: Anm0::parse(&files.cm["player00.anm"]).expect("parse player00"),
         player_tex: stage::TEX_PLAYER,
         player_marisa: Anm0::parse(&files.cm["player01.anm"]).expect("parse player01"),
         player_marisa_tex,
+        bomb_name_tex,
         etama: Anm0::parse(&files.cm["etama3.anm"]).expect("parse etama3"),
         etama4: Anm0::parse(&files.cm["etama4.anm"]).expect("parse etama4"),
         etama4_tex,
@@ -844,6 +910,10 @@ impl Game {
         }
         self.starting_lives = self.options.life_count as i32 + 1;
         self.starting_bombs = self.options.bomb_count as i32;
+        if !self.options_menu.midi_available {
+            self.options.music_mode = self.options.music_mode.min(1);
+        }
+        th06_engine::set_color_16bit(self.options.color_16bit);
         #[cfg(not(target_arch = "wasm32"))]
         th06_engine::set_windowed(self.options.windowed);
         if let Some(bytes) = save::load_bytes(&self.controller_path).filter(|b| b.len() == 18) {
@@ -901,6 +971,27 @@ impl Game {
         self.replay_session = Some(session);
         self.scene = Scene::Stage(Box::new(stage));
         Ok(())
+    }
+
+    pub fn replay_reference_state(&self) -> Option<String> {
+        let Scene::Stage(stage) = &self.scene else {
+            return None;
+        };
+        let session = self.replay_session.as_ref()?;
+        Some(format!("{},{}", session.frame(), stage.reference_state()))
+    }
+
+    pub fn replay_reference_bullets(&self) -> Option<String> {
+        let Scene::Stage(stage) = &self.scene else {
+            return None;
+        };
+        Some(stage.reference_bullets(self.replay_session.as_ref()?.frame()))
+    }
+    pub fn replay_reference_effects(&self) -> Option<String> {
+        let Scene::Stage(stage) = &self.scene else {
+            return None;
+        };
+        Some(stage.reference_effects(self.replay_session.as_ref()?.frame()))
     }
     pub fn extra_unlocked(&self) -> [bool; 4] {
         std::array::from_fn(|c| {
@@ -1184,6 +1275,14 @@ impl Game {
         }
     }
 
+    /// Prepare isolated browser audio before the initial playback request.
+    #[cfg(target_arch = "wasm32")]
+    pub async fn prepare_audio(&self) {
+        if let Some(audio) = &self.audio {
+            audio.prepare().await;
+        }
+    }
+
     /// Start the title BGM (call once the audio context is unlocked).
     pub fn start_title_bgm(&mut self) {
         self.play_bgm("th06_01.wav");
@@ -1194,12 +1293,38 @@ impl Game {
             return;
         }
         if let Some(audio) = &mut self.audio {
-            audio.play_bgm(file);
+            if self.options.music_mode == 2 {
+                audio.play_bgm(&file.replace(".wav", ".mid"));
+            } else {
+                audio.play_bgm(file);
+            }
         }
     }
 
     pub fn update(&mut self, input: &Input) -> Frame {
-        let play_menu_sounds = self.options.play_sounds;
+        // ReplayManager's final calc-chain job restarts the entire chain during
+        // eligible dialogue until frameId % 3 == 2. Only the final tick draws.
+        let mut output = self.update_render_frame(input);
+        for _ in 0..2 {
+            let accelerate = matches!(&self.scene, Scene::Stage(stage) if stage.replay_accelerates_dialogue())
+                && self
+                    .replay_session
+                    .as_ref()
+                    .is_some_and(|session| session.is_playback() && session.frame() % 3 != 2);
+            if !accelerate {
+                break;
+            }
+            output = self.update_render_frame(input);
+        }
+        if self.options.play_sounds
+            && let Some(audio) = &self.audio
+        {
+            audio.flush_sfx();
+        }
+        output
+    }
+
+    fn update_render_frame(&mut self, input: &Input) -> Frame {
         if let Some(frame) = &mut self.demo_frames {
             *frame += 1;
             if input.buttons() != 0 || *frame >= 3720 {
@@ -1220,7 +1345,7 @@ impl Game {
             self.result.take_sounds(),
             self.replay_menu.take_sounds(),
         ];
-        if play_menu_sounds && let Some(audio) = &self.audio {
+        if let Some(audio) = &self.audio {
             for sound in sounds.into_iter().flatten() {
                 audio.play_sfx(sound);
             }
@@ -1233,6 +1358,7 @@ impl Game {
                 tint: [0.0, 0.0, 0.0, (frame - 3600) as f32 / 120.0],
                 rot: 0.0,
                 additive: false,
+                color_add: false,
             });
         }
         output
@@ -1347,6 +1473,7 @@ impl Game {
                     self.title.reset();
                 }
                 options::OptionsAction::Changed => {
+                    th06_engine::set_color_16bit(self.options.color_16bit);
                     if previous_options.windowed != self.options.windowed {
                         th06_engine::set_windowed(self.options.windowed);
                     }
@@ -1614,10 +1741,13 @@ impl Game {
                 let mut game_over: Option<i64> = None;
                 for ev in events {
                     match ev {
+                        Event::SfxIdx(index) => {
+                            if let Some(audio) = &self.audio {
+                                audio.play_sfx_idx(index);
+                            }
+                        }
                         Event::Sfx(name) => {
-                            if self.options.play_sounds
-                                && let Some(a) = &self.audio
-                            {
+                            if let Some(a) = &self.audio {
                                 a.play_sfx(name);
                             }
                         }

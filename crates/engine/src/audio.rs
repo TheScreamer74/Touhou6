@@ -3,6 +3,94 @@
 //! the browser — every wav is uploaded by the player and held in memory).
 //! Both fail soft: with no output the game runs silent.
 
+/// SoundPlayer.cpp: 26 shared files, 32 independently retriggered variants.
+pub const SFX_FILES: [&str; 26] = [
+    "plst00", "enep00", "pldead00", "power0", "power1", "tan00", "tan01", "tan02", "ok00",
+    "cancel00", "select00", "gun00", "cat00", "lazer00", "lazer01", "enep01", "nep00", "damage00",
+    "item00", "kira00", "kira01", "kira02", "extend", "timeout", "graze", "powerup",
+];
+const SFX_VARIANTS: [(usize, i32); 32] = [
+    (0, -1500),
+    (0, -2000),
+    (1, -1200),
+    (1, -1400),
+    (2, -1000),
+    (3, -500),
+    (4, -500),
+    (5, -1700),
+    (6, -1700),
+    (7, -1700),
+    (8, -1000),
+    (9, -1000),
+    (10, -1900),
+    (11, -1200),
+    (12, -900),
+    (5, -1500),
+    (13, -900),
+    (14, -900),
+    (15, -600),
+    (16, -400),
+    (17, -1100),
+    (18, -900),
+    (5, -1800),
+    (6, -1800),
+    (7, -1800),
+    (19, -300),
+    (20, -600),
+    (21, -800),
+    (22, -100),
+    (23, -500),
+    (24, -1000),
+    (25, -1000),
+];
+
+#[derive(Default)]
+struct SoundQueue(std::cell::RefCell<Vec<usize>>);
+impl SoundQueue {
+    fn queue(&self, index: usize) {
+        let mut queue = self.0.borrow_mut();
+        if index < SFX_VARIANTS.len() && queue.len() < 3 && !queue.contains(&index) {
+            queue.push(index);
+        }
+    }
+    fn named(&self, name: &str) {
+        if let Some(index) = SFX_VARIANTS
+            .iter()
+            .position(|(file, _)| SFX_FILES[*file] == name)
+        {
+            self.queue(index);
+        }
+    }
+    fn drain(&self) -> Vec<usize> {
+        self.0.borrow_mut().drain(..).collect()
+    }
+}
+
+fn sfx_gain(index: usize) -> f32 {
+    10.0_f32.powf(SFX_VARIANTS[index].1 as f32 / 2000.0)
+}
+
+#[cfg(test)]
+mod sound_queue_tests {
+    use super::*;
+    #[test]
+    fn original_three_variant_queue_deduplicates_without_merging_shared_files() {
+        let queue = SoundQueue::default();
+        queue.queue(7);
+        queue.queue(7);
+        queue.queue(15);
+        queue.queue(22);
+        queue.queue(28);
+        assert_eq!(queue.drain(), vec![7, 15, 22]);
+        queue.named("ok00");
+        queue.named("cancel00");
+        queue.named("select00");
+        assert_eq!(queue.drain(), vec![10, 11, 12]);
+        assert!((sfx_gain(0) - 0.177_827_94).abs() < 1e-7);
+        assert!((sfx_gain(1) - 0.1).abs() < 1e-7);
+    }
+}
+
 /// `.pos` values count frames in the encoded track, before Web Audio resamples
 /// it to the output device's sample rate. Keep that rate when converting the
 /// loop positions to seconds; AudioBuffer::sample_rate is the output rate.
@@ -86,7 +174,7 @@ impl Fade {
 mod native {
     use std::collections::HashMap;
     use std::io::{BufReader, Cursor};
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
 
@@ -100,6 +188,11 @@ mod native {
         /// Per-track loop points (loop_start, loop_end) in sample-frames, from
         /// the track's `.pos` file — mirrors the decomp's LoadPos.
         bgm_loop: HashMap<String, (u32, u32)>,
+        midi: HashMap<String, Arc<[u8]>>,
+        soundfont: Option<Arc<rustysynth::SoundFont>>,
+        midi_player: Option<Arc<Mutex<crate::midi::Player>>>,
+        sfx_queue: super::SoundQueue,
+        sfx_voices: std::cell::RefCell<Vec<Option<Sink>>>,
         fade: super::Fade,
     }
 
@@ -174,8 +267,27 @@ mod native {
                 sfx: HashMap::new(),
                 bgm_data: HashMap::new(),
                 bgm_loop: HashMap::new(),
+                midi: HashMap::new(),
+                soundfont: None,
+                midi_player: None,
+                sfx_queue: super::SoundQueue::default(),
+                sfx_voices: std::cell::RefCell::new((0..32).map(|_| None).collect()),
                 fade: super::Fade::default(),
             })
+        }
+
+        pub fn register_soundfont(&mut self, bytes: &[u8]) -> Result<(), String> {
+            self.soundfont = Some(crate::midi::soundfont(bytes)?);
+            Ok(())
+        }
+        pub fn register_midi(&mut self, name: &str, bytes: Vec<u8>) -> Result<(), String> {
+            crate::midi::Sequence::parse(&bytes)?;
+            self.midi.insert(name.to_string(), bytes.into());
+            Ok(())
+        }
+        pub fn midi_available(&self) -> bool {
+            self.soundfont.is_some()
+                && (1..=17).all(|index| self.midi.contains_key(&format!("th06_{index:02}.mid")))
         }
 
         pub fn register_sfx(&mut self, name: &str, wav: Vec<u8>) {
@@ -194,21 +306,44 @@ mod native {
         }
 
         pub fn play_sfx(&self, name: &str) {
-            if let Some(data) = self.sfx.get(name) {
-                let cursor = Cursor::new(data.clone());
-                if let Ok(source) = Decoder::new(cursor) {
-                    let _ = self.handle.play_raw(source.convert_samples());
+            self.sfx_queue.named(name);
+        }
+        pub fn play_sfx_idx(&self, index: u8) {
+            self.sfx_queue.queue(usize::from(index));
+        }
+        pub fn flush_sfx(&self) {
+            for index in self.sfx_queue.drain() {
+                let name = super::SFX_FILES[super::SFX_VARIANTS[index].0];
+                if let Some(data) = self.sfx.get(name) {
+                    if let Some(old) = self.sfx_voices.borrow_mut()[index].take() {
+                        old.stop();
+                    }
+                    let cursor = Cursor::new(data.clone());
+                    if let Ok(source) = Decoder::new(cursor)
+                        && let Ok(sink) = Sink::try_new(&self.handle)
+                    {
+                        sink.set_volume(super::sfx_gain(index));
+                        sink.append(source);
+                        self.sfx_voices.borrow_mut()[index] = Some(sink);
+                    }
                 }
             }
         }
 
         pub fn fade_bgm(&mut self, seconds: f32) {
             self.fade.start(seconds);
+            if let Some(player) = &self.midi_player
+                && let Ok(mut player) = player.lock()
+            {
+                player.fade(seconds);
+            }
         }
         pub fn tick(&mut self) {
             if let Some(volume) = self.fade.tick() {
-                if let Some(sink) = &self.bgm {
-                    sink.set_volume(volume);
+                if let Some(sink) = &self.bgm
+                    && self.midi_player.is_none()
+                {
+                    sink.set_volume(volume * 0.6);
                 }
                 if volume == 0.0 {
                     self.stop_bgm();
@@ -220,6 +355,7 @@ mod native {
                 old.stop();
             }
             self.bgm_name = None;
+            self.midi_player = None;
         }
 
         /// Play a registered BGM track on infinite loop. No-op when already
@@ -230,10 +366,33 @@ mod native {
             if self.bgm_name.as_deref() == Some(name) {
                 return;
             }
-            if let Some(old) = self.bgm.take() {
-                old.stop();
-            }
+            self.stop_bgm();
             self.fade = super::Fade::default();
+            if name.ends_with(".mid") {
+                let Some(bank) = &self.soundfont else {
+                    return;
+                };
+                let Some(bytes) = self.midi.get(name) else {
+                    return;
+                };
+                let Ok(player) = crate::midi::Player::new(bank, bytes, 44100) else {
+                    return;
+                };
+                let player = Arc::new(Mutex::new(player));
+                let Ok(sink) = Sink::try_new(&self.handle) else {
+                    return;
+                };
+                sink.set_volume(0.6);
+                sink.append(MidiSource {
+                    player: player.clone(),
+                    samples: [0.0; 512],
+                    cursor: 512,
+                });
+                self.bgm = Some(sink);
+                self.midi_player = Some(player);
+                self.bgm_name = Some(name.to_string());
+                return;
+            }
             let Some(data) = self.bgm_data.get(name) else {
                 return;
             };
@@ -274,6 +433,47 @@ mod native {
             sink.append(source);
             self.bgm = Some(sink);
             self.bgm_name = Some(name.to_string());
+        }
+    }
+
+    struct MidiSource {
+        player: Arc<Mutex<crate::midi::Player>>,
+        samples: [f32; 512],
+        cursor: usize,
+    }
+    impl Iterator for MidiSource {
+        type Item = f32;
+        fn next(&mut self) -> Option<f32> {
+            if self.cursor == self.samples.len() {
+                let mut left = [0.0; 256];
+                let mut right = [0.0; 256];
+                self.player.lock().ok()?.render(&mut left, &mut right);
+                for (sample, (left, right)) in self
+                    .samples
+                    .chunks_exact_mut(2)
+                    .zip(left.into_iter().zip(right))
+                {
+                    sample.copy_from_slice(&[left, right]);
+                }
+                self.cursor = 0;
+            }
+            let sample = self.samples[self.cursor];
+            self.cursor += 1;
+            Some(sample)
+        }
+    }
+    impl Source for MidiSource {
+        fn current_frame_len(&self) -> Option<usize> {
+            None
+        }
+        fn channels(&self) -> u16 {
+            2
+        }
+        fn sample_rate(&self) -> u32 {
+            44100
+        }
+        fn total_duration(&self) -> Option<std::time::Duration> {
+            None
         }
     }
 }
@@ -379,7 +579,10 @@ mod web {
     };
     use wasm_bindgen::{JsCast, closure::Closure};
 
-    use web_sys::{AudioBuffer, AudioBufferSourceNode, AudioContext, GainNode};
+    use web_sys::{
+        AudioBuffer, AudioBufferSourceNode, AudioContext, AudioProcessingEvent, AudioWorkletNode,
+        GainNode, ScriptProcessorNode,
+    };
 
     /// Decoded PCM held as an AudioBuffer, ready to (re)play cheaply.
     pub struct Audio {
@@ -393,6 +596,17 @@ mod web {
         bgm_generation: Rc<Cell<u64>>,
         /// (loop_start, loop_end) in sample-frames from the track's `.pos`.
         bgm_loop: HashMap<String, (u32, u32)>,
+        midi: HashMap<String, Rc<[u8]>>,
+        soundfont: Option<std::sync::Arc<rustysynth::SoundFont>>,
+        midi_node: Option<ScriptProcessorNode>,
+        midi_callback: Option<Closure<dyn FnMut(AudioProcessingEvent)>>,
+        midi_player: Option<Rc<RefCell<crate::midi::Player>>>,
+        midi_worklet: Rc<RefCell<Option<AudioWorkletNode>>>,
+        midi_worklet_ready: Option<js_sys::Promise>,
+        midi_worklet_bank: Rc<RefCell<Option<Rc<[u8]>>>>,
+        midi_on_worklet: bool,
+        sfx_queue: super::SoundQueue,
+        sfx_voices: RefCell<Vec<Option<(AudioBufferSourceNode, GainNode)>>>,
         fade: super::Fade,
     }
 
@@ -420,6 +634,35 @@ mod web {
             let bgm_gain = ctx.create_gain().ok()?;
             bgm_gain.gain().set_value(0.6);
             let _ = bgm_gain.connect_with_audio_node(&ctx.destination());
+            let midi_worklet = Rc::new(RefCell::new(None));
+            let midi_worklet_bank: Rc<RefCell<Option<Rc<[u8]>>>> = Rc::new(RefCell::new(None));
+            let midi_worklet_ready = if let Ok(factory) =
+                js_sys::Reflect::get(&js_sys::global(), &"__th06CreateMidiWorklet".into())
+                    .and_then(|value| value.dyn_into::<js_sys::Function>())
+                && let Ok(promise) = factory.call1(&wasm_bindgen::JsValue::NULL, ctx.as_ref())
+            {
+                let active_node = midi_worklet.clone();
+                let bank = midi_worklet_bank.clone();
+                let gain = bgm_gain.clone();
+                Some(wasm_bindgen_futures::future_to_promise(async move {
+                    if let Ok(value) =
+                        wasm_bindgen_futures::JsFuture::from(js_sys::Promise::resolve(&promise))
+                            .await
+                        && let Ok(node) = value.dyn_into::<AudioWorkletNode>()
+                        && node.connect_with_audio_node(&gain).is_ok()
+                    {
+                        if let Some(bytes) = bank.borrow().as_ref() {
+                            worklet_message(&node, "bank", Some(bytes), None, None);
+                        }
+                        *active_node.borrow_mut() = Some(node);
+                    }
+                    // A rejected/unsupported worklet leaves the compatibility
+                    // backend available, without preventing the game starting.
+                    Ok(wasm_bindgen::JsValue::UNDEFINED)
+                }))
+            } else {
+                None
+            };
             Some(Self {
                 ctx,
                 bgm_gain,
@@ -429,14 +672,51 @@ mod web {
                 bgm_name: Rc::new(RefCell::new(None)),
                 bgm_generation: Rc::new(Cell::new(0)),
                 bgm_loop: HashMap::new(),
+                midi: HashMap::new(),
+                soundfont: None,
+                midi_node: None,
+                midi_callback: None,
+                midi_player: None,
+                midi_worklet,
+                midi_worklet_ready,
+                midi_worklet_bank,
+                midi_on_worklet: false,
+                sfx_queue: super::SoundQueue::default(),
+                sfx_voices: RefCell::new((0..32).map(|_| None).collect()),
                 fade: super::Fade::default(),
             })
+        }
+
+        /// Await installation before the first MIDI play request. This also
+        /// settles successfully when only the compatibility backend is usable.
+        pub async fn prepare(&self) {
+            if let Some(promise) = &self.midi_worklet_ready {
+                let _ = wasm_bindgen_futures::JsFuture::from(promise.clone()).await;
+            }
         }
 
         pub fn register_sfx(&mut self, name: &str, wav: Vec<u8>) {
             if let Some(buf) = self.decode_wav(&wav) {
                 self.sfx.insert(name.to_string(), buf);
             }
+        }
+
+        pub fn register_soundfont(&mut self, bytes: &[u8]) -> Result<(), String> {
+            self.soundfont = Some(crate::midi::soundfont(bytes)?);
+            *self.midi_worklet_bank.borrow_mut() = Some(bytes.into());
+            if let Some(node) = self.midi_worklet.borrow().as_ref() {
+                worklet_message(node, "bank", Some(bytes), None, None);
+            }
+            Ok(())
+        }
+        pub fn register_midi(&mut self, name: &str, bytes: Vec<u8>) -> Result<(), String> {
+            crate::midi::Sequence::parse(&bytes)?;
+            self.midi.insert(name.to_string(), bytes.into());
+            Ok(())
+        }
+        pub fn midi_available(&self) -> bool {
+            self.soundfont.is_some()
+                && (1..=17).all(|index| self.midi.contains_key(&format!("th06_{index:02}.mid")))
         }
 
         /// Web has no filesystem; BGM wavs are registered by name from the
@@ -451,28 +731,91 @@ mod web {
         }
 
         pub fn play_sfx(&self, name: &str) {
-            let Some(buf) = self.sfx.get(name) else {
-                return;
-            };
-            if let Ok(src) = self.ctx.create_buffer_source() {
-                src.set_buffer(Some(buf));
-                let _ = src.connect_with_audio_node(&self.ctx.destination());
-                let _ = src.start();
+            self.sfx_queue.named(name);
+        }
+        pub fn play_sfx_idx(&self, index: u8) {
+            self.sfx_queue.queue(usize::from(index));
+        }
+        pub fn flush_sfx(&self) {
+            for index in self.sfx_queue.drain() {
+                let name = super::SFX_FILES[super::SFX_VARIANTS[index].0];
+                let Some(buf) = self.sfx.get(name) else {
+                    continue;
+                };
+                if let Some((old, gain)) = self.sfx_voices.borrow_mut()[index].take() {
+                    #[allow(deprecated)]
+                    let _ = old.stop_with_when(0.0);
+                    let _ = old.disconnect();
+                    let _ = gain.disconnect();
+                }
+                if let (Ok(src), Ok(gain)) =
+                    (self.ctx.create_buffer_source(), self.ctx.create_gain())
+                {
+                    src.set_buffer(Some(buf));
+                    gain.gain().set_value(super::sfx_gain(index));
+                    let _ = src.connect_with_audio_node(&gain);
+                    let _ = gain.connect_with_audio_node(&self.ctx.destination());
+                    let _ = src.start();
+                    self.sfx_voices.borrow_mut()[index] = Some((src, gain));
+                }
             }
         }
 
         pub fn fade_bgm(&mut self, seconds: f32) {
             self.fade.start(seconds);
+            if self.midi_on_worklet
+                && let Some(node) = self.midi_worklet.borrow().as_ref()
+            {
+                worklet_message(node, "fade", None, Some(seconds), None);
+            }
+            if let Some(player) = &self.midi_player {
+                player.borrow_mut().fade(seconds);
+            }
         }
         pub fn tick(&mut self) {
+            let worklet_failed = self.midi_worklet.borrow().as_ref().is_some_and(|node| {
+                js_sys::Reflect::get(node, &"__th06Failed".into())
+                    .ok()
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false)
+            });
+            if worklet_failed {
+                let retry = self
+                    .midi_on_worklet
+                    .then(|| self.bgm_name.borrow().clone())
+                    .flatten();
+                if retry.is_some() {
+                    self.stop_bgm();
+                }
+                if let Some(node) = self.midi_worklet.borrow_mut().take() {
+                    let _ = node.disconnect();
+                }
+                if let Some(name) = retry {
+                    self.play_bgm(&name);
+                }
+            }
             if let Some(volume) = self.fade.tick() {
-                self.bgm_gain.gain().set_value(volume * 0.6);
+                if self.midi_player.is_none() && !self.midi_on_worklet {
+                    self.bgm_gain.gain().set_value(volume * 0.6);
+                }
                 if volume == 0.0 {
                     self.stop_bgm();
                 }
             }
         }
         pub fn stop_bgm(&mut self) {
+            if self.midi_on_worklet
+                && let Some(node) = self.midi_worklet.borrow().as_ref()
+            {
+                worklet_message(node, "stop", None, None, None);
+            }
+            self.midi_on_worklet = false;
+            if let Some(node) = self.midi_node.take() {
+                node.set_onaudioprocess(None);
+                let _ = node.disconnect();
+            }
+            self.midi_callback = None;
+            self.midi_player = None;
             self.bgm_generation
                 .set(self.bgm_generation.get().wrapping_add(1));
             if let Some(old) = self.bgm_node.borrow_mut().take() {
@@ -491,6 +834,47 @@ mod web {
             self.stop_bgm();
             self.fade = super::Fade::default();
             self.bgm_gain.gain().set_value(0.6);
+            if name.ends_with(".mid") {
+                let Some(bank) = &self.soundfont else {
+                    return;
+                };
+                let Some(bytes) = self.midi.get(name) else {
+                    return;
+                };
+                if let Some(node) = self.midi_worklet.borrow().as_ref() {
+                    worklet_message(node, "play", Some(bytes), None, Some(name));
+                    self.midi_on_worklet = true;
+                    *self.bgm_name.borrow_mut() = Some(name.to_string());
+                    return;
+                }
+                let Ok(player) =
+                    crate::midi::Player::new(bank, bytes, self.ctx.sample_rate() as u32)
+                else {
+                    return;
+                };
+                let Ok(node) = self.ctx.create_script_processor_with_buffer_size_and_number_of_input_channels_and_number_of_output_channels(2048, 0, 2) else { return; };
+                let player = Rc::new(RefCell::new(player));
+                let active = player.clone();
+                let callback = Closure::<dyn FnMut(AudioProcessingEvent)>::new(
+                    move |event: AudioProcessingEvent| {
+                        let Ok(buffer) = event.output_buffer() else {
+                            return;
+                        };
+                        let mut left = vec![0.0; buffer.length() as usize];
+                        let mut right = vec![0.0; left.len()];
+                        active.borrow_mut().render(&mut left, &mut right);
+                        let _ = buffer.copy_to_channel(&left, 0);
+                        let _ = buffer.copy_to_channel(&right, 1);
+                    },
+                );
+                node.set_onaudioprocess(Some(callback.as_ref().unchecked_ref()));
+                let _ = node.connect_with_audio_node(&self.bgm_gain);
+                self.midi_node = Some(node);
+                self.midi_callback = Some(callback);
+                self.midi_player = Some(player);
+                *self.bgm_name.borrow_mut() = Some(name.to_string());
+                return;
+            }
             let Some(bytes) = self.bgm.get(name) else {
                 return;
             };
@@ -562,9 +946,37 @@ mod web {
                 for f in 0..frames {
                     plane.push(samples[f * channels as usize + ch]);
                 }
-                buf.copy_to_channel(&mut plane, ch as i32).ok()?;
+                buf.copy_to_channel(&plane, ch as i32).ok()?;
             }
             Some(buf)
+        }
+    }
+
+    fn worklet_message(
+        node: &AudioWorkletNode,
+        kind: &str,
+        bytes: Option<&[u8]>,
+        seconds: Option<f32>,
+        name: Option<&str>,
+    ) {
+        let message = js_sys::Object::new();
+        let _ = js_sys::Reflect::set(&message, &"type".into(), &kind.into());
+        if let Some(bytes) = bytes {
+            let _ =
+                js_sys::Reflect::set(&message, &"bytes".into(), &js_sys::Uint8Array::from(bytes));
+        }
+        if let Some(seconds) = seconds {
+            let _ = js_sys::Reflect::set(
+                &message,
+                &"seconds".into(),
+                &wasm_bindgen::JsValue::from_f64(f64::from(seconds)),
+            );
+        }
+        if let Some(name) = name {
+            let _ = js_sys::Reflect::set(&message, &"name".into(), &name.into());
+        }
+        if let Ok(port) = node.port() {
+            let _ = port.post_message(&message);
         }
     }
 

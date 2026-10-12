@@ -60,6 +60,56 @@ static int g_practice;              /* force all stages unlocked for Practice */
 static int g_forcestage;            /* if >0, force currentStage = g_forcestage-1 */
 static volatile LONG g_frame;       /* Present count == logic frame */
 static FILE *g_log;
+static FILE *g_state;
+static unsigned g_stopafter;
+static FILE *g_detail;
+static FILE *g_effects;
+static unsigned g_detailstart;
+static unsigned g_detailend = 0xffffffffu;
+
+/* 1.02h globals/layout from globals.csv and the size-checked decomp headers.
+ * Read only: logging must not change the replay, RNG, collision or score. */
+static void log_replay_state(unsigned present)
+{
+    unsigned char *gm = (unsigned char *)0x69bca0;
+    unsigned char *player = (unsigned char *)0x6ca628;
+    unsigned char *manager = *(unsigned char **)0x6d3f18;
+    if (!g_state || !manager || !gm[0x1821]) return;
+    unsigned bullets = 0, lasers = 0, items = 0;
+    unsigned char *bm = (unsigned char *)0x5a5ff8;
+    for (unsigned i = 0; i < 640; i++) {
+        unsigned char *b = bm + 0x5600 + i * 0x5c4;
+        unsigned state = *(unsigned short *)(b + 0x5be);
+        bullets += state != 0;
+        if (state && g_detail && (unsigned)*(int *)manager >= g_detailstart && (unsigned)*(int *)manager <= g_detailend)
+            fprintf(g_detail, "%d,%u,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%u,%d\n", *(int *)manager, i,
+                *(float *)(b+0x560), *(float *)(b+0x564), *(float *)(b+0x590), *(float *)(b+0x584),
+                *(float *)(b+0x56c), *(float *)(b+0x570), state, *(int *)(b+0x5a4));
+    }
+    if (g_detail) fflush(g_detail);
+    for (unsigned i = 0; i < 64; i++)
+        lasers += *(int *)(bm + 0x5600 + 640 * 0x5c4 + i * 0x270 + 0x258) != 0;
+    for (unsigned i = 0; i < 512; i++)
+        items += *((unsigned char *)0x69e268 + i * 0x144 + 0x141) != 0;
+    if (g_effects && (unsigned)*(int *)manager >= g_detailstart && (unsigned)*(int *)manager <= g_detailend) {
+        for (unsigned i = 0; i < 512; i++) {
+            unsigned char *e = (unsigned char *)0x487fe0 + 8 + i * 0x17c;
+            if (!e[0x178]) continue;
+            fprintf(g_effects, "%d,%u,%d,%u,%u,%.9g,%.9g,%.9g\n", *(int *)manager, i,
+                *(int *)(e+0x16c), *(unsigned *)(e+0x174), *(unsigned *)(e+0xc0),
+                *(float *)(e+0x110), *(float *)(e+0x114), *(float *)(e+0x118));
+        }
+        fflush(g_effects);
+    }
+    fprintf(g_state, "%u,%d,%d,%.6f,%.6f,%d,%d,%d,%u,%u,%u,%d,%d,%u,%u,%u,%u,%u\n",
+        present, *(int *)manager, *(int *)(gm + 0x1a34),
+        *(float *)(player + 0x440), *(float *)(player + 0x444),
+        (signed char)gm[0x181a], (signed char)gm[0x181b], *(int *)(gm + 0x1810),
+        *(unsigned *)(gm + 4), *(unsigned *)(gm + 0x14), *(unsigned *)(gm + 0x18),
+        *(int *)(gm + 0x1a70), *(int *)(gm + 0x1a7c), *(unsigned short *)0x69d8f8,
+        bullets, lasers, items, player[0x9e4]);
+    fflush(g_state);
+}
 
 /* Player::Die in 102h.exe (config/mapping.csv: 0x427770, __thiscall void(Player*)).
  * ImageBase 0x400000, no dynamic base, so this VA is directly patchable. */
@@ -141,6 +191,21 @@ static void load_config(void)
             g_capstride = s ? s : 1;
         } else if (sscanf(line, "realtime %u", &s) == 1) {
             g_realtime = (int)s;
+        } else if (sscanf(line, "stopafter %u", &s) == 1) {
+            g_stopafter = s;
+        } else if (sscanf(line, "statefile %63s", a) == 1) {
+            g_state = fopen(a, "w");
+            if (g_state) fprintf(g_state, "present,frame,stage,x,y,lives,bombs,power,score,graze_stage,graze_total,rank,subrank,rng,bullets,lasers,items,particle_timer\n");
+        } else if (sscanf(line, "detailfile %63s", a) == 1) {
+            g_detail = fopen(a, "w");
+            if (g_detail) fprintf(g_detail, "frame,slot,x,y,angle,speed,vx,vy,state,timer\n");
+        } else if (sscanf(line, "effectfile %63s", a) == 1) {
+            g_effects = fopen(a, "w");
+            if (g_effects) fprintf(g_effects, "frame,slot,timer,callback,sprite,x,y,z\n");
+        } else if (sscanf(line, "detailstart %u", &s) == 1) {
+            g_detailstart = s;
+        } else if (sscanf(line, "detailend %u", &s) == 1) {
+            g_detailend = s;
         } else if (sscanf(line, "god %u", &s) == 1) {
             g_god = (int)s;
         } else if (sscanf(line, "practice %u", &s) == 1) {
@@ -415,6 +480,8 @@ static HRESULT STDMETHODCALLTYPE my_Present(IDirect3DDevice8 *dev,
                                             HWND wnd, CONST RGNDATA *dirty)
 {
     unsigned f = (unsigned)g_frame;
+    log_replay_state(f);
+    if (g_stopafter && f >= g_stopafter) ExitProcess(0);
     if (g_practice)
         force_practice_unlock();
     if (g_forcestage > 0)
