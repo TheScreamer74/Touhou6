@@ -1,49 +1,53 @@
 # Deployed build — 2026-10-12
 
-- Public URL: https://games.blackoutburst.com/th06/
-- Build: `music-loop-20261012-5f7145f2299d`
-- Code commit: `9714c16e951ec21619149431a260ceb144a34e85`
-- WASM SHA256: `5f7145f2299de379224413e5a074c3581becc40a59548080303621c40fda9738`
-- Release directory: `/home/ubuntu/touhou6-web/releases/music-loop-20261012-5f7145f2299d`
+- Public URL: https://games.blackoutburst.com/th06/?v=3ac820702f24
+- Build: `fidelity-20261012-3ac820702f24`
+- Code commit: `4a8d092b690929a7804eeab678ca307cfdcb39d9`
+- WASM SHA256: `3ac820702f24fdeca7dbdf17061f14d00392f10cc525334b42a2ec31aa3f95e6`
+- Release directory: `/home/ubuntu/touhou6-web/releases/fidelity-20261012-3ac820702f24`
 - Published link: `/home/ubuntu/Touhou6-Mac/web/th06`
-- Previous deployment: `/home/ubuntu/touhou6-web/releases/full-game-20261012-eef7cca16643`
+- Previous release: `/home/ubuntu/touhou6-web/releases/music-loop-20261012-5f7145f2299d`
 - Initial legacy backup: `/home/ubuntu/touhou6-web/releases/legacy-20261012-083504`
-- Source archive: `/home/ubuntu/touhou6-web/source/touhou6-9714c16-source.tar.gz`
+- Source archive: `/home/ubuntu/touhou6-web/source/touhou6-4a8d092-source.tar.gz`
+- Source archive SHA256: `5b41573aae02d702ebaed25e02ea86405369e8666bc31e0412a750f6d5ba6946`
 - Server receipt: `/home/ubuntu/touhou6-web/deployment.json`
 
-The existing dirty server checkout was preserved. The release was transferred
-separately, verified with SHA256SUMS, and exercised under
-`/th06-preview-20261012/`. Linux `renameat2(RENAME_EXCHANGE)` switched the initial
-directory to the new symlink atomically. Other game routes were unchanged.
-Future releases can atomically replace the published symlink after validation.
+The existing dirty server checkout was preserved. The separate release passed
+all SHA256SUMS before publication. Browser startup was checked at the HTTPS
+preview, then the published symlink was replaced atomically with `os.replace`.
+A post-switch check confirms the downloaded WASM hash and `application/wasm`
+content type, Worklet JavaScript and full SoundFont license. TH04 and the portal
+still return HTTP 200; their routes were unchanged. All previous releases remain
+available. [Deployment receipt](deployment-fidelity-2026-10-12.json).
 
-The follow-up music correction was exercised at `/th06-music-preview-20261012/`
-before atomically replacing that symlink. The preceding full-game release and
-the original legacy deployment are both retained. The actual engine was checked
-with a 48 kHz output context, and all 17 tracks passed browser loop-boundary
-render checks at 44.1 and 48 kHz. See [the audio receipt](audio-loop-2026-10-12.json).
+The hosted set contains seven game archives, 17 Ogg tracks retaining the original
+WAV sample rates/frame counts, and a separate TimGM6mb General MIDI SoundFont.
+The bank's attribution and full GPL-2 license are served beside it. Original
+executables, MS Gothic and the Windows GS bank are not hosted. Game assets and
+the freely licensed bank remain outside Git. `res` and `bgm` aliases preserve the
+previous asset paths. `midi-worklet.js` must deploy beside `index.html` and `pkg/`.
 
-The hosted set includes seven archives and 17 Ogg tracks converted from the
-provided WAVs at their original sample rate. No original executable is hosted.
-`res` and `bgm` aliases retain the old asset URLs. Assets remain outside Git.
+The final browser check exercised 16-bit rendering, Normal/Marisa B selection,
+shots and Master Spark, plus saved-MIDI cold startup. HTTPS preview and public
+startup both loaded all 25 assets and rendered with no observed console errors
+or warnings. The original title demo runs on the public build. These browser
+checks are distinct from the 96-route internal replay regression and the 3,720
+original-executable observations in [the validation report](REVERSE_ENGINEERING.md).
 
-HTTPS checks returned 200 for build.json, the WASM, TH04 and the portal. The
-WASM was served as `application/wasm` and its downloaded hash matched the local
-build. Browser checks covered startup, Hard/Reimu B selection, a game-over
-Result flow, saving a T6RP replay and seeing it again after reload. The six
-endings and 96 stage routes are covered by the separate original-asset checks
-in [the validation report](REVERSE_ENGINEERING.md).
+The original WAV/Ogg loop correction remains active, including the 48 kHz
+resampling case. [Loop receipt](audio-loop-2026-10-12.json),
+[MIDI worklet receipt](midi-worklet-2026-10-12.json).
 
 ## Roll back
 
-On the server, create a temporary symlink and replace the published symlink in
-one operation. The previous release and its asset links remain available:
+Create a temporary symlink to the previous release and replace the current
+symlink in one operation. No release data needs to be removed:
 
 ```python
 import os
 from pathlib import Path
 root = Path('/home/ubuntu/Touhou6-Mac/web')
-backup = Path('/home/ubuntu/touhou6-web/releases/full-game-20261012-eef7cca16643')
+backup = Path('/home/ubuntu/touhou6-web/releases/music-loop-20261012-5f7145f2299d')
 next_link = root / '.th06-rollback'
 assert backup.is_dir()
 assert not next_link.exists() and not next_link.is_symlink()
@@ -53,7 +57,6 @@ os.replace(next_link, root / 'th06')
 
 ## Browser updates
 
-New builds must change `build.json.version` after uploading both JS and WASM.
-Use a hard reload once if the browser retained the previous HTML. The link
-`https://games.blackoutburst.com/th06/?v=5f7145f2299d` also bypasses that older
-HTML cache. Score/replay storage keys and the personal asset cache are retained.
+New builds must change `build.json.version` after uploading JS, WASM and the MIDI
+worklet. The public link above bypasses older cached HTML; a hard reload also
+refreshes it. Score/replay storage and the personal asset cache are retained.

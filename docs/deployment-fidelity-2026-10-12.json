@@ -1,0 +1,55 @@
+{
+  "version": "fidelity-20261012-3ac820702f24",
+  "code_commit": "4a8d092b690929a7804eeab678ca307cfdcb39d9",
+  "release": "/home/ubuntu/touhou6-web/releases/fidelity-20261012-3ac820702f24",
+  "previous_release": "/home/ubuntu/touhou6-web/releases/music-loop-20261012-5f7145f2299d",
+  "legacy_backup": "/home/ubuntu/touhou6-web/releases/legacy-20261012-083504",
+  "current": "/home/ubuntu/Touhou6-Mac/web/th06",
+  "source_archive": "/home/ubuntu/touhou6-web/source/touhou6-4a8d092-source.tar.gz",
+  "source_archive_sha256": "5b41573aae02d702ebaed25e02ea86405369e8666bc31e0412a750f6d5ba6946",
+  "published_at": "2026-10-12T10:08:49.942911+00:00",
+  "other_routes_unchanged": true,
+  "wasm_sha256": "3ac820702f24fdeca7dbdf17061f14d00392f10cc525334b42a2ec31aa3f95e6",
+  "rollback": "Create a symlink to previous_release and atomically replace the current th06 symlink with it.",
+  "https_checks": {
+    "/th06/build.json": {
+      "status": 200,
+      "content_type": "application/json",
+      "bytes": 46,
+      "version": "fidelity-20261012-3ac820702f24"
+    },
+    "/th06/pkg/th06_bg.wasm": {
+      "status": 200,
+      "content_type": "application/wasm",
+      "bytes": 9577298,
+      "sha256": "3ac820702f24fdeca7dbdf17061f14d00392f10cc525334b42a2ec31aa3f95e6"
+    },
+    "/th06/midi-worklet.js": {
+      "status": 200,
+      "content_type": "text/javascript",
+      "bytes": 4873
+    },
+    "/th06/assets/COPYING-TimGM6mb.txt": {
+      "status": 200,
+      "content_type": "text/plain",
+      "bytes": 18092
+    },
+    "/th04/": {
+      "status": 200,
+      "content_type": "text/html",
+      "bytes": 7128
+    },
+    "/": {
+      "status": 200,
+      "content_type": "text/html",
+      "bytes": 4097
+    }
+  },
+  "browser_checks": {
+    "browser": "Codex in-app browser",
+    "final_local_release": "16-bit mode enabled through Options, Normal Marisa B stage 1, firing and Master Spark",
+    "https_preview": "25 assets loaded; title rendered without observed errors or warnings",
+    "public_release": "25 assets loaded; original title demo rendered without observed errors or warnings",
+    "saved_midi_cold_start": "Passed; isolated audio thread handles title from first playback. See midi-worklet-2026-10-12.json"
+  }
+}
