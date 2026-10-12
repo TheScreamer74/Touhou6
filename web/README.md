@@ -57,7 +57,9 @@ names consumed by Rust to same-origin URLs, relative to the page. Example:
 
 The `.wav` keys identify tracks; their bytes may be Ogg for browser decoding.
 Keep the original sample rate when converting music so `.pos` loop points
-remain correct. `MD.DAT` contains `musiccmt.txt` (Shift-JIS) and the 17 `.pos`
+remain correct. The browser reads that rate from the WAV/Vorbis header before
+decoding and converts loop frames to seconds; Web Audio may resample the buffer
+to the output device rate (for example 48 kHz). `MD.DAT` contains `musiccmt.txt` (Shift-JIS) and the 17 `.pos`
 files (two little-endian u32 sample offsets each). Loose `.pos` files and
 `musiccmt.txt` are also supported. `ED.DAT` contains the six endings and the
 staff roll. `th06e_ST.DAT` supplies translated stage text when present.

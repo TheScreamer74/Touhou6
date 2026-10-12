@@ -1,5 +1,0 @@
---- a/src/wasm/WabtRelease.ts
-+++ b/src/wasm/WabtRelease.ts
-@@ -8 +8 @@
--  inputBytes: 8 * 1024 * 1024,
-+  inputBytes: 16 * 1024 * 1024,

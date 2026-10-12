@@ -1,0 +1,53 @@
+<!doctype html><html lang="fr"><meta charset="utf-8"><title>Vérification locale des boucles TH06</title><style>body{font:16px system-ui;max-width:1000px;margin:30px auto;background:#10141d;color:#eee}button{font:inherit;padding:10px}pre{white-space:pre-wrap}</style><h1>Vérification locale des boucles TH06</h1><p>Décodage réel des 17 pistes Vorbis et rendu hors ligne de la jonction de boucle, à 44,1 et 48 kHz. Aucune donnée n’est envoyée.</p><button id="run">Vérifier les boucles</button><pre id="status">Prêt.</pre><pre id="results"></pre><script>
+const status=document.querySelector('#status'),results=document.querySelector('#results');
+document.querySelector('#run').onclick=async()=>{
+ document.querySelector('#run').disabled=true;
+ const ac=new AudioContext(); const deviceRate=ac.sampleRate; await ac.close();
+ const tracks=await (await fetch('tracks.json')).json();
+ const report={deviceRate,tests:[]};
+ try {
+ for(const rate of [44100,48000]) for(const track of tracks){
+  status.textContent=`Décodage ${track.name} à ${rate} Hz (${report.tests.length}/34)…`;
+  const ctx=new OfflineAudioContext(2,Math.round(rate*.5),rate);
+  const bytes=await (await fetch(`ogg/${track.name}.ogg`)).arrayBuffer();
+  const buf=await ctx.decodeAudioData(bytes);
+  const start=track.start/track.rate,end=track.end/track.rate;
+  const src=ctx.createBufferSource();src.buffer=buf;src.loop=true;src.loopStart=start;src.loopEnd=end;
+  src.connect(ctx.destination);src.start(0,end-.25);
+  const rendered=await ctx.startRendering();
+  const input=buf.getChannelData(0),output=rendered.getChannelData(0);
+  const alignments=[];
+  // Find the source position from the rendered PCM, allowing the browser's
+  // fractional-frame interpolation within one output sample of the request.
+  // This measures the actual seek before and after the loop independently.
+  for(const sec of [.125,.375]){
+   const outputIndex=Math.round(sec*rate);
+   const actualSec=outputIndex/rate; const wantedFrame=(actualSec<.25 ? end-.25+actualSec : start+actualSec-.25)*rate;
+   const lo=Math.floor(wantedFrame);let best;
+   for(const offset of [-1,0,1]){
+    let numerator=0,denominator=0;
+    for(let i=0;i<1024;i++){
+     const a=input[lo+offset+i],b=input[lo+offset+i+1]-a;
+     numerator+=b*(output[outputIndex+i]-a);denominator+=b*b;
+    }
+    const fraction=Math.max(0,Math.min(1,numerator/denominator));
+    let square=0,energy=0;
+    for(let i=0;i<1024;i++){
+     const a=input[lo+offset+i],b=input[lo+offset+i+1]-a;
+     const expected=a+b*fraction,delta=output[outputIndex+i]-expected;
+     square+=delta*delta;energy+=expected*expected;
+    }
+    const fit={relativeRmsError:Math.sqrt(square/energy),frameError:lo+offset+fraction-wantedFrame};
+    if(!best||fit.relativeRmsError<best.relativeRmsError)best=fit;
+   }
+   alignments.push(best);
+  }
+  const test={track:track.name,outputRate:rate,decodedRate:buf.sampleRate,decodedFrames:buf.length,expectedFrames:track.length*rate/track.rate,loopStart:src.loopStart,loopEnd:src.loopEnd,duration:buf.duration,alignments};
+  test.pass=buf.sampleRate===rate&&Math.abs(buf.length-test.expectedFrames)<=1&&end<=buf.duration&&alignments.every(a=>a.relativeRmsError<.0001&&Math.abs(a.frameError)<1.01);
+  report.tests.push(test);results.textContent=JSON.stringify(report,null,2);
+ }
+ report.pass=report.tests.length===34&&report.tests.every(x=>x.pass);
+ status.textContent=report.pass?'PASS — 34 vérifications réussies.':'ÉCHEC — voir les résultats.';
+ }catch(error){report.error=String(error);status.textContent='Erreur : '+error;}
+ results.textContent=JSON.stringify(report,null,2);
+};</script></html>

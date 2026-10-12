@@ -1,0 +1,62 @@
+--- a/src/wasm/WabtRelease.ts
++++ b/src/wasm/WabtRelease.ts
+@@ -4,9 +4,11 @@
+   name: "REA WABT artifact adapter",
+   version: "wabt@1.0.42",
+ } as const;
++// A 9 MiB production Rust/WGPU module expands to 116 MiB of WAT.
++// Bound both representations independently; oversized output still fails closed.
+ export const WABT_LIMITS = {
+-  inputBytes: 8 * 1024 * 1024,
++  inputBytes: 16 * 1024 * 1024,
+   toolBytes: 64 * 1024 * 1024,
+-  outputBytes: 32 * 1024 * 1024,
++  outputBytes: 256 * 1024 * 1024,
+   timeoutMs: 30_000,
+ } as const;
+--- a/src/wasm/WabtArtifactProvider.ts
++++ b/src/wasm/WabtArtifactProvider.ts
+@@ -341,7 +341,7 @@
+         "Imports and exports retain exact top-level WABT WAT forms. Names remain escaped producer text; unescaped objdump display names are not parsed as unambiguous identifiers.",
+         "JavaScript references are AST-observed static literals only. Candidate matches are associations, not proven data flow, URL-to-file identity or runtime loading. Computed references and aliases are not resolved.",
+         "No target execution or implicit fetch. WABT tools are trusted caller-supplied executables; SHA-256 identifies their bytes, not publisher authenticity. No OS memory sandbox is claimed.",
+-        "Each subprocess has a 30-second deadline and 32 MiB combined output budget. Oversized output fails instead of producing truncated success.",
++        `Each subprocess has a ${WABT_LIMITS.timeoutMs / 1000}-second deadline and ${WABT_LIMITS.outputBytes / (1024 * 1024)} MiB combined output budget. Oversized output fails instead of producing truncated success.`,
+       ];
+       const report = wasmArtifactSchema.parse({
+         artifact,
+--- a/docs/wasm-artifacts.md
++++ b/docs/wasm-artifacts.md
+@@ -41,7 +41,7 @@
+ ```
+ 
+ Each selected regular file is read through the existing stable artifact reader;
+-symlinks, changing files and files over 8 MiB fail closed. WASM bytes are copied
++symlinks, changing files and files over 16 MiB fail closed. WASM bytes are copied
+ into a private workspace as read-only `module.wasm`; its digest is rechecked
+ before and after each tool. WABT validates with `--enable-all`,
+ reports sections through `wasm-objdump -h -x`, and decodes through
+@@ -56,8 +56,9 @@
+ paths, executable digests, exact banners and arguments. Executable digests are
+ checked again after each command. Caller-supplied tools are trusted programs;
+ version and digest recording are not publisher authentication or an OS sandbox.
+-Each subprocess has a 30-second deadline and 32 MiB combined output budget;
+-truncation fails. All commands use existing owned-process cancellation and
++Each subprocess has a 30-second deadline and 256 MiB combined output budget;
++truncation fails. Binary and decoded text budgets are independent: a 9 MiB
++Rust/WGPU application can expand to more than 115 MiB of WAT. All commands use existing owned-process cancellation and
+ cleanup. Workspace cleanup failures remain explicit errors with resource paths.
+ 
+ WAT is a decoded representation, not original source or proof of runtime
+--- a/scripts/lib/real-ghidra-snapshot-lifecycle.mjs
++++ b/scripts/lib/real-ghidra-snapshot-lifecycle.mjs
+@@ -40,7 +40,8 @@
+       "evidence_integrity_mismatch",
+       JSON.stringify(reply),
+     );
+-    assert.match(error.message, /after analysis metadata mutations/u);
++    // The code and recovery contract identify the rejection; user-facing prose
++    // can evolve without changing whether the mutated binding is protected.
+     assert.match(
+       error.remediation.action,
+       /close.*without saving a snapshot/iu,

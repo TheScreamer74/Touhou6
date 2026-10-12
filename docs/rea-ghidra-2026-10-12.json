@@ -1,0 +1,176 @@
+{
+  "rea_source_revision": "b3dec005bcb89b5afe6e0aa41e5251f8a3a31de7",
+  "ghidra_version": "12.1.4",
+  "host": "darwin/arm64",
+  "verifier_patch": "/tmp/th06-tooling/rea-ghidra-verifier.patch",
+  "verifier_patch_sha256": "65023a29847f49e237e2e93f971a3290542165c67d9be6e8f3bb9529e01ce190",
+  "cause": "Verifier asserted superseded user-facing prose despite a correct evidence_integrity_mismatch rejection and recovery contract.",
+  "native_component": "/tmp/th06-tooling/ghidra_12.1.4_PUBLIC/GPL/DemanglerGnu/os/mac_arm_64/demangler_gnu_v2_41",
+  "native_component_sha256": "d1238633231b7515da76b9f494efa17b1e81850616eaf6d1cc4ae704f3bbd195",
+  "native_component_built_from": "Ghidra distribution bundled GPL/DemanglerGnu/src/demangler_gnu_v2_41 C sources",
+  "build_command": "cc -arch arm64 -std=gnu17 -O2 -DHAVE_STDLIB_H -DHAVE_STRING_H -I GPL/DemanglerGnu/src/demangler_gnu_v2_41/headers GPL/DemanglerGnu/src/demangler_gnu_v2_41/c/*.c -o GPL/DemanglerGnu/os/mac_arm_64/demangler_gnu_v2_41",
+  "native_smoke_input": "_ZN3rea5scope5entryEi",
+  "native_smoke_output": "rea::scope::entry(int)",
+  "checks": {
+    "syntax": "pass",
+    "format": "pass",
+    "real_host_ghidra": "pass"
+  },
+  "scope": "Ephemeral local tooling only; no global REA/MCP setup or game code modifications.",
+  "real_host_ghidra_report": "/tmp/th06-tooling/ghidra-verification-fixed.log",
+  "real_host_ghidra_report_sha256": "304e2b11117523e985f1f5276f5c82927878770c2a621cf0a1bef1f8716f42c0",
+  "real_host_ghidra_provider": {
+    "id": "ghidra",
+    "version": "12.1.4"
+  },
+  "real_host_ghidra_verification_lane": "host-native",
+  "real_host_ghidra_cleanup": "complete",
+  "real_verifier": {
+    "verifier_run": {
+      "run_id": "307f0e8f-8c36-4823-8d6c-5bcd4e6966cb",
+      "verifier_pid": 16371,
+      "parent_pid": 76264,
+      "process_lineage": {
+        "status": "verified",
+        "observed_at": "2026-10-12T08:56:49.346Z",
+        "launcher_pid": 16371,
+        "launcher_parent_pid": 76264,
+        "process_group_id": 16371,
+        "descendants": []
+      }
+    },
+    "ok": true,
+    "provider": {
+      "id": "ghidra",
+      "version": "12.1.4"
+    },
+    "verification_lane": "host-native",
+    "fixture_sources": [
+      "/private/tmp/th06-tooling/rea-b3dec005bcb89b5afe6e0aa41e5251f8a3a31de7/tests/conformance/ghidra/inventory.c"
+    ],
+    "fixtures": [
+      {
+        "variant": "debug",
+        "target_path": "/private/var/folders/1q/_gnfhf0s3px8tc7s94k2ly_r0000gn/T/rea-ghidra-fixtures-1vmGui/rea-ghidra-inventory-debug",
+        "target_sha256": "5dec3f1ca1f56dcc67a62b8cad59fc4bc0426afbb385afda0baefdc2f185d7c3",
+        "analysis_profile_digest": "fa476e9d439e49d9833aa5be0af7a525ecb40f09a0b8244d25468535cc489804",
+        "language_id": "AARCH64:LE:64:AppleSilicon",
+        "compiler_spec_id": "default",
+        "image_base": "0x100000000",
+        "procedures": 12,
+        "names": 116,
+        "strings": 49,
+        "memory_blocks": 11
+      },
+      {
+        "variant": "stripped",
+        "target_path": "/private/var/folders/1q/_gnfhf0s3px8tc7s94k2ly_r0000gn/T/rea-ghidra-fixtures-1vmGui/rea-ghidra-inventory-stripped",
+        "target_sha256": "a8a3e53f9f435290935bebaa862d44c9fb0da57a1014a94055a6341a5758d178",
+        "analysis_profile_digest": "fa476e9d439e49d9833aa5be0af7a525ecb40f09a0b8244d25468535cc489804",
+        "language_id": "AARCH64:LE:64:AppleSilicon",
+        "compiler_spec_id": "default",
+        "image_base": "0x100000000",
+        "procedures": 12,
+        "names": 96,
+        "strings": 16,
+        "memory_blocks": 11
+      },
+      {
+        "variant": "type-layout",
+        "target_path": "/private/var/folders/1q/_gnfhf0s3px8tc7s94k2ly_r0000gn/T/rea-ghidra-fixtures-1vmGui/rea-ghidra-layout.o",
+        "target_sha256": "c17fcb364dee1bf31c69931bd78532cdcc5aab061c3a247d54b1dfff1e5b68cf",
+        "analysis_profile_digest": "fa476e9d439e49d9833aa5be0af7a525ecb40f09a0b8244d25468535cc489804",
+        "language_id": "AARCH64:LE:64:AppleSilicon",
+        "compiler_spec_id": "default",
+        "image_base": "0x0",
+        "procedures": 12,
+        "names": 110,
+        "strings": 37,
+        "memory_blocks": 15
+      },
+      {
+        "variant": "jump-table",
+        "target_path": "/private/var/folders/1q/_gnfhf0s3px8tc7s94k2ly_r0000gn/T/rea-ghidra-fixtures-1vmGui/rea-ghidra-inventory-jump",
+        "target_sha256": "18a1cbecb18283fd6fb4d5e84d66452f97da7eb378ea738160a5c142070807c0",
+        "analysis_profile_digest": "fa476e9d439e49d9833aa5be0af7a525ecb40f09a0b8244d25468535cc489804",
+        "language_id": "AARCH64:LE:64:AppleSilicon",
+        "compiler_spec_id": "default",
+        "image_base": "0x100000000",
+        "procedures": 12,
+        "names": 102,
+        "strings": 49,
+        "memory_blocks": 12
+      }
+    ],
+    "malformed_target": "rejected-before-provider-start",
+    "native_api_cli": {
+      "operation": "inspect_native_api",
+      "provider": {
+        "id": "rea-workflow",
+        "name": "REA composed investigation workflow",
+        "version": "1"
+      },
+      "mappings_returned": 40,
+      "default_oracle": null,
+      "residual_unknowns": 3
+    },
+    "native_value_e2e": {
+      "mocked": false,
+      "cli": true,
+      "stdio_mcp": true,
+      "inline_evidence": true,
+      "direct_function_comparison": true,
+      "boundaries": {
+        "mocked": false,
+        "catalog_tools": 173,
+        "successful_calls": 370,
+        "rejected_calls": 52,
+        "cli_mcp_parity": true,
+        "mutation_rollback": true,
+        "annotation_native_text_validation": true,
+        "lossless_unicode_transport": true,
+        "exact_external_entry_resolution": true,
+        "recoverable_regex_stack_exhaustion": true,
+        "complete_function_body_references": true,
+        "ambiguity_candidates_inline": true,
+        "legacy_reference_snapshot_rejected": true,
+        "mutation_snapshot_lifecycle": true,
+        "concurrent_annotation_snapshot_close": true,
+        "changed_source_admission_and_recovery": true,
+        "source_permission_denial_verified": true,
+        "missing_and_nonregular_source_rejected": true,
+        "imported_source_identity_retained": true,
+        "equivalent_instruction_address_spellings": true,
+        "batch_procedure_identity": {
+          "entry": "0x1000004f8",
+          "interior": "0x1000004fc",
+          "selectors_preserved": true,
+          "identical_resolved_code": true,
+          "partial_failure_retained": true
+        },
+        "instruction_flow": {
+          "return_instruction": "0x10000052c",
+          "decoded_pcode_return": true,
+          "return_cli_mcp_parity": true,
+          "explicit_x86_elf_controls": 0,
+          "explicit_control_scope": "Not present on this host-native fixture format/architecture",
+          "generic_unknown_preserved": true
+        },
+        "qualified_annotation_name_roundtrip": true,
+        "imported_entry_alias_selection": true,
+        "oversized_result_retention_and_complete_export": true,
+        "long_selector_rejection_and_provider_recovery": true,
+        "source_immutable": true,
+        "reopen_discards_edits": true,
+        "long_tmpdir_private_socket_cleanup": true,
+        "real_startup_cancellation_cleanup": true
+      },
+      "nodes": 171,
+      "edges": 298,
+      "decompilations": 6,
+      "unknowns": 3
+    },
+    "custom_target": null,
+    "cleanup": "complete"
+  }
+}

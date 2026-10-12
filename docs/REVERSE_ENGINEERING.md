@@ -43,12 +43,44 @@ Related source-map addresses for v1.02h:
 
 REA also inspected the deployed HTML/JavaScript: two files, 14664 AST nodes,
 zero parse failures, complete inventory but 3716 semantic unknowns. The exact
-9,132,905-byte deployed WASM exceeds REA's default 8 MiB input budget. Raising
+9,132,905-byte initially deployed WASM exceeded REA's default 8 MiB input budget. Raising
 only that local tooling cap to 16 MiB allowed input processing, but WABT's WAT
-output then exceeded the unchanged 32 MiB output budget. No complete deployed
-WASM recovery is claimed. The official Ghidra conformance verifier encountered
+output then exceeded the unchanged 32 MiB output budget. The initial run therefore
+did not complete WASM inspection. The official Ghidra conformance verifier encountered
 an upstream error-message assertion mismatch; provider doctor and actual
 function decompilations succeeded, rather than the complete verifier suite.
+
+The follow-up tooling patch raises the separate binary/text budgets to 16/256 MiB
+and reports the configured limits directly. Both the full-game build and the
+music-loop correction now pass complete static inspection: 13 sections and exact
+WAT output matching an independent WABT invocation (121,217,568 and 121,677,166
+bytes respectively). A generated 12 MiB module also passes, exercising both old
+limits without game assets. The 21 adapter tests and 42 real CLI/MCP checks pass.
+This is complete decoding of the selected module, not recovered Rust source or
+a proof that its behavior matches Windows. The JavaScript semantic unknowns
+above still require separate investigation. See [the tooling repair](REA_TOOLING.md)
+and [capacity receipts](rea-capacity-2026-10-12.json).
+The Ghidra follow-up also passes its complete host-native lane after repairing
+the stale verifier assertion and compiling the distribution's missing ARM64
+GNU demangler from its bundled source: 370 successful calls and 52 checked
+rejections, with complete cleanup. [Receipt](rea-ghidra-2026-10-12.json).
+
+## Music-loop correction
+
+Web Audio's `decodeAudioData` resamples music to the device rate. The previous
+code divided original `.pos` frame counts by the decoded buffer rate, which
+shifted loop times when a 44.1 kHz track was decoded at 48 kHz. The title track
+returned to its loop 4.811 seconds too early. The corrected engine reads the
+encoded WAV/Vorbis rate and converts the original frame counts to seconds before
+the asynchronous decode. Generation IDs also discard stale A → B → A decodes.
+
+All 17 hosted Vorbis files retain the corresponding original WAV's frame count
+and source rate; every `.pos` range is inside its track. Thirty-four browser
+render checks (17 tracks at 44.1 and 48 kHz) straddled the loop boundary and
+matched the expected decoded PCM alignment within 0.49 output samples. Six
+focused audio tests and all 60 workspace unit checks pass. This checks loop
+timing and rendered output, without claiming subjective listening results or
+lossless Vorbis equivalence. [Browser receipt](audio-loop-2026-10-12.json).
 
 REA workflow sources: [installation](https://github.com/morluto/rea/blob/b3dec005bcb89b5afe6e0aa41e5251f8a3a31de7/docs/installation.md),
 [CLI](https://github.com/morluto/rea/blob/b3dec005bcb89b5afe6e0aa41e5251f8a3a31de7/docs/cli.md),

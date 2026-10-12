@@ -1,0 +1,744 @@
+{
+  "deviceRate": 48000,
+  "tests": [
+    {
+      "track": "th06_01",
+      "outputRate": 44100,
+      "decodedRate": 44100,
+      "decodedFrames": 2801664,
+      "expectedFrames": 2801664,
+      "loopStart": 6.0003401360544215,
+      "loopEnd": 59.214625850340134,
+      "duration": 63.52979591836735,
+      "alignments": [
+        {
+          "relativeRmsError": 0,
+          "frameError": 0
+        },
+        {
+          "relativeRmsError": 0,
+          "frameError": 0
+        }
+      ],
+      "pass": true
+    },
+    {
+      "track": "th06_02",
+      "outputRate": 44100,
+      "decodedRate": 44100,
+      "decodedFrames": 3842048,
+      "expectedFrames": 3842048,
+      "loopStart": 20.76734693877551,
+      "loopEnd": 86.96766439909297,
+      "duration": 87.12126984126984,
+      "alignments": [
+        {
+          "relativeRmsError": 0,
+          "frameError": 0
+        },
+        {
+          "relativeRmsError": 0,
+          "frameError": -1.1641532182693481e-10
+        }
+      ],
+      "pass": true
+    },
+    {
+      "track": "th06_03",
+      "outputRate": 44100,
+      "decodedRate": 44100,
+      "decodedFrames": 2486272,
+      "expectedFrames": 2486272,
+      "loopStart": 2.8746485260770975,
+      "loopEnd": 55.496643990929705,
+      "duration": 56.37804988662131,
+      "alignments": [
+        {
+          "relativeRmsError": 0,
+          "frameError": 0
+        },
+        {
+          "relativeRmsError": 0,
+          "frameError": 0
+        }
+      ],
+      "pass": true
+    },
+    {
+      "track": "th06_04",
+      "outputRate": 44100,
+      "decodedRate": 44100,
+      "decodedFrames": 3883008,
+      "expectedFrames": 3883008,
+      "loopStart": 6.891655328798186,
+      "loopEnd": 87.51108843537415,
+      "duration": 88.05006802721088,
+      "alignments": [
+        {
+          "relativeRmsError": 0,
+          "frameError": 0
+        },
+        {
+          "relativeRmsError": 0,
+          "frameError": 0
+        }
+      ],
+      "pass": true
+    },
+    {
+      "track": "th06_05",
+      "outputRate": 44100,
+      "decodedRate": 44100,
+      "decodedFrames": 3964928,
+      "expectedFrames": 3964928,
+      "loopStart": 5.791088435374149,
+      "loopEnd": 89.5471201814059,
+      "duration": 89.90766439909297,
+      "alignments": [
+        {
+          "relativeRmsError": 0,
+          "frameError": -4.656612873077393e-10
+        },
+        {
+          "relativeRmsError": 0,
+          "frameError": 2.9103830456733704e-11
+        }
+      ],
+      "pass": true
+    },
+    {
+      "track": "th06_06",
+      "outputRate": 44100,
+      "decodedRate": 44100,
+      "decodedFrames": 6209536,
+      "expectedFrames": 6209536,
+      "loopStart": 44.99149659863946,
+      "loopEnd": 139.8364172335601,
+      "duration": 140.80580498866212,
+      "alignments": [
+        {
+          "relativeRmsError": 0,
+          "frameError": 0
+        },
+        {
+          "relativeRmsError": 0,
+          "frameError": 0
+        }
+      ],
+      "pass": true
+    },
+    {
+      "track": "th06_07",
+      "outputRate": 44100,
+      "decodedRate": 44100,
+      "decodedFrames": 4714496,
+      "expectedFrames": 4714496,
+      "loopStart": 23.53829931972789,
+      "loopEnd": 105.23034013605442,
+      "duration": 106.90467120181405,
+      "alignments": [
+        {
+          "relativeRmsError": 0,
+          "frameError": 0
+        },
+        {
+          "relativeRmsError": 0,
+          "frameError": 0
+        }
+      ],
+      "pass": true
+    },
+    {
+      "track": "th06_08",
+      "outputRate": 44100,
+      "decodedRate": 44100,
+      "decodedFrames": 5381832,
+      "expectedFrames": 5381832,
+      "loopStart": 4.14514739229025,
+      "loopEnd": 110.78,
+      "duration": 122.0370068027211,
+      "alignments": [
+        {
+          "relativeRmsError": 0,
+          "frameError": 0
+        },
+        {
+          "relativeRmsError": 0,
+          "frameError": 0
+        }
+      ],
+      "pass": true
+    },
+    {
+      "track": "th06_09",
+      "outputRate": 44100,
+      "decodedRate": 44100,
+      "decodedFrames": 5789977,
+      "expectedFrames": 5789977,
+      "loopStart": 29.38798185941043,
+      "loopEnd": 117.9452380952381,
+      "duration": 131.29199546485262,
+      "alignments": [
+        {
+          "relativeRmsError": 0,
+          "frameError": 0
+        },
+        {
+          "relativeRmsError": 0,
+          "frameError": 0
+        }
+      ],
+      "pass": true
+    },
+    {
+      "track": "th06_10",
+      "outputRate": 44100,
+      "decodedRate": 44100,
+      "decodedFrames": 8059296,
+      "expectedFrames": 8059296,
+      "loopStart": 20.524489795918367,
+      "loopEnd": 162.9137641723356,
+      "duration": 182.75047619047618,
+      "alignments": [
+        {
+          "relativeRmsError": 0,
+          "frameError": 9.313225746154785e-10
+        },
+        {
+          "relativeRmsError": 0,
+          "frameError": 0
+        }
+      ],
+      "pass": true
+    },
+    {
+      "track": "th06_11",
+      "outputRate": 44100,
+      "decodedRate": 44100,
+      "decodedFrames": 4153344,
+      "expectedFrames": 4153344,
+      "loopStart": 5.429501133786848,
+      "loopEnd": 84.33736961451247,
+      "duration": 94.18013605442177,
+      "alignments": [
+        {
+          "relativeRmsError": 0,
+          "frameError": 0
+        },
+        {
+          "relativeRmsError": 0,
+          "frameError": 0
+        }
+      ],
+      "pass": true
+    },
+    {
+      "track": "th06_12",
+      "outputRate": 44100,
+      "decodedRate": 44100,
+      "decodedFrames": 2658304,
+      "expectedFrames": 2658304,
+      "loopStart": 3.7640589569160996,
+      "loopEnd": 59.1521768707483,
+      "duration": 60.279002267573695,
+      "alignments": [
+        {
+          "relativeRmsError": 0,
+          "frameError": 0
+        },
+        {
+          "relativeRmsError": 0,
+          "frameError": 2.9103830456733704e-11
+        }
+      ],
+      "pass": true
+    },
+    {
+      "track": "th06_13",
+      "outputRate": 44100,
+      "decodedRate": 44100,
+      "decodedFrames": 7266340,
+      "expectedFrames": 7266340,
+      "loopStart": 33.20108843537415,
+      "loopEnd": 140.82274376417234,
+      "duration": 164.76961451247166,
+      "alignments": [
+        {
+          "relativeRmsError": 0,
+          "frameError": 0
+        },
+        {
+          "relativeRmsError": 0,
+          "frameError": 0
+        }
+      ],
+      "pass": true
+    },
+    {
+      "track": "th06_14",
+      "outputRate": 44100,
+      "decodedRate": 44100,
+      "decodedFrames": 6991872,
+      "expectedFrames": 6991872,
+      "loopStart": 35.85526077097506,
+      "loopEnd": 153.3116553287982,
+      "duration": 158.54585034013604,
+      "alignments": [
+        {
+          "relativeRmsError": 0,
+          "frameError": 0
+        },
+        {
+          "relativeRmsError": 0,
+          "frameError": 0
+        }
+      ],
+      "pass": true
+    },
+    {
+      "track": "th06_15",
+      "outputRate": 44100,
+      "decodedRate": 44100,
+      "decodedFrames": 5660672,
+      "expectedFrames": 5660672,
+      "loopStart": 4.47,
+      "loopEnd": 126.44390022675736,
+      "duration": 128.35990929705216,
+      "alignments": [
+        {
+          "relativeRmsError": 0,
+          "frameError": 0
+        },
+        {
+          "relativeRmsError": 0,
+          "frameError": 2.9103830456733704e-11
+        }
+      ],
+      "pass": true
+    },
+    {
+      "track": "th06_16",
+      "outputRate": 44100,
+      "decodedRate": 44100,
+      "decodedFrames": 2543616,
+      "expectedFrames": 2543616,
+      "loopStart": 9.075260770975056,
+      "loopEnd": 56.18442176870748,
+      "duration": 57.67836734693878,
+      "alignments": [
+        {
+          "relativeRmsError": 0,
+          "frameError": 0
+        },
+        {
+          "relativeRmsError": 0,
+          "frameError": 0
+        }
+      ],
+      "pass": true
+    },
+    {
+      "track": "th06_17",
+      "outputRate": 44100,
+      "decodedRate": 44100,
+      "decodedFrames": 4816896,
+      "expectedFrames": 4816896,
+      "loopStart": 5.430997732426304,
+      "loopEnd": 105.8866439909297,
+      "duration": 109.22666666666667,
+      "alignments": [
+        {
+          "relativeRmsError": 0,
+          "frameError": 0
+        },
+        {
+          "relativeRmsError": 0,
+          "frameError": 0
+        }
+      ],
+      "pass": true
+    },
+    {
+      "track": "th06_01",
+      "outputRate": 48000,
+      "decodedRate": 48000,
+      "decodedFrames": 3049430,
+      "expectedFrames": 3049430.2040816327,
+      "loopStart": 6.0003401360544215,
+      "loopEnd": 59.214625850340134,
+      "duration": 63.52979166666667,
+      "alignments": [
+        {
+          "relativeRmsError": 0,
+          "frameError": -0.04081632662564516
+        },
+        {
+          "relativeRmsError": 2.4866501028956916e-08,
+          "frameError": -0.04081632854649797
+        }
+      ],
+      "pass": true
+    },
+    {
+      "track": "th06_02",
+      "outputRate": 48000,
+      "decodedRate": 48000,
+      "decodedFrames": 4181820,
+      "expectedFrames": 4181820.9523809524,
+      "loopStart": 20.76734693877551,
+      "loopEnd": 86.96766439909297,
+      "duration": 87.12125,
+      "alignments": [
+        {
+          "relativeRmsError": 0,
+          "frameError": 0.10884353751316667
+        },
+        {
+          "relativeRmsError": 2.5793245993356364e-08,
+          "frameError": 0.10884353751316667
+        }
+      ],
+      "pass": true
+    },
+    {
+      "track": "th06_03",
+      "outputRate": 48000,
+      "decodedRate": 48000,
+      "decodedFrames": 2706146,
+      "expectedFrames": 2706146.394557823,
+      "loopStart": 2.8746485260770975,
+      "loopEnd": 55.496643990929705,
+      "duration": 56.37804166666667,
+      "alignments": [
+        {
+          "relativeRmsError": 0,
+          "frameError": 0.08843537420034409
+        },
+        {
+          "relativeRmsError": 2.5581689124006785e-08,
+          "frameError": 0.08843537422944792
+        }
+      ],
+      "pass": true
+    },
+    {
+      "track": "th06_04",
+      "outputRate": 48000,
+      "decodedRate": 48000,
+      "decodedFrames": 4226403,
+      "expectedFrames": 4226403.265306123,
+      "loopStart": 6.891655328798186,
+      "loopEnd": 87.51108843537415,
+      "duration": 88.0500625,
+      "alignments": [
+        {
+          "relativeRmsError": 0,
+          "frameError": -0.2448979588225484
+        },
+        {
+          "relativeRmsError": 2.5170027385538972e-08,
+          "frameError": -0.24489795824047178
+        }
+      ],
+      "pass": true
+    },
+    {
+      "track": "th06_05",
+      "outputRate": 48000,
+      "decodedRate": 48000,
+      "decodedFrames": 4315567,
+      "expectedFrames": 4315567.891156463,
+      "loopStart": 5.791088435374149,
+      "loopEnd": 89.5471201814059,
+      "duration": 89.90764583333333,
+      "alignments": [
+        {
+          "relativeRmsError": 0,
+          "frameError": 0.23129251692444086
+        },
+        {
+          "relativeRmsError": 2.500314225048152e-08,
+          "frameError": 0.2312925161095336
+        }
+      ],
+      "pass": true
+    },
+    {
+      "track": "th06_06",
+      "outputRate": 48000,
+      "decodedRate": 48000,
+      "decodedFrames": 6758678,
+      "expectedFrames": 6758678.639455782,
+      "loopStart": 44.99149659863946,
+      "loopEnd": 139.8364172335601,
+      "duration": 140.80579166666666,
+      "alignments": [
+        {
+          "relativeRmsError": 0,
+          "frameError": -0.027210884727537632
+        },
+        {
+          "relativeRmsError": 2.515446531694925e-08,
+          "frameError": -0.027210881933569908
+        }
+      ],
+      "pass": true
+    },
+    {
+      "track": "th06_07",
+      "outputRate": 48000,
+      "decodedRate": 48000,
+      "decodedFrames": 5131424,
+      "expectedFrames": 5131424.217687075,
+      "loopStart": 23.53829931972789,
+      "loopEnd": 105.23034013605442,
+      "duration": 106.90466666666667,
+      "alignments": [
+        {
+          "relativeRmsError": 0,
+          "frameError": -0.3265306120738387
+        },
+        {
+          "relativeRmsError": 2.500067407919993e-08,
+          "frameError": -0.3265306134708226
+        }
+      ],
+      "pass": true
+    },
+    {
+      "track": "th06_08",
+      "outputRate": 48000,
+      "decodedRate": 48000,
+      "decodedFrames": 5857776,
+      "expectedFrames": 5857776.326530612,
+      "loopStart": 4.14514739229025,
+      "loopEnd": 110.78,
+      "duration": 122.037,
+      "alignments": [
+        {
+          "relativeRmsError": 0,
+          "frameError": 0
+        },
+        {
+          "relativeRmsError": 2.5083870606885835e-08,
+          "frameError": 5.122274160385132e-09
+        }
+      ],
+      "pass": true
+    },
+    {
+      "track": "th06_09",
+      "outputRate": 48000,
+      "decodedRate": 48000,
+      "decodedFrames": 6302015,
+      "expectedFrames": 6302015.782312925,
+      "loopStart": 29.38798185941043,
+      "loopEnd": 117.9452380952381,
+      "duration": 131.29197916666666,
+      "alignments": [
+        {
+          "relativeRmsError": 0,
+          "frameError": -0.4285714281722903
+        },
+        {
+          "relativeRmsError": 2.4636091614924223e-08,
+          "frameError": -0.42857143213041127
+        }
+      ],
+      "pass": true
+    },
+    {
+      "track": "th06_10",
+      "outputRate": 48000,
+      "decodedRate": 48000,
+      "decodedFrames": 8772022,
+      "expectedFrames": 8772022.857142856,
+      "loopStart": 20.524489795918367,
+      "loopEnd": 162.9137641723356,
+      "duration": 182.75045833333334,
+      "alignments": [
+        {
+          "relativeRmsError": 0,
+          "frameError": 0.3197278920561075
+        },
+        {
+          "relativeRmsError": 2.4168286022984448e-08,
+          "frameError": 0.3197278931038454
+        }
+      ],
+      "pass": true
+    },
+    {
+      "track": "th06_11",
+      "outputRate": 48000,
+      "decodedRate": 48000,
+      "decodedFrames": 4520646,
+      "expectedFrames": 4520646.530612245,
+      "loopStart": 5.429501133786848,
+      "loopEnd": 84.33736961451247,
+      "duration": 94.180125,
+      "alignments": [
+        {
+          "relativeRmsError": 0,
+          "frameError": 0.2585034016519785
+        },
+        {
+          "relativeRmsError": 2.532030733292495e-08,
+          "frameError": 0.25850339903263375
+        }
+      ],
+      "pass": true
+    },
+    {
+      "track": "th06_12",
+      "outputRate": 48000,
+      "decodedRate": 48000,
+      "decodedFrames": 2893392,
+      "expectedFrames": 2893392.1088435375,
+      "loopStart": 3.7640589569160996,
+      "loopEnd": 59.1521768707483,
+      "duration": 60.279,
+      "alignments": [
+        {
+          "relativeRmsError": 0,
+          "frameError": -0.48979591857641935
+        },
+        {
+          "relativeRmsError": 2.4719976046246938e-08,
+          "frameError": -0.489795922068879
+        }
+      ],
+      "pass": true
+    },
+    {
+      "track": "th06_13",
+      "outputRate": 48000,
+      "decodedRate": 48000,
+      "decodedFrames": 7908941,
+      "expectedFrames": 7908941.4965986395,
+      "loopStart": 33.20108843537415,
+      "loopEnd": 140.82274376417234,
+      "duration": 164.76960416666665,
+      "alignments": [
+        {
+          "relativeRmsError": 0,
+          "frameError": 0.2993197273463011
+        },
+        {
+          "relativeRmsError": 2.473008540644556e-08,
+          "frameError": 0.29931972990743816
+        }
+      ],
+      "pass": true
+    },
+    {
+      "track": "th06_14",
+      "outputRate": 48000,
+      "decodedRate": 48000,
+      "decodedFrames": 7610200,
+      "expectedFrames": 7610200.816326531,
+      "loopStart": 35.85526077097506,
+      "loopEnd": 153.3116553287982,
+      "duration": 158.54583333333332,
+      "alignments": [
+        {
+          "relativeRmsError": 0,
+          "frameError": -0.45578231383115053
+        },
+        {
+          "relativeRmsError": 2.4815531076993814e-08,
+          "frameError": -0.4557823115028441
+        }
+      ],
+      "pass": true
+    },
+    {
+      "track": "th06_15",
+      "outputRate": 48000,
+      "decodedRate": 48000,
+      "decodedFrames": 6161275,
+      "expectedFrames": 6161275.646258503,
+      "loopStart": 4.47,
+      "loopEnd": 126.44390022675736,
+      "duration": 128.35989583333333,
+      "alignments": [
+        {
+          "relativeRmsError": 0,
+          "frameError": -0.210884353145957
+        },
+        {
+          "relativeRmsError": 2.4605181421572684e-08,
+          "frameError": -0.2108843535243068
+        }
+      ],
+      "pass": true
+    },
+    {
+      "track": "th06_16",
+      "outputRate": 48000,
+      "decodedRate": 48000,
+      "decodedFrames": 2768561,
+      "expectedFrames": 2768561.6326530613,
+      "loopStart": 9.075260770975056,
+      "loopEnd": 56.18442176870748,
+      "duration": 57.678354166666665,
+      "alignments": [
+        {
+          "relativeRmsError": 0,
+          "frameError": -0.2448979588225484
+        },
+        {
+          "relativeRmsError": 2.651970301447128e-08,
+          "frameError": -0.24489796586567536
+        }
+      ],
+      "pass": true
+    },
+    {
+      "track": "th06_17",
+      "outputRate": 48000,
+      "decodedRate": 48000,
+      "decodedFrames": 5242880,
+      "expectedFrames": 5242880,
+      "loopStart": 5.430997732426304,
+      "loopEnd": 105.8866439909297,
+      "duration": 109.22666666666667,
+      "alignments": [
+        {
+          "relativeRmsError": 0,
+          "frameError": 0.08843537420034409
+        },
+        {
+          "relativeRmsError": 2.658475059776697e-08,
+          "frameError": 0.08843537577195093
+        }
+      ],
+      "pass": true
+    }
+  ],
+  "pass": true,
+  "engine_probe": {
+    "contextRates": [
+      48000
+    ],
+    "decodes": [
+      {
+        "id": 1,
+        "rate": 48000,
+        "duration": 63.52979166666667
+      }
+    ],
+    "starts": [
+      {
+        "id": 1,
+        "loopStart": 6.0003401360544215,
+        "loopEnd": 59.214625850340134,
+        "bufferRate": 48000,
+        "duration": 63.52979166666667
+      }
+    ],
+    "stops": []
+  },
+  "wasm_sha256": "5f7145f2299de379224413e5a074c3581becc40a59548080303621c40fda9738",
+  "scope": "Real browser decoding and rendered loop alignment; actual engine title-source properties at 48 kHz. No subjective listening or lossless Vorbis claim."
+}
