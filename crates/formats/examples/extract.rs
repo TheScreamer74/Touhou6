@@ -15,7 +15,12 @@ fn main() {
         println!("  {:>10}  {}", entry.size, entry.name);
         if let Some(dir) = &out_dir {
             let contents = archive.extract(entry).expect("decompress");
-            assert_eq!(contents.len(), entry.size as usize, "{}: size mismatch", entry.name);
+            assert_eq!(
+                contents.len(),
+                entry.size as usize,
+                "{}: size mismatch",
+                entry.name
+            );
             std::fs::create_dir_all(dir).expect("create out dir");
             std::fs::write(dir.join(&entry.name), contents).expect("write file");
         }

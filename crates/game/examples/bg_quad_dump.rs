@@ -11,12 +11,23 @@ fn main() {
     let sid: u32 = std::env::args().nth(3).unwrap().parse().unwrap();
     let frames: u32 = std::env::args().nth(4).unwrap().parse().unwrap();
     let arc = Pbg3::parse(&dat).unwrap();
-    let e = arc.entries.iter().find(|e| e.name == format!("stg{n}bg.anm")).unwrap();
+    let e = arc
+        .entries
+        .iter()
+        .find(|e| e.name == format!("stg{n}bg.anm"))
+        .unwrap();
     let anm = Anm0::parse(&arc.extract(e).unwrap()).unwrap();
     let ent = &anm.entries[0];
-    let sprites: HashMap<u32, [f32; 2]> =
-        ent.sprites.iter().map(|s| (s.index, [s.width, s.height])).collect();
-    let (_, instrs) = ent.scripts.iter().find(|(id, _)| *id == sid).expect("script");
+    let sprites: HashMap<u32, [f32; 2]> = ent
+        .sprites
+        .iter()
+        .map(|s| (s.index, [s.width, s.height]))
+        .collect();
+    let (_, instrs) = ent
+        .scripts
+        .iter()
+        .find(|(id, _)| *id == sid)
+        .expect("script");
     for line in dbg_quad_run(instrs.clone(), &sprites, frames) {
         println!("{line}");
     }

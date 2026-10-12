@@ -7,7 +7,11 @@ pub struct BitStream<'a> {
 
 impl<'a> BitStream<'a> {
     pub fn new(data: &'a [u8]) -> Self {
-        Self { data, pos: 0, bit: 0 }
+        Self {
+            data,
+            pos: 0,
+            bit: 0,
+        }
     }
 
     pub fn seek(&mut self, byte_pos: usize) {

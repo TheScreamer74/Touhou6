@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use th06::{build_game, Character, GameFiles, RecordPhase};
+use th06::{Character, Difficulty, GameFiles, RecordPhase, build_game};
 use th06_engine::{Engine, Frame, Input, Key};
 
 /// All files from one PBG3 archive, keyed by entry name.
@@ -21,25 +21,36 @@ fn load_archive(path: &Path) -> HashMap<String, Vec<u8>> {
 }
 
 /// Read every `*.wav` in the game's `bgm/` directory, keyed by basename.
-fn load_bgm(dir: &Path) -> (HashMap<String, Vec<u8>>, HashMap<String, (u32, u32)>) {
+type BgmFiles = (HashMap<String, Vec<u8>>, HashMap<String, (u32, u32)>);
+fn load_bgm(dir: &Path) -> BgmFiles {
     let mut out = HashMap::new();
     let mut pos = HashMap::new();
-    let Ok(entries) = std::fs::read_dir(dir) else { return (out, pos) };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return (out, pos);
+    };
     for e in entries.flatten() {
         let path = e.path();
         if path.extension().and_then(|x| x.to_str()) != Some("wav") {
             continue;
         }
-        let Some(name) = path.file_name().and_then(|n| n.to_str()).map(str::to_string) else { continue };
-        let Ok(data) = std::fs::read(&path) else { continue };
+        let Some(name) = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(str::to_string)
+        else {
+            continue;
+        };
+        let Ok(data) = std::fs::read(&path) else {
+            continue;
+        };
         // Sibling `.pos`: 2 little-endian u32 (loop_start, loop_end) in frames
         // (decomp SoundPlayer::LoadPos). Present in a standard TH06 install.
-        if let Ok(p) = std::fs::read(path.with_extension("pos")) {
-            if p.len() >= 8 {
-                let s = u32::from_le_bytes([p[0], p[1], p[2], p[3]]);
-                let ed = u32::from_le_bytes([p[4], p[5], p[6], p[7]]);
-                pos.insert(name.clone(), (s, ed));
-            }
+        if let Ok(p) = std::fs::read(path.with_extension("pos"))
+            && p.len() >= 8
+        {
+            let s = u32::from_le_bytes([p[0], p[1], p[2], p[3]]);
+            let ed = u32::from_le_bytes([p[4], p[5], p[6], p[7]]);
+            pos.insert(name.clone(), (s, ed));
         }
         out.insert(name, data);
     }
@@ -71,12 +82,17 @@ fn install_crash_logger() {
 
 /// Read the persisted high score (0 if absent/unparseable).
 fn load_hiscore(path: &Path) -> i64 {
-    std::fs::read_to_string(path).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0)
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0)
 }
 
 /// Read the high-score table (one `score<TAB>stage<TAB>name` row per line).
 fn load_scores(path: &Path) -> Vec<th06::ScoreEntry> {
-    let Ok(body) = std::fs::read_to_string(path) else { return Vec::new() };
+    let Ok(body) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
     body.lines()
         .filter_map(|line| {
             let mut it = line.splitn(3, '\t');
@@ -97,7 +113,7 @@ fn load_scores(path: &Path) -> Vec<th06::ScoreEntry> {
 fn auto_play_input(game: &th06::Game, f: u32) -> Input {
     let Some((p, bombs)) = game.stage_player() else {
         // Menus: pulse Shoot to advance title -> char select -> stage.
-        return if f % 48 == 0 {
+        return if f.is_multiple_of(48) {
             Input::synthetic(&[], &[Key::Shoot])
         } else {
             Input::default()
@@ -116,8 +132,15 @@ fn auto_play_input(game: &th06::Game, f: u32) -> Input {
     // Player clamp bounds (Stage::clamp): x [12, 372], y [20, 428].
     let d = 1.0 / 2f32.sqrt();
     let moves: [[f32; 2]; 9] = [
-        [0.0, 0.0], [-1.0, 0.0], [1.0, 0.0], [0.0, -1.0], [0.0, 1.0],
-        [-d, -d], [d, -d], [-d, d], [d, d],
+        [0.0, 0.0],
+        [-1.0, 0.0],
+        [1.0, 0.0],
+        [0.0, -1.0],
+        [0.0, 1.0],
+        [-d, -d],
+        [d, -d],
+        [-d, d],
+        [d, d],
     ];
     // (min bullet distance over the horizon, the move, the end position).
     let mut scored: Vec<(f32, [f32; 2], [f32; 2])> = Vec::with_capacity(9);
@@ -164,9 +187,16 @@ fn auto_play_input(game: &th06::Game, f: u32) -> Input {
             safest.1 // under threat: take the safest escape
         } else if let Some(gx) = goal_x {
             // comfortable: pick the move whose end position sits nearest the goal x
-            comfy.iter().min_by(|a, b| (a.2[0] - gx).abs().total_cmp(&(b.2[0] - gx).abs())).unwrap().1
+            comfy
+                .iter()
+                .min_by(|a, b| (a.2[0] - gx).abs().total_cmp(&(b.2[0] - gx).abs()))
+                .unwrap()
+                .1
         } else {
-            comfy.iter().find(|s| s.1 == [0.0, 0.0]).map_or(safest.1, |s| s.1)
+            comfy
+                .iter()
+                .find(|s| s.1 == [0.0, 0.0])
+                .map_or(safest.1, |s| s.1)
         }
     };
 
@@ -181,7 +211,11 @@ fn auto_play_input(game: &th06::Game, f: u32) -> Input {
     } else if chosen[1] > 0.01 {
         held.push(Key::Down);
     }
-    let pressed: &[Key] = if safest.0 < BOMB_DIST && bombs > 0 { &[Key::Bomb] } else { &[] };
+    let pressed: &[Key] = if safest.0 < BOMB_DIST && bombs > 0 {
+        &[Key::Bomb]
+    } else {
+        &[]
+    };
     Input::synthetic(&held, pressed)
 }
 
@@ -229,6 +263,8 @@ fn main() {
     let mut record_split: Option<String> = None;
     let mut debug_power: Option<i32> = None;
     let mut debug_score: Option<i64> = None;
+    let mut difficulty = Difficulty::Normal;
+    let mut replay_file: Option<String> = None;
     let mut god = false;
     let mut autoplay = false;
     let mut probe_run = false;
@@ -238,17 +274,54 @@ fn main() {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--screenshot" => screenshot = Some(args.next().expect("--screenshot <out.png>")),
-            "--frames" => frames = args.next().expect("--frames <n>").parse().expect("frame count"),
+            "--frames" => {
+                frames = args
+                    .next()
+                    .expect("--frames <n>")
+                    .parse()
+                    .expect("frame count")
+            }
             "--scene" => scene_arg = args.next().expect("--scene <title|stage>"),
-            "--lives" => debug_lives = Some(args.next().expect("--lives <n>").parse().expect("lives")),
-            "--stage" => debug_stage = args.next().expect("--stage <1-6>").parse().expect("stage"),
+            "--lives" => {
+                debug_lives = Some(args.next().expect("--lives <n>").parse().expect("lives"))
+            }
+            "--stage" => debug_stage = args.next().expect("--stage <1-7>").parse().expect("stage"),
             "--char" => debug_char = args.next().expect("--char <0-3>").parse().expect("char"),
             "--demo" => demo = Some(args.next().expect("--demo <out_dir>")),
-            "--demo-interval" => demo_interval = args.next().expect("--demo-interval <n>").parse().expect("interval"),
+            "--demo-interval" => {
+                demo_interval = args
+                    .next()
+                    .expect("--demo-interval <n>")
+                    .parse()
+                    .expect("interval")
+            }
             "--record" => record = Some(args.next().expect("--record <out_dir>")),
             "--record-split" => record_split = Some(args.next().expect("--record-split <out_dir>")),
-            "--power" => debug_power = Some(args.next().expect("--power <0-128>").parse().expect("power")),
-            "--score" => debug_score = Some(args.next().expect("--score <n>").parse().expect("score")),
+            "--power" => {
+                debug_power = Some(
+                    args.next()
+                        .expect("--power <0-128>")
+                        .parse()
+                        .expect("power"),
+                )
+            }
+            "--score" => {
+                debug_score = Some(args.next().expect("--score <n>").parse().expect("score"))
+            }
+            "--difficulty" => {
+                let value = args
+                    .next()
+                    .expect("--difficulty <easy|normal|hard|lunatic|extra>");
+                difficulty = match value.to_lowercase().as_str() {
+                    "easy" | "0" => Difficulty::Easy,
+                    "normal" | "1" => Difficulty::Normal,
+                    "hard" | "2" => Difficulty::Hard,
+                    "lunatic" | "3" => Difficulty::Lunatic,
+                    "extra" | "4" => Difficulty::Extra,
+                    _ => panic!("invalid difficulty: {value}"),
+                };
+            }
+            "--replay" => replay_file = Some(args.next().expect("--replay <path.rpy>")),
             "--god" => god = true,
             "--autoplay" => autoplay = true,
             "--probe-run" => probe_run = true,
@@ -261,17 +334,55 @@ fn main() {
     }
 
     let game_dir = PathBuf::from(game_dir);
-    let (bgm, bgm_pos) = load_bgm(&game_dir.join("bgm"));
+    let (bgm, mut bgm_pos) = load_bgm(&game_dir.join("bgm"));
+    let md = if game_dir.join("MD.DAT").exists() {
+        load_archive(&game_dir.join("MD.DAT"))
+    } else {
+        HashMap::new()
+    };
+    let inn = load_archive(&game_dir.join("IN.DAT"));
+    for (name, bytes) in md
+        .iter()
+        .chain(inn.iter())
+        .filter(|(n, b)| n.ends_with(".pos") && b.len() >= 8)
+    {
+        bgm_pos
+            .entry(name.replace(".pos", ".wav"))
+            .or_insert_with(|| {
+                (
+                    u32::from_le_bytes(bytes[..4].try_into().unwrap()),
+                    u32::from_le_bytes(bytes[4..8].try_into().unwrap()),
+                )
+            });
+    }
     let files = GameFiles {
         tl: load_archive(&game_dir.join("TL.DAT")),
         cm: load_archive(&game_dir.join("CM.DAT")),
         st: load_archive(&game_dir.join("ST.DAT")),
-        inn: load_archive(&game_dir.join("IN.DAT")),
-        st_en: load_archive(&game_dir.join("th06e_ST.DAT")),
+        inn: inn.clone(),
+        st_en: if game_dir.join("th06e_ST.DAT").exists() {
+            load_archive(&game_dir.join("th06e_ST.DAT"))
+        } else {
+            Default::default()
+        },
+        ed: if game_dir.join("ED.DAT").exists() {
+            load_archive(&game_dir.join("ED.DAT"))
+        } else {
+            Default::default()
+        },
+        music_comments: std::fs::read(game_dir.join("musiccmt.txt"))
+            .ok()
+            .or_else(|| {
+                md.get("musiccmt.txt")
+                    .or_else(|| inn.get("musiccmt.txt"))
+                    .cloned()
+            })
+            .unwrap_or_default(),
         bgm,
         bgm_pos,
     };
 
+    th06::validate_game_files(&files).expect("validate game data");
     let engine = Engine::new();
     // Headless dumps (screenshot / record / demo) run silent.
     let with_audio = screenshot.is_none()
@@ -289,6 +400,18 @@ fn main() {
     let scores_path = game_dir.join("th06_scores.txt");
     game.set_scores(load_scores(&scores_path));
     game.set_scores_path(scores_path);
+    game.configure_storage(&game_dir.to_string_lossy());
+    game.set_difficulty(difficulty);
+    if let Some(path) = replay_file {
+        let bytes = std::fs::read(path).expect("read replay");
+        let replay = th06_formats::replay::Replay::parse(&bytes).expect("parse replay");
+        let index = replay
+            .stages
+            .iter()
+            .position(Option::is_some)
+            .expect("replay stage");
+        game.start_replay(replay, index).expect("start replay");
+    }
 
     // `--god` makes the player invulnerable (the collide() check reads this).
     // Safe: still single-threaded here, before the game/run loop starts.
@@ -312,13 +435,28 @@ fn main() {
         // instead of stalling on the real (faithful) text — dialogue timing is a
         // Gui concern the oracle can't model, not an ECL/bullet concern.
         unsafe { std::env::set_var("TH06_NO_DIALOGUE", "1") };
-        let ch = [Character::ReimuA, Character::ReimuB, Character::MarisaA, Character::MarisaB][debug_char.min(3)];
-        game.debug_start_stage(ch, debug_lives, debug_stage.saturating_sub(1), debug_power, debug_score);
+        let ch = [
+            Character::ReimuA,
+            Character::ReimuB,
+            Character::MarisaA,
+            Character::MarisaB,
+        ][debug_char.min(3)];
+        game.debug_start_stage(
+            ch,
+            debug_lives,
+            debug_stage.saturating_sub(1),
+            debug_power,
+            debug_score,
+        );
         let dump_enemies = std::env::var_os("DUMP_ENEMIES").is_some();
+        game.debug_set_stage_seed(0x1234);
         for fr in 0..frames {
             game.update(&Input::default());
             let mut lines: Vec<String> = if dump_enemies {
-                game.stage_enemies().iter().map(|e| format!("{:.4} {:.4}", e[0], e[1])).collect()
+                game.stage_enemies()
+                    .iter()
+                    .map(|e| format!("{:.4} {:.4}", e[0], e[1]))
+                    .collect()
             } else {
                 game.stage_bullets()
                     .iter()
@@ -363,9 +501,19 @@ fn main() {
     }
 
     if scene_arg == "stage" {
-        let ch = [Character::ReimuA, Character::ReimuB, Character::MarisaA, Character::MarisaB]
-            [debug_char.min(3)];
-        game.debug_start_stage(ch, debug_lives, debug_stage.saturating_sub(1), debug_power, debug_score);
+        let ch = [
+            Character::ReimuA,
+            Character::ReimuB,
+            Character::MarisaA,
+            Character::MarisaB,
+        ][debug_char.min(3)];
+        game.debug_start_stage(
+            ch,
+            debug_lives,
+            debug_stage.saturating_sub(1),
+            debug_power,
+            debug_score,
+        );
         // `--midboss` / `--boss`: fast-forward straight to that fight. The warp
         // must be invulnerable; restore the chosen god state afterwards.
         if let Some(to_boss) = warp {
@@ -403,8 +551,13 @@ fn main() {
         for f in 0..frames {
             // Once the run is over, stop sending input so the auto-player doesn't
             // immediately start a fresh game from the title during the end tail.
-            let run_over = phase == RecordPhase::Ended || (phase == RecordPhase::Menu && entered_stage);
-            let input = if run_over { Input::default() } else { auto_play_input(&game, f) };
+            let run_over =
+                phase == RecordPhase::Ended || (phase == RecordPhase::Menu && entered_stage);
+            let input = if run_over {
+                Input::default()
+            } else {
+                auto_play_input(&game, f)
+            };
             let frame = game.update(&input);
             let new_phase = game.record_phase();
             if matches!(new_phase, RecordPhase::Stage(_)) {
@@ -433,7 +586,8 @@ fn main() {
 
             // The run is over once we hit the post-game screens or return to the
             // title after having played a stage; grab a short tail then stop.
-            let run_over = phase == RecordPhase::Ended || (phase == RecordPhase::Menu && entered_stage);
+            let run_over =
+                phase == RecordPhase::Ended || (phase == RecordPhase::Menu && entered_stage);
             if run_over {
                 tail += 1;
                 if tail >= 240 {
@@ -456,7 +610,11 @@ fn main() {
         let textures_ref: Vec<&th06_engine::Texture> = textures.iter().collect();
         let no_shoot = std::env::var_os("TH06_NOSHOOT").is_some();
         for f in 0..frames {
-            let mut held = if no_shoot { Vec::new() } else { vec![Key::Shoot] };
+            let mut held = if no_shoot {
+                Vec::new()
+            } else {
+                vec![Key::Shoot]
+            };
             if let Some((px, Some(tx))) = game.stage_aim() {
                 if tx < px - 4.0 {
                     held.push(Key::Left);
@@ -465,7 +623,7 @@ fn main() {
                 }
             }
             let pressed: &[Key] = if no_shoot {
-                if f % 12 == 0 { &[Key::Enter] } else { &[] }
+                if f % 12 == 0 { &[Key::Shoot] } else { &[] }
             } else if f % 12 == 0 {
                 &[Key::Shoot]
             } else {
@@ -474,8 +632,14 @@ fn main() {
             let frame = game.update(&Input::synthetic(&held, pressed));
             let pixels = engine.render_to_image(&frame.cmds, &textures_ref, frame.bg.as_ref());
             let path = format!("{dir}/frame_{f:06}.png");
-            image::save_buffer(&path, &pixels, th06_engine::SCREEN_W, th06_engine::SCREEN_H, image::ColorType::Rgba8)
-                .expect("save record frame");
+            image::save_buffer(
+                &path,
+                &pixels,
+                th06_engine::SCREEN_W,
+                th06_engine::SCREEN_H,
+                image::ColorType::Rgba8,
+            )
+            .expect("save record frame");
         }
         println!("recorded {frames} frames to {dir}");
         return;
@@ -487,7 +651,11 @@ fn main() {
         // frames so the real title->stage->boss path is visible headlessly.
         std::fs::create_dir_all(&dir).expect("create demo dir");
         let textures_ref: Vec<&th06_engine::Texture> = textures.iter().collect();
-        let mut frame = Frame { cmds: Vec::new(), bg: None, quit: false };
+        let mut frame = Frame {
+            cmds: Vec::new(),
+            bg: None,
+            quit: false,
+        };
         for f in 0..frames {
             // Title/char-select: tap Start then confirm. In a stage: hold Shoot,
             // steer under the boss/nearest enemy, and pulse Shoot to advance
@@ -514,8 +682,14 @@ fn main() {
             if f % demo_interval == 0 {
                 let pixels = engine.render_to_image(&frame.cmds, &textures_ref, frame.bg.as_ref());
                 let path = format!("{dir}/frame_{f:05}.png");
-                image::save_buffer(&path, &pixels, th06_engine::SCREEN_W, th06_engine::SCREEN_H, image::ColorType::Rgba8)
-                    .expect("save demo frame");
+                image::save_buffer(
+                    &path,
+                    &pixels,
+                    th06_engine::SCREEN_W,
+                    th06_engine::SCREEN_H,
+                    image::ColorType::Rgba8,
+                )
+                .expect("save demo frame");
                 println!("wrote {path}");
             }
         }
@@ -523,14 +697,22 @@ fn main() {
     } else if let Some(out) = screenshot {
         // Auto-play: hold Shoot, steer under the boss/nearest enemy, and pulse
         // Shoot to advance dialogue — so headless runs actually fight.
-        let mut frame = Frame { cmds: Vec::new(), bg: None, quit: false };
+        let mut frame = Frame {
+            cmds: Vec::new(),
+            bg: None,
+            quit: false,
+        };
         // TH06_NOSHOOT: steer but never fire — lets a midboss/boss reach its
         // timeout so leave-without-kill and time-out-only spellcards (the ones
         // that use ex-instructions) are exercised. Dialogue is advanced with
         // Enter (which doesn't fire shots) so the fight actually starts.
         let no_shoot = std::env::var_os("TH06_NOSHOOT").is_some();
         for f in 0..frames {
-            let mut held = if no_shoot { Vec::new() } else { vec![Key::Shoot] };
+            let mut held = if no_shoot {
+                Vec::new()
+            } else {
+                vec![Key::Shoot]
+            };
             if let Some((px, Some(tx))) = game.stage_aim() {
                 if tx < px - 4.0 {
                     held.push(Key::Left);
@@ -539,7 +721,7 @@ fn main() {
                 }
             }
             let pressed: &[Key] = if no_shoot {
-                if f % 12 == 0 { &[Key::Enter] } else { &[] }
+                if f % 12 == 0 { &[Key::Shoot] } else { &[] }
             } else if std::env::var_os("TH06_BOMB").is_some() && f == 40 {
                 &[Key::Bomb]
             } else if f % 12 == 0 {
@@ -551,8 +733,14 @@ fn main() {
         }
         let textures_ref: Vec<&th06_engine::Texture> = textures.iter().collect();
         let pixels = engine.render_to_image(&frame.cmds, &textures_ref, frame.bg.as_ref());
-        image::save_buffer(&out, &pixels, th06_engine::SCREEN_W, th06_engine::SCREEN_H, image::ColorType::Rgba8)
-            .expect("save screenshot");
+        image::save_buffer(
+            &out,
+            &pixels,
+            th06_engine::SCREEN_W,
+            th06_engine::SCREEN_H,
+            image::ColorType::Rgba8,
+        )
+        .expect("save screenshot");
         println!("wrote {out}");
     } else if autoplay {
         // Drive the live window with the god-mode auto-player (steer under the
@@ -566,6 +754,8 @@ fn main() {
         });
     } else {
         game.start_title_bgm();
-        engine.run_game("Touhou 6 ~ EoSD (Mac port)", textures, move |input| game.update(input));
+        engine.run_game("Touhou 6 ~ EoSD (Mac port)", textures, move |input| {
+            game.update(input)
+        });
     }
 }

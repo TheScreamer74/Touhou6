@@ -7,11 +7,19 @@ fn main() {
     for entry in &anm.entries {
         println!(
             "entry: {}x{} fmt={} name={:?} alpha={:?} sprites={} scripts={}",
-            entry.width, entry.height, entry.format, entry.name, entry.alpha_name,
-            entry.sprites.len(), entry.scripts.len()
+            entry.width,
+            entry.height,
+            entry.format,
+            entry.name,
+            entry.alpha_name,
+            entry.sprites.len(),
+            entry.scripts.len()
         );
         for s in entry.sprites.iter() {
-            println!("  sprite {}: ({}, {}) {}x{}", s.index, s.x, s.y, s.width, s.height);
+            println!(
+                "  sprite {}: ({}, {}) {}x{}",
+                s.index, s.x, s.y, s.width, s.height
+            );
         }
         for (id, instrs) in entry.scripts.iter() {
             println!("  script {id}:");

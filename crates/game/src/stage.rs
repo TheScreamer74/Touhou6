@@ -4,22 +4,92 @@
 //! behavior runs in ecl_vm. The player, bomb and HUD live here.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use th06_engine::{DrawCmd, Input, Key};
 use th06_formats::anm0::{Entry, Instr as AnmInstr, Sprite};
 use th06_formats::ecl::Ecl;
 use th06_formats::msg::Msg;
+use th06_formats::replay::{ReplayInput, ReplayStage};
+use th06_formats::score::SpellcardRecord;
 
 use crate::anm_vm::AnmRunner;
-use crate::hud::Hud;
 use crate::background::Background;
+use crate::ecl_vm::{
+    BULLET_BASE_SPRITE, Bullet, Enemy, Rng, SpawnReq, World, WorldEvent, normalize_angle,
+};
+use crate::hud::Hud;
 use th06_engine::BgScene;
-use crate::ecl_vm::{normalize_angle, Bullet, Enemy, Rng, SpawnReq, World, WorldEvent, BULLET_BASE_SPRITE};
 
 pub const FIELD_W: f32 = 384.0;
 pub const FIELD_H: f32 = 448.0;
 const FIELD_X: f32 = 32.0;
 const FIELD_Y: f32 = 16.0;
+
+/// Original GameManager.hpp difficulty indices, including the Extra script bit.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Difficulty {
+    Easy = 0,
+    #[default]
+    Normal = 1,
+    Hard = 2,
+    Lunatic = 3,
+    Extra = 4,
+}
+
+impl Difficulty {
+    pub const ALL: [Self; 5] = [
+        Self::Easy,
+        Self::Normal,
+        Self::Hard,
+        Self::Lunatic,
+        Self::Extra,
+    ];
+
+    /// GameManager_AddedCallback's g_DifficultyInfo (EoSD 1.02h).
+    pub const fn rank_limits(self) -> (i32, i32, i32) {
+        match self {
+            Self::Easy => (16, 12, 20),
+            Self::Extra => (16, 14, 18),
+            _ => (16, 10, 32),
+        }
+    }
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Easy => "Easy",
+            Self::Normal => "Normal",
+            Self::Hard => "Hard",
+            Self::Lunatic => "Lunatic",
+            Self::Extra => "Extra",
+        }
+    }
+
+    /// ItemManager::CALCULATE_POINT_SCORE truncates Y before comparing to 128.
+    fn point_score(self, y: f32) -> i64 {
+        let (top, bottom, multiplier) = match self {
+            Self::Easy | Self::Normal => (100_000, 60_000, 100),
+            Self::Hard => (150_000, 100_000, 180),
+            Self::Lunatic => (200_000, 150_000, 270),
+            Self::Extra => (300_000, 200_000, 400),
+        };
+        let y = y as i64;
+        if y < 128 {
+            top
+        } else {
+            bottom - (y - 128) * multiplier
+        }
+    }
+}
+
+const EXTEND_SCORES: [i64; 5] = [
+    10_000_000,
+    20_000_000,
+    40_000_000,
+    60_000_000,
+    1_900_000_000,
+];
 
 /// Frames you can still bomb after a lethal hit (Player.cpp respawnTimer = 6).
 const DEATHBOMB_FRAMES: u32 = 6;
@@ -56,6 +126,7 @@ pub const SFX_BY_IDX: [&str; 26] = [
 pub enum Event {
     Sfx(&'static str),
     Bgm(&'static str),
+    BgmFade(f32),
     BackToTitle,
     /// Stage cleared — advance to the next stage (Game decides the target).
     NextStage,
@@ -76,6 +147,40 @@ pub struct StageConfig {
     pub boss_bgm: &'static str,
     /// 1-based stage number (Gui currentStage), for the clear bonus + banner.
     pub stage_num: i32,
+    pub difficulty: Difficulty,
+    pub practice: bool,
+    /// Total starting lives; EoSD's config stores this value minus one.
+    pub starting_lives: i32,
+    pub starting_bombs: i32,
+    /// RNG state at stage entry, before EnemyManager's two item-table draws.
+    pub rng_seed: u16,
+}
+
+/// One original face ANM file, in Gui's A/B/C load order. Sprites keep their
+/// original local indices; Stage applies the distinct player/boss offsets.
+#[derive(Clone)]
+pub struct PortraitAsset {
+    pub tex: usize,
+    pub entry: Arc<Entry>,
+    pub tex_size: (u32, u32),
+}
+
+impl PortraitAsset {
+    pub fn new(tex: usize, entry: &Entry) -> Self {
+        Self {
+            tex,
+            tex_size: (entry.width, entry.height),
+            entry: Arc::new(Entry {
+                width: entry.width,
+                height: entry.height,
+                format: entry.format,
+                name: entry.name.clone(),
+                alpha_name: entry.alpha_name.clone(),
+                sprites: entry.sprites.clone(),
+                scripts: entry.scripts.clone(),
+            }),
+        }
+    }
 }
 
 /// Player progress carried from one stage to the next.
@@ -87,6 +192,16 @@ pub struct Carry {
     pub score: i64,
     pub graze: i64,
     pub power_item_count: usize,
+    pub rng_seed: u16,
+    pub rank: i32,
+    pub continues_used: u8,
+    pub next_extend: usize,
+    pub point_items_total: i64,
+    pub deaths: u32,
+    pub bombs_used: u32,
+    pub spellcards_captured: u32,
+    pub starting_spare_lives: i32,
+    pub starting_bombs: i32,
 }
 
 #[derive(Clone, Copy)]
@@ -96,7 +211,10 @@ struct SpriteRef {
 }
 
 const fn spr(tex: usize, x: f32, y: f32, w: f32, h: f32) -> SpriteRef {
-    SpriteRef { tex, rect: [x, y, w, h] }
+    SpriteRef {
+        tex,
+        rect: [x, y, w, h],
+    }
 }
 
 /// Fallback shot sprite (player00 amulet) when a script can't be resolved.
@@ -138,13 +256,52 @@ struct ShotDef {
 }
 
 /// Reimu A constructor (motion.y = 0; bullet type from the homing flag).
-const fn sd(wait: i32, frame: i32, mx: f32, dir_deg: f32, vel: f32, damage: i32, spawn: u8, homing: bool) -> ShotDef {
-    ShotDef { wait, frame, motion: [mx, 0.0], dir_deg, vel, damage, spawn, bt: homing as u8 }
+#[allow(clippy::too_many_arguments)] // Original data-table/function argument layout.
+const fn sd(
+    wait: i32,
+    frame: i32,
+    mx: f32,
+    dir_deg: f32,
+    vel: f32,
+    damage: i32,
+    spawn: u8,
+    homing: bool,
+) -> ShotDef {
+    ShotDef {
+        wait,
+        frame,
+        motion: [mx, 0.0],
+        dir_deg,
+        vel,
+        damage,
+        spawn,
+        bt: homing as u8,
+    }
 }
 
 /// General constructor with explicit motion.y and bullet type.
-const fn sb(wait: i32, frame: i32, mx: f32, my: f32, dir_deg: f32, vel: f32, damage: i32, spawn: u8, bt: u8) -> ShotDef {
-    ShotDef { wait, frame, motion: [mx, my], dir_deg, vel, damage, spawn, bt }
+#[allow(clippy::too_many_arguments)] // Original data-table/function argument layout.
+const fn sb(
+    wait: i32,
+    frame: i32,
+    mx: f32,
+    my: f32,
+    dir_deg: f32,
+    vel: f32,
+    damage: i32,
+    spawn: u8,
+    bt: u8,
+) -> ShotDef {
+    ShotDef {
+        wait,
+        frame,
+        motion: [mx, my],
+        dir_deg,
+        vel,
+        damage,
+        spawn,
+        bt,
+    }
 }
 
 /// ReimuA shot tiers (g_CharacterPowerDataReimuA in BulletData.cpp). Indexed
@@ -460,9 +617,9 @@ impl Character {
     /// the same id yields Reimu's amulet vs Marisa's star automatically.
     fn shot_anm_script(self, bt: u8) -> i32 {
         match (self, bt) {
-            (_, 0) => 64,             // ANM_SCRIPT_PLAYER_BULLET (straight)
-            (Character::ReimuA, _) => 65, // REIMU_A_ORB_BULLET
-            (Character::ReimuB, _) => 66, // REIMU_B_ORB_BULLET
+            (_, 0) => 64,                  // ANM_SCRIPT_PLAYER_BULLET (straight)
+            (Character::ReimuA, _) => 65,  // REIMU_A_ORB_BULLET
+            (Character::ReimuB, _) => 66,  // REIMU_B_ORB_BULLET
             (Character::MarisaA, _) => 65, // MARISA_A_ORB_BULLET_1
             (Character::MarisaB, _) => 69, // MARISA_B_ORB_LASER_1
         }
@@ -512,6 +669,7 @@ struct BombRect {
 /// 0 = normal fall, 1 = homing to player (latched, never reverts), 2 = the
 /// 60-frame scatter arc used by death/boss-kill drops, then it falls.
 struct Item {
+    pool_index: usize,
     pos: [f32; 2],
     vy: f32,
     kind: i32,
@@ -524,17 +682,47 @@ struct Item {
 impl Item {
     /// Normal drop: pops up (vy -2.2) then falls under gravity.
     fn fall(pos: [f32; 2], kind: i32) -> Self {
-        Item { pos, vy: -2.2, kind, state: 0, timer: 0, start: [0.0; 2], target: [0.0; 2] }
+        Item {
+            pool_index: 0,
+            pos,
+            vy: -2.2,
+            kind,
+            state: 0,
+            timer: 0,
+            start: [0.0; 2],
+            target: [0.0; 2],
+        }
     }
     /// Cancelled-bullet point item: homes to the player immediately (state 1).
     fn homing(pos: [f32; 2], kind: i32) -> Self {
-        Item { pos, vy: 0.0, kind, state: 1, timer: 0, start: [0.0; 2], target: [0.0; 2] }
+        Item {
+            pool_index: 0,
+            pos,
+            vy: 0.0,
+            kind,
+            state: 1,
+            timer: 0,
+            start: [0.0; 2],
+            target: [0.0; 2],
+        }
     }
     /// Death / boss-kill scatter (state 2): arcs to a random target over 60
     /// frames (SpawnItem state==2: x in 48..336, y in -64..128) then falls.
     fn scatter(pos: [f32; 2], kind: i32, rng: &mut Rng) -> Self {
-        let target = [rng.f32_in_range(288.0) + 48.0, rng.f32_in_range(192.0) - 64.0];
-        Item { pos, vy: 0.0, kind, state: 2, timer: 0, start: pos, target }
+        let target = [
+            rng.f32_in_range(288.0) + 48.0,
+            rng.f32_in_range(192.0) - 64.0,
+        ];
+        Item {
+            pool_index: 0,
+            pos,
+            vy: 0.0,
+            kind,
+            state: 2,
+            timer: 0,
+            start: pos,
+            target,
+        }
     }
 }
 
@@ -560,7 +748,7 @@ pub fn scan_dialogue_lines(msg: &Msg) -> Vec<(u32, Vec<u8>)> {
         let mut off = start;
         let mut budget = 10_000;
         while let Some(i) = msg.instr_at(off) {
-            if i.opcode == 3 && i.args.len() > 4 {
+            if matches!(i.opcode, 3 | 8) && i.args.len() > 4 {
                 let text = &i.args[4..];
                 let end = text.iter().position(|&b| b == 0).unwrap_or(text.len());
                 if end > 0 {
@@ -677,11 +865,12 @@ fn spellcard_name(id: i32) -> &'static str {
 /// Per-spellcard capture score, indexed by spellcard id (g_SpellcardScore,
 /// EclManager.cpp:18). The capture bonus is `score * (1 + secondsLeft/10)`.
 const SPELLCARD_SCORE: [i64; 64] = [
-    200000, 200000, 200000, 200000, 200000, 200000, 200000, 250000, 250000, 250000, 250000, 250000, 250000,
-    250000, 300000, 300000, 300000, 300000, 300000, 300000, 300000, 300000, 300000, 300000, 300000, 300000,
-    300000, 300000, 300000, 300000, 300000, 300000, 400000, 400000, 400000, 400000, 400000, 400000, 400000,
-    400000, 500000, 500000, 500000, 500000, 500000, 500000, 600000, 600000, 600000, 600000, 600000, 700000,
-    700000, 700000, 700000, 700000, 700000, 700000, 700000, 700000, 700000, 700000, 700000, 700000,
+    200000, 200000, 200000, 200000, 200000, 200000, 200000, 250000, 250000, 250000, 250000, 250000,
+    250000, 250000, 300000, 300000, 300000, 300000, 300000, 300000, 300000, 300000, 300000, 300000,
+    300000, 300000, 300000, 300000, 300000, 300000, 300000, 300000, 400000, 400000, 400000, 400000,
+    400000, 400000, 400000, 400000, 500000, 500000, 500000, 500000, 500000, 500000, 600000, 600000,
+    600000, 600000, 600000, 700000, 700000, 700000, 700000, 700000, 700000, 700000, 700000, 700000,
+    700000, 700000, 700000, 700000,
 ];
 
 /// Item drop pattern for ITEM_RANDOM_ITEM enemies (g_RandomItems).
@@ -692,44 +881,57 @@ const RANDOM_ITEMS: [i32; 32] = [
 /// Running MSG dialogue (GuiImpl::RunMsg port, text-only for now).
 struct Dialogue {
     active: bool,
+    msg_idx: usize,
     off: u32,
     timer: u16,
     frames_pause: u16,
     ecl_resumed: bool,
+    skippable: bool,
     lines: [String; 2],
     line_colors: [usize; 2],
     /// Pre-baked JP line textures (slot, w, h) for the two visible lines.
     line_tex: [Option<(usize, f32, f32)>; 2],
-    /// Which portrait (0 player / 1 boss) spoke last, -1 none.
-    portrait_active: i32,
-    /// Whether each portrait has appeared, and its chosen expression sprite.
-    portrait_shown: [bool; 2],
-    portrait_expr: [usize; 2],
+    line_runners: [Option<AnmRunner>; 2],
+    portraits: [Option<AnmRunner>; 2],
+    intro_lines: [String; 2],
+    intro_colors: [usize; 2],
+    intro_tex: [Option<(usize, f32, f32)>; 2],
+    intro_runners: [Option<AnmRunner>; 2],
 }
 
 impl Default for Dialogue {
     fn default() -> Self {
         Self {
             active: false,
+            msg_idx: 0,
             off: 0,
             timer: 0,
             frames_pause: 0,
             ecl_resumed: false,
+            skippable: true,
             lines: [String::new(), String::new()],
             line_colors: [0, 0],
             line_tex: [None, None],
-            portrait_active: -1,
-            portrait_shown: [false, false],
-            portrait_expr: [0, 0],
+            line_runners: [None, None],
+            portraits: [None, None],
+            intro_lines: [String::new(), String::new()],
+            intro_colors: [0, 0],
+            intro_tex: [None, None],
+            intro_runners: [None, None],
         }
     }
 }
 
+#[derive(Hash)]
 enum PlayerState {
     Alive,
+    /// Elapsed Player::invulnerabilityTimer while dead or spawning.
     Dead(u32),
-    GameOver(u32),
+    Spawning(u32),
+    GameOver,
     Cleared(u32),
+    /// Stage-results display and transition are timed by the original MSG.
+    Results,
 }
 
 /// One enemy ANM script with its sprite table and texture slot.
@@ -841,6 +1043,7 @@ pub struct Stage {
     lives: i32,
     bombs: i32,
     invuln: u32,
+    bullet_grace_period: u32,
     /// `> 0` while a bomb is running (mirrors PlayerBombInfo.isInUse for the many
     /// `bombing > 0` gates).
     bombing: u32,
@@ -894,6 +1097,18 @@ pub struct Stage {
     graze: i64,
     /// Point items collected this stage (Gui shows it as "Point"). Not carried.
     point_items: i64,
+    point_items_total: i64,
+    practice: bool,
+    starting_lives: i32,
+    starting_bombs: i32,
+    continues_used: u8,
+    next_extend: usize,
+    deaths: u32,
+    bombs_used: u32,
+    spellcards_captured: u32,
+    spellcard_records: Vec<SpellcardRecord>,
+    is_replay: bool,
+    stage_rng_seed: u16,
     /// Focus held last update, for drawing the orbs in their focused position.
     last_input_focus: bool,
     /// positionOfLastEnemyHit: the lowest on-screen enemy, for the orb-amulet and
@@ -902,6 +1117,7 @@ pub struct Stage {
     state: PlayerState,
     shots: Vec<Shot>,
     items: Vec<Item>,
+    next_item_index: usize,
     particles: Vec<Particle>,
     /// Cosmetic-only RNG for visual particle bursts (`spawn_burst`), kept
     /// separate from the gameplay `world.rng` so effects never desync it (#26).
@@ -921,7 +1137,10 @@ pub struct Stage {
     /// Running count for scoring power items collected at max power.
     power_item_count: usize,
     paused: bool,
-    pause_cursor: usize,
+    pause_state: u8,
+    pause_timer: u16,
+    pause_asset: Option<PortraitAsset>,
+    pause_runners: [Option<AnmRunner>; 6],
     rand_item_table: usize,
     rand_item_spawn: usize,
     spell_active: bool,
@@ -949,16 +1168,17 @@ pub struct Stage {
     /// Boss spellcard portrait (face*.anm script 3) + which boss-face sprite.
     portrait_script: Vec<AnmInstr>,
     portrait_runner: Option<AnmRunner>,
-    spell_portrait_sprite: i32,
     spell_bonus_timer: u32,
     spell_bonus_amount: i64,
     /// "BONUS" popup (bullet-cancel total) — frames remaining, amount.
     bonus_score_timer: u32,
     bonus_score_amount: i64,
     boss_bgm_started: bool,
-    /// Dialogue portrait texture slots (player left / boss right).
-    face_player_tex: usize,
-    face_boss_tex: usize,
+    /// Original face files, including full-width boss expressions in B/C.
+    player_portraits: Vec<PortraitAsset>,
+    boss_portraits: Vec<PortraitAsset>,
+    extra_boss_portrait: Option<PortraitAsset>,
+    dialogue_scripts: HashMap<u32, Vec<AnmInstr>>,
     /// Music tracks for this stage (field theme / boss theme).
     stage_bgm: &'static str,
     boss_bgm: &'static str,
@@ -974,17 +1194,191 @@ pub struct Stage {
 }
 
 impl Stage {
-    pub fn new(ecl: Ecl, enemy_scripts: HashMap<i32, ScriptRef>, etama: &Entry, eff: &Entry, eff_tex: usize, player: &Entry, player_tex: usize, character: Character, msg: Msg, background: Option<Background>, hud: Hud, cfg: StageConfig, spell_name_script: Vec<AnmInstr>, portrait_script: Vec<AnmInstr>, spell_name_tex: HashMap<i32, (usize, f32, f32)>, dialogue_tex: HashMap<u32, (usize, f32, f32)>, stage_name_script: Vec<AnmInstr>, stage_name_tex: Option<(usize, f32, f32)>) -> Self {
+    pub fn set_pause_art(&mut self, asset: PortraitAsset) {
+        self.pause_asset = Some(asset);
+    }
+
+    pub fn set_dialogue_scripts(&mut self, text: &Entry) {
+        self.dialogue_scripts = text.scripts.iter().cloned().collect();
+    }
+
+    pub fn set_portrait_assets(&mut self, player: Vec<PortraitAsset>, boss: Vec<PortraitAsset>) {
+        if let Some(script) = player
+            .first()
+            .and_then(|asset| asset.entry.scripts.iter().find(|(id, _)| *id == 3))
+        {
+            self.portrait_script = script.1.clone();
+        }
+        self.player_portraits = player;
+        self.boss_portraits = boss;
+    }
+
+    pub fn set_extra_boss_portrait(&mut self, asset: PortraitAsset) {
+        self.extra_boss_portrait = Some(asset);
+    }
+
+    /// ReplayManager records dialogue frames as well as combat. Entering or
+    /// leaving the pause menu consumes no simulation/input-recording frame.
+    pub fn replay_frame_active(&self, input: &Input) -> bool {
+        !(self.paused
+            || input.pressed(Key::Pause)
+                && matches!(
+                    self.state,
+                    PlayerState::Alive | PlayerState::Dead(_) | PlayerState::Spawning(_)
+                ))
+    }
+
+    fn portrait_sprite(&self, index: u32) -> Option<(&PortraitAsset, &Sprite)> {
+        const PLAYER_OFFSETS: [u32; 3] = [0, 2, 4];
+        const BOSS_OFFSETS: [u32; 3] = [8, 10, 11];
+        for (assets, offsets) in [
+            (&self.player_portraits, PLAYER_OFFSETS),
+            (&self.boss_portraits, BOSS_OFFSETS),
+        ] {
+            for (asset, offset) in assets.iter().zip(offsets) {
+                if let Some(sprite) = index
+                    .checked_sub(offset)
+                    .and_then(|id| asset.entry.sprites.iter().find(|sprite| sprite.index == id))
+                {
+                    return Some((asset, sprite));
+                }
+            }
+        }
+        None
+    }
+
+    fn draw_portrait(&self, runner: &AnmRunner, cmds: &mut Vec<DrawCmd>) {
+        if !runner.visible() {
+            return;
+        }
+        let Some((asset, sprite)) = runner
+            .sprite
+            .and_then(|sprite| self.portrait_sprite(sprite))
+        else {
+            return;
+        };
+        let w = sprite.width * runner.scale[0].abs();
+        let h = sprite.height * runner.scale[1].abs();
+        let x = runner.pos[0] + runner.pos_offset[0];
+        let y = runner.pos[1] + runner.pos_offset[1];
+        let (tw, th) = (asset.tex_size.0 as f32, asset.tex_size.1 as f32);
+        let mut src = [
+            sprite.x / tw,
+            sprite.y / th,
+            (sprite.x + sprite.width) / tw,
+            (sprite.y + sprite.height) / th,
+        ];
+        if runner.flip_x ^ (runner.scale[0] < 0.0) {
+            src.swap(0, 2);
+        }
+        if runner.flip_y ^ (runner.scale[1] < 0.0) {
+            src.swap(1, 3);
+        }
+        cmds.push(DrawCmd {
+            tex: asset.tex,
+            dst: if runner.corner {
+                [x, y, w, h]
+            } else {
+                [x - w / 2.0, y - h / 2.0, w, h]
+            },
+            src,
+            tint: [
+                runner.color[0],
+                runner.color[1],
+                runner.color[2],
+                runner.alpha,
+            ],
+            rot: 0.0,
+            additive: runner.additive,
+        });
+    }
+
+    #[allow(clippy::too_many_arguments)] // Original data-table/function argument layout.
+    fn draw_dialogue_line(
+        &self,
+        cmds: &mut Vec<DrawCmd>,
+        runner: Option<&AnmRunner>,
+        texture: Option<(usize, f32, f32)>,
+        text: &str,
+        color: usize,
+        fallback_pos: [f32; 2],
+    ) {
+        if text.is_empty() || runner.is_some_and(|runner| !runner.visible()) {
+            return;
+        }
+        let mut pos = fallback_pos;
+        let mut scale = [1.0, 1.0];
+        let mut alpha = 1.0;
+        if let Some(runner) = runner {
+            pos = [
+                runner.pos[0] + runner.pos_offset[0],
+                runner.pos[1] + runner.pos_offset[1],
+            ];
+            scale = runner.scale;
+            alpha = runner.alpha;
+            // Dynamic text occupies a 256x16 ANM sprite; the glyph texture
+            // contains only the used width, so its origin follows that sprite.
+            if !runner.corner {
+                pos[0] -= 128.0 * scale[0];
+                pos[1] -= 8.0 * scale[1];
+            }
+        }
+        let tint = if color == 0 {
+            [232.0 / 255.0, 240.0 / 255.0, 1.0, alpha]
+        } else {
+            [1.0, 232.0 / 255.0, 240.0 / 255.0, alpha]
+        };
+        if let Some((tex, width, height)) = texture {
+            cmds.push(DrawCmd {
+                tex,
+                dst: [pos[0], pos[1], width * scale[0], height * scale[1]],
+                src: [0.0, 0.0, 1.0, 1.0],
+                tint,
+                rot: 0.0,
+                additive: false,
+            });
+        } else {
+            draw_text(cmds, pos, 16.0, tint, text);
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)] // Original data-table/function argument layout.
+    pub fn new(
+        ecl: Ecl,
+        enemy_scripts: HashMap<i32, ScriptRef>,
+        etama: &Entry,
+        eff: &Entry,
+        eff_tex: usize,
+        player: &Entry,
+        player_tex: usize,
+        character: Character,
+        msg: Msg,
+        background: Option<Background>,
+        hud: Hud,
+        cfg: StageConfig,
+        spell_name_script: Vec<AnmInstr>,
+        portrait_script: Vec<AnmInstr>,
+        spell_name_tex: HashMap<i32, (usize, f32, f32)>,
+        dialogue_tex: HashMap<u32, (usize, f32, f32)>,
+        stage_name_script: Vec<AnmInstr>,
+        stage_name_tex: Option<(usize, f32, f32)>,
+    ) -> Self {
         let timeline_off = ecl.timeline_offset;
         // etama4 (effect) ANM: per-script instructions for the runners, and the
         // shared sprite table + texture for rendering particles.
-        let eff_scripts: HashMap<u32, Vec<AnmInstr>> =
-            eff.scripts.iter().map(|(id, instrs)| (*id, instrs.clone())).collect();
+        let eff_scripts: HashMap<u32, Vec<AnmInstr>> = eff
+            .scripts
+            .iter()
+            .map(|(id, instrs)| (*id, instrs.clone()))
+            .collect();
         let eff_sprites: HashMap<u32, Sprite> =
             eff.sprites.iter().map(|s| (s.index, s.clone())).collect();
         let eff_tex_size = [eff.width as f32, eff.height as f32];
-        let player_scripts: HashMap<i32, Vec<AnmInstr>> =
-            player.scripts.iter().map(|(id, instrs)| (*id as i32, instrs.clone())).collect();
+        let player_scripts: HashMap<i32, Vec<AnmInstr>> = player
+            .scripts
+            .iter()
+            .map(|(id, instrs)| (*id as i32, instrs.clone()))
+            .collect();
         let idle = player_scripts.get(&0).cloned().unwrap_or_default();
         // Bullet-type auto-rotate flags from etama3.anm (scripts 0..9): a type
         // rotates with its travel angle iff its script runs SetAutoRotate (op 26)
@@ -1006,36 +1400,63 @@ impl Stage {
                 bullet_widths[t] = sp.width;
             }
         }
+        let (rank, min_rank, max_rank) = cfg.difficulty.rank_limits();
+        let starting_lives = if cfg.practice || cfg.difficulty == Difficulty::Extra {
+            2
+        } else {
+            cfg.starting_lives.clamp(1, 5) - 1
+        };
+        let power = if cfg.practice {
+            match cfg.stage_num {
+                1 => 0,
+                2 => 64,
+                _ => 128,
+            }
+        } else {
+            0
+        };
+        let starting_bombs = if cfg.practice || cfg.difficulty == Difficulty::Extra {
+            3
+        } else {
+            cfg.starting_bombs.clamp(0, 3)
+        };
+        // EnemyManager_AddedCallback: item-drop phase and initial table offset.
+        let mut rng = Rng::new(cfg.rng_seed);
+        let item_spawn_index = rng.u16_in_range(3) as usize;
+        let item_table_index = rng.u16_in_range(8) as usize;
         Self {
             tick: 0,
             anim: 0,
             ecl,
             world: World {
-                rng: Rng::new(0x1234),
-                difficulty: 1, // Normal
-                // g_DifficultyInfo[NORMAL]: rank 16, range [10, 32].
-                rank: 16,
+                rng,
+                difficulty: cfg.difficulty as u8,
+                rank,
                 sub_rank: 0,
-                min_rank: 10,
-                max_rank: 32,
-                player_pos: [FIELD_W / 2.0, FIELD_H - 40.0],
+                min_rank,
+                max_rank,
+                player_pos: [FIELD_W / 2.0, FIELD_H - 64.0],
                 bullets: Vec::new(),
+                next_bullet_index: 0,
                 lasers: Vec::new(),
                 events: Vec::new(),
+                enemy_slots: [false; 256],
                 pending_spawns: Vec::new(),
                 kill_trash: false,
                 boss_present: false,
-                power: 0,
+                power,
                 character: character.is_marisa() as u8,
                 shot_type: matches!(character, Character::ReimuB | Character::MarisaB) as u8,
                 time_stopped: false,
                 bomb_active: false,
+                spellcard_active: 0,
                 bullet_heights,
                 bullet_widths,
                 effects: Vec::new(),
+                next_effect_index: 0,
                 eff_scripts,
-                random_item_spawn_index: 0,
-                random_item_table_index: 0,
+                random_item_spawn_index: item_spawn_index as i32,
+                random_item_table_index: item_table_index as i32,
             },
             enemies: Vec::new(),
             anims: Vec::new(),
@@ -1053,17 +1474,22 @@ impl Stage {
             player_tex,
             beam_dmg: 0,
             bomb_kind: 0,
-            player_sprites: player.sprites.iter().map(|s| (s.index, s.clone())).collect(),
+            player_sprites: player
+                .sprites
+                .iter()
+                .map(|s| (s.index, s.clone()))
+                .collect(),
             player_tex_size: [player.width as f32, player.height as f32],
             player_runner: AnmRunner::new(idle),
             player_scripts,
             player_script_id: 0,
             prev_hspeed: 0.0,
             focus_anim: 0.0,
-            pos: [FIELD_W / 2.0, FIELD_H - 40.0],
-            lives: 2,
-            bombs: 3,
+            pos: [FIELD_W / 2.0, FIELD_H - 64.0],
+            lives: starting_lives,
+            bombs: starting_bombs,
             invuln: 0,
+            bullet_grace_period: 0,
             bombing: 0,
             bomb_timer: 0,
             bomb_duration: 0,
@@ -1089,11 +1515,28 @@ impl Stage {
             dying: 0,
             graze: 0,
             point_items: 0,
+            point_items_total: 0,
+            practice: cfg.practice,
+            starting_lives,
+            starting_bombs,
+            continues_used: 0,
+            next_extend: if cfg.difficulty == Difficulty::Extra {
+                4
+            } else {
+                0
+            },
+            deaths: 0,
+            bombs_used: 0,
+            spellcards_captured: 0,
+            spellcard_records: vec![SpellcardRecord::default(); 64],
+            is_replay: false,
+            stage_rng_seed: cfg.rng_seed,
             last_input_focus: false,
             last_enemy_hit: None,
-            state: PlayerState::Alive,
+            state: PlayerState::Spawning(120),
             shots: Vec::new(),
             items: Vec::new(),
+            next_item_index: 0,
             particles: Vec::new(),
             fx_rng: Rng::new(0x4321),
             score: 0,
@@ -1106,9 +1549,12 @@ impl Stage {
             clear_bonus: 0,
             power_item_count: 0,
             paused: false,
-            pause_cursor: 0,
-            rand_item_table: 0,
-            rand_item_spawn: 0,
+            pause_state: 0,
+            pause_timer: 0,
+            pause_asset: None,
+            pause_runners: std::array::from_fn(|_| None),
+            rand_item_table: item_table_index,
+            rand_item_spawn: item_spawn_index,
             spell_active: false,
             spell_name: String::new(),
             spell_name_tex,
@@ -1124,17 +1570,18 @@ impl Stage {
             spell_name_runner: None,
             portrait_script,
             portrait_runner: None,
-            spell_portrait_sprite: 0,
             spell_bonus_timer: 0,
             spell_bonus_amount: 0,
             bonus_score_timer: 0,
             bonus_score_amount: 0,
+            boss_bgm_started: false,
             spell_capturing: false,
             spell_result: 0,
             spell_captured: false,
-            boss_bgm_started: false,
-            face_player_tex: cfg.face_player_tex,
-            face_boss_tex: cfg.face_boss_tex,
+            player_portraits: Vec::new(),
+            boss_portraits: Vec::new(),
+            extra_boss_portrait: None,
+            dialogue_scripts: HashMap::new(),
             stage_bgm: cfg.stage_bgm,
             boss_bgm: cfg.boss_bgm,
             stage_num: cfg.stage_num,
@@ -1156,6 +1603,16 @@ impl Stage {
             score: self.score,
             graze: self.graze,
             power_item_count: self.power_item_count,
+            rng_seed: self.world.rng.seed(),
+            rank: self.world.rank,
+            continues_used: self.continues_used,
+            next_extend: self.next_extend,
+            point_items_total: self.point_items_total,
+            deaths: self.deaths,
+            bombs_used: self.bombs_used,
+            spellcards_captured: self.spellcards_captured,
+            starting_spare_lives: self.starting_lives,
+            starting_bombs: self.starting_bombs,
         }
     }
 
@@ -1165,16 +1622,132 @@ impl Stage {
         self.bombs = c.bombs;
         self.world.power = c.power;
         self.score = c.score;
+        self.gui_score = c.score;
+        self.next_score_inc = 0;
         self.graze = c.graze;
         self.power_item_count = c.power_item_count;
         // grazeInStage counts from the stage start (Gui clear bonus).
         self.graze_start = c.graze;
+        self.world.rank = c.rank;
+        // GameManager_AddedCallback preserves rank/RNG, resets subRank per stage.
+        self.world.sub_rank = 0;
+        self.continues_used = c.continues_used;
+        self.next_extend = c.next_extend;
+        self.point_items_total = c.point_items_total;
+        self.deaths = c.deaths;
+        self.bombs_used = c.bombs_used;
+        self.spellcards_captured = c.spellcards_captured;
+        self.starting_lives = c.starting_spare_lives;
+        self.starting_bombs = c.starting_bombs;
+        self.set_rng_seed(c.rng_seed);
+    }
+
+    /// Seed at stage entry; the two EnemyManager item-table draws happen next.
+    pub fn set_rng_seed(&mut self, seed: u16) {
+        self.stage_rng_seed = seed;
+        self.world.rng = Rng::new(seed);
+        self.rand_item_spawn = self.world.rng.u16_in_range(3) as usize;
+        self.rand_item_table = self.world.rng.u16_in_range(8) as usize;
+        self.world.random_item_spawn_index = self.rand_item_spawn as i32;
+        self.world.random_item_table_index = self.rand_item_table as i32;
+    }
+
+    pub fn continues_used(&self) -> u8 {
+        self.continues_used
+    }
+
+    pub fn spellcard_records(&self) -> &[SpellcardRecord] {
+        &self.spellcard_records
+    }
+
+    pub fn set_spellcard_records(&mut self, records: &[SpellcardRecord]) {
+        for (dst, src) in self.spellcard_records.iter_mut().zip(records) {
+            *dst = src.clone();
+        }
+    }
+
+    /// ReplayManager_AddedCallback records the stage-entry seed, not the RNG
+    /// state after EnemyManager has selected its random item phase/table.
+    pub fn replay_state(&self) -> ReplayStage {
+        ReplayStage {
+            score: self.score as u32,
+            random_seed: self.stage_rng_seed,
+            point_items: self.point_items_total as u16,
+            power: self.world.power as u8,
+            lives: self.lives as i8,
+            bombs: self.bombs as i8,
+            rank: self.world.rank as u8,
+            power_item_count: self.power_item_count as i8,
+            inputs: vec![ReplayInput {
+                frame: 0,
+                buttons: 0,
+            }],
+        }
+    }
+
+    /// Playback initialization runs before the first gameplay update. `score`
+    /// comes from the previous recorded stage, as in ReplayManager.cpp.
+    pub fn restore_replay_state(&mut self, replay: &ReplayStage, score: u32) {
+        self.is_replay = true;
+        self.set_rng_seed(replay.random_seed);
+        self.world.rank = replay.rank as i32;
+        self.world.sub_rank = 0;
+        self.world.power = replay.power as i32;
+        self.lives = replay.lives as i32;
+        self.bombs = replay.bombs as i32;
+        self.point_items_total = replay.point_items as i64;
+        self.point_items = 0;
+        self.power_item_count = replay.power_item_count.max(0) as usize;
+        self.score = score as i64;
+        self.gui_score = self.score;
+        self.next_score_inc = 0;
+        self.next_extend = if self.world.difficulty == Difficulty::Extra as u8 {
+            4
+        } else {
+            0
+        };
+        while EXTEND_SCORES
+            .get(self.next_extend)
+            .is_some_and(|&value| value <= self.gui_score)
+        {
+            self.next_extend += 1;
+        }
+    }
+
+    pub fn can_continue(&self) -> bool {
+        !self.practice
+            && !self.is_replay
+            && self.world.difficulty < Difficulty::Extra as u8
+            && self.continues_used < 3
+    }
+
+    /// StageMenu::OnUpdateRetryMenu, EoSD 1.02h. Continues resume this stage's
+    /// existing enemies and timeline; the RNG and dynamic rank keep their state.
+    pub fn continue_run(&mut self) -> bool {
+        if !self.can_continue() {
+            return false;
+        }
+        self.continues_used += 1;
+        self.score = self.continues_used as i64;
+        self.gui_score = self.score;
+        self.next_score_inc = 0;
+        self.lives = self.starting_lives;
+        self.bombs = self.starting_bombs;
+        self.graze_start = self.graze;
+        self.point_items = 0;
+        self.world.power = 0;
+        self.next_extend = 0;
+        self.pos = [FIELD_W / 2.0, FIELD_H - 64.0];
+        self.invuln = 0;
+        self.dying = 0;
+        self.state = PlayerState::Spawning(1);
+        self.paused = false;
+        true
     }
 
     pub fn set_lives(&mut self, lives: i32) {
         self.lives = lives;
     }
-
 
     /// Debug: seed starting power / score.
     pub fn set_power(&mut self, power: i32) {
@@ -1219,12 +1792,20 @@ impl Stage {
     /// Every live bullet as [pos.x, pos.y, angle, speed] — for the full-VM
     /// oracle diff against the decomp.
     pub fn bullets_dump(&self) -> Vec<[f32; 4]> {
-        self.world.bullets.iter().map(|b| [b.pos[0], b.pos[1], b.angle, b.speed]).collect()
+        self.world
+            .bullets
+            .iter()
+            .map(|b| [b.pos[0], b.pos[1], b.angle, b.speed])
+            .collect()
     }
 
     /// Occupied enemy positions [x, y] — oracle diff (isolates movement).
     pub fn enemies_dump(&self) -> Vec<[f32; 2]> {
-        self.enemies.iter().filter(|e| e.occupied).map(|e| [e.pos[0], e.pos[1]]).collect()
+        self.enemies
+            .iter()
+            .filter(|e| e.occupied)
+            .map(|e| [e.pos[0], e.pos[1]])
+            .collect()
     }
 
     /// X of the boss if present, else the lowest (closest) live enemy — the
@@ -1261,19 +1842,26 @@ impl Stage {
             return self.draw();
         }
         if input.pressed(Key::Pause)
-            && matches!(self.state, PlayerState::Alive | PlayerState::Dead(_))
+            && matches!(
+                self.state,
+                PlayerState::Alive | PlayerState::Dead(_) | PlayerState::Spawning(_)
+            )
         {
             self.paused = true;
-            self.pause_cursor = 0;
+            self.pause_state = 0;
+            self.arcade = [FIELD_X, FIELD_Y, FIELD_W, FIELD_H];
+            self.run_pause_menu(&Input::default());
             return self.draw();
         }
 
         self.tick += 1;
         self.anim += 1;
-        if let Some(bg) = &mut self.background {
-            bg.tick();
+        if !self.world.time_stopped {
+            if let Some(bg) = &mut self.background {
+                bg.tick();
+            }
+            self.hud.tick();
         }
-        self.hud.tick();
         self.roll_gui_score();
         // "Full Power Mode!!" popup when power first reaches max.
         let full = self.world.power >= 128;
@@ -1313,82 +1901,53 @@ impl Stage {
             }
         }
 
-        // Player state machine.
-        let mut respawn = false;
-        match &mut self.state {
-            PlayerState::Alive => {}
-            PlayerState::Dead(t) => {
-                *t -= 1;
-                if *t == 0 {
-                    if self.lives < 0 {
-                        self.state = PlayerState::GameOver(180);
-                    } else {
-                        respawn = true;
-                    }
-                }
-            }
-            PlayerState::GameOver(t) => {
-                *t -= 1;
-                if *t == 0 {
-                    self.events.push(Event::GameOver(self.score));
-                    return self.draw();
-                }
-            }
-            PlayerState::Cleared(t) => {
-                *t -= 1;
-                if *t == 0 {
-                    self.events.push(Event::NextStage);
-                    return self.draw();
-                }
+        if let PlayerState::Cleared(t) = &mut self.state {
+            *t -= 1;
+            if *t == 0 {
+                self.events.push(Event::NextStage);
+                return self.draw();
             }
         }
-        if respawn {
-            self.pos = [FIELD_W / 2.0, FIELD_H - 40.0];
-            self.invuln = 180;
-            self.state = PlayerState::Alive;
+        // Player's chain callback precedes EnemyManager. Time stop freezes the
+        // player, its shots and its respawn timers, while ECL keeps running.
+        if !self.world.time_stopped && self.update_player_lifecycle(input) {
+            return self.draw();
         }
-        // Player::OnUpdate clears every bomb rect's size before the bomb calc
-        // repopulates the active ones, so each frame's rects come only from this
-        // frame's calc (a despawned seal stops cancelling/damaging immediately).
-        for r in &mut self.bomb_projectiles {
-            r.size[0] = 0.0;
-        }
-        for r in &mut self.bomb_regions {
-            r.size[0] = 0.0;
-        }
-        // The player can still move (but not shoot/bomb) during dialogue.
-        if matches!(self.state, PlayerState::Alive) {
-            self.update_player(input);
-        }
-        if self.dialogue.active {
-            self.run_dialogue(input);
-        }
-        self.invuln = self.invuln.saturating_sub(1);
         self.spell_result = self.spell_result.saturating_sub(1);
         self.world.player_pos = self.pos;
         self.world.bomb_active = self.bombing > 0;
-        self.player_runner.tick();
 
         // Only the timeline freezes during dialogue (EnemyManager gates it on
         // !HasCurrentMsgIdx), which keeps the boss's scripted attack from
         // triggering. Bullets, enemies and collision keep running so the
         // player must still dodge whatever is already on screen.
-        if !self.dialogue.active {
-            self.run_timeline();
-        }
+        self.run_timeline();
         self.update_enemies();
         // EffectManager::OnUpdate (chain prio 10, between enemy 9 and bullet 11):
         // draw the RNG for effects spawned this frame (enemy deaths, etc.). (#26)
         self.world.update_effects();
-        self.update_shots();
-        self.update_bullets();
-        self.update_items();
-        self.update_particles();
-        self.collide();
+        // ECL cancels patterns and spawns items before BulletManager and
+        // ItemManager run. Drain here so cancellation cannot hit the player
+        // or erase a replacement pattern fired later in the same ECL frame.
         self.drain_world_events();
+        if !self.world.time_stopped {
+            self.update_items();
+        }
+        self.update_bullets();
+        self.update_particles();
+        if !self.world.time_stopped {
+            self.collide_bullets();
+        }
+        self.drain_world_events();
+        // Gui's MSG interpreter runs after enemy/bullet/item update. An
+        // ECLRESUME therefore releases the next frame's timeline MSGWAIT.
+        if self.dialogue.active && !self.world.time_stopped {
+            self.run_dialogue(input);
+        }
 
         // Stage clear: timeline exhausted and field empty.
         if matches!(self.state, PlayerState::Alive)
+            && (self.msg.offsets.is_empty() || std::env::var_os("TH06_NO_DIALOGUE").is_some())
             && self.timeline_done()
             && !self.enemies.iter().any(|e| e.occupied)
             && !self.world.boss_present
@@ -1401,6 +1960,7 @@ impl Stage {
                 self.lives.max(0) as i64,
                 self.bombs.max(0) as i64,
                 self.world.difficulty,
+                self.starting_lives,
             );
             self.score += bonus;
             self.clear_bonus = bonus;
@@ -1416,28 +1976,107 @@ impl Stage {
         self.draw()
     }
 
-    const PAUSE_OPTIONS: [&'static str; 3] = ["Resume", "Return to Title", "Quit Game"];
-
     fn run_pause_menu(&mut self, input: &Input) {
         if input.pressed(Key::Pause) {
-            self.paused = false;
-            return;
-        }
-        let n = Self::PAUSE_OPTIONS.len();
-        if input.pressed(Key::Up) {
-            self.pause_cursor = (self.pause_cursor + n - 1) % n;
-            self.events.push(Event::Sfx("tan00"));
-        }
-        if input.pressed(Key::Down) {
-            self.pause_cursor = (self.pause_cursor + 1) % n;
-            self.events.push(Event::Sfx("tan00"));
-        }
-        if input.pressed(Key::Shoot) || input.pressed(Key::Enter) {
-            match self.pause_cursor {
-                0 => self.paused = false,
-                1 => self.events.push(Event::BackToTitle),
-                _ => self.events.push(Event::Quit),
+            self.pause_state = 3;
+            self.pause_timer = 0;
+            for runner in self.pause_runners.iter_mut().flatten() {
+                if runner.visible() {
+                    runner.interrupt(2);
+                }
             }
+        }
+        if self.pause_state == 0 {
+            self.pause_runners = std::array::from_fn(|idx| {
+                self.pause_asset
+                    .as_ref()
+                    .and_then(|asset| {
+                        asset
+                            .entry
+                            .scripts
+                            .iter()
+                            .find(|(id, _)| *id == idx as u32 + 2)
+                    })
+                    .map(|(_, script)| AnmRunner::new(script.clone()))
+            });
+            self.pause_interrupt(0..3, 1);
+            self.pause_state = 1;
+            self.pause_timer = 0;
+        }
+        let active = match self.pause_state {
+            1 => Some(1),
+            2 => Some(2),
+            4 => Some(4),
+            5 => Some(5),
+            _ => None,
+        };
+        if let Some(active) = active {
+            let options = if active < 3 { 1..3 } else { 4..6 };
+            for idx in options {
+                if let Some(runner) = &mut self.pause_runners[idx] {
+                    let selected = idx == active;
+                    runner.color = if selected {
+                        [1.0, 128.0 / 255.0, 128.0 / 255.0]
+                    } else {
+                        [128.0 / 255.0; 3]
+                    };
+                    runner.alpha = if selected { 1.0 } else { 128.0 / 255.0 };
+                    runner.scale = if selected { [1.7; 2] } else { [1.5; 2] };
+                    runner.pos_offset = if selected { [-4.0; 2] } else { [0.0; 2] };
+                }
+            }
+            if self.pause_timer >= 4 {
+                if input.pressed(Key::Up) || input.pressed(Key::Down) {
+                    self.pause_state = match self.pause_state {
+                        1 => 2,
+                        2 => 1,
+                        4 => 5,
+                        _ => 4,
+                    };
+                }
+                if input.pressed(Key::Shoot) || input.pressed(Key::Enter) {
+                    // The switch executes the originally selected state's
+                    // branch even if a direction was pressed simultaneously.
+                    match active {
+                        1 => {
+                            self.pause_interrupt(0..3, 2);
+                            self.pause_state = 3;
+                        }
+                        2 => {
+                            self.pause_interrupt(0..3, 2);
+                            self.pause_interrupt(3..6, 1);
+                            self.pause_state = 5;
+                        }
+                        4 => {
+                            self.pause_interrupt(3..6, 2);
+                            self.pause_state = 6;
+                        }
+                        _ => {
+                            self.pause_interrupt(0..3, 1);
+                            self.pause_interrupt(3..6, 2);
+                            self.pause_state = 2;
+                        }
+                    }
+                    self.pause_timer = 0;
+                }
+            }
+        } else if matches!(self.pause_state, 3 | 6) && self.pause_timer >= 20 {
+            if self.pause_state == 6 {
+                self.events.push(Event::BackToTitle);
+            }
+            self.paused = false;
+            self.pause_state = 0;
+            self.pause_runners = std::array::from_fn(|_| None);
+        }
+        for runner in self.pause_runners.iter_mut().flatten() {
+            runner.tick();
+        }
+        self.pause_timer = self.pause_timer.saturating_add(1);
+    }
+
+    fn pause_interrupt(&mut self, range: std::ops::Range<usize>, label: u32) {
+        for runner in self.pause_runners[range].iter_mut().flatten() {
+            runner.interrupt(label);
         }
     }
 
@@ -1448,8 +2087,7 @@ impl Stage {
             .unwrap_or(true)
     }
 
-    /// Port of EnemyManager::RunEclTimeline (dialogue ops are skipped — no
-    /// MSG interpreter yet).
+    /// Port of EnemyManager::RunEclTimeline.
     fn run_timeline(&mut self) {
         // Survival subrank tick (EnemyManager.cpp:161-172): every
         // (2400 - lives*240) frames of timeline time, +100 subrank (= +1 rank).
@@ -1461,7 +2099,7 @@ impl Stage {
         // port's `timeline_time` here is one behind (incremented at the end of
         // run_timeline), so use `+ 1` to fire on the same frame as the oracle.
         let interval = 2400 - self.lives * 240;
-        if interval > 0 && (self.timeline_time + 1) % interval == 0 {
+        if !self.dialogue.active && interval > 0 && (self.timeline_time + 1) % interval == 0 {
             self.world.increase_subrank(100);
         }
         loop {
@@ -1480,7 +2118,9 @@ impl Stage {
                 a1: i32,
             }
             let t = {
-                let Some(raw) = self.ecl.timeline_at(self.timeline_off) else { return };
+                let Some(raw) = self.ecl.timeline_at(self.timeline_off) else {
+                    return;
+                };
                 let has_full = raw.args.len() >= 20;
                 T {
                     time: raw.time as i32,
@@ -1495,8 +2135,16 @@ impl Stage {
                     life: if has_full { raw.arg_u16(12) as i16 } else { -1 },
                     item: if has_full { raw.arg_u16(14) as i16 } else { -2 },
                     score: if has_full { raw.arg_i32(16) } else { -1 },
-                    a0: if raw.args.len() >= 4 { raw.arg_i32(0) } else { 0 },
-                    a1: if raw.args.len() >= 8 { raw.arg_i32(4) } else { 0 },
+                    a0: if raw.args.len() >= 4 {
+                        raw.arg_i32(0)
+                    } else {
+                        0
+                    },
+                    a1: if raw.args.len() >= 8 {
+                        raw.arg_i32(4)
+                    } else {
+                        0
+                    },
                 }
             };
             if t.time < 0 {
@@ -1531,7 +2179,17 @@ impl Stage {
                             self.spawn(SpawnReq { sub: t.arg0, pos, life, item, score, mirror });
                         }
                     }
-                    8 => self.start_dialogue(t.arg0 as usize),
+                    8 => {
+                        // Easy stage 5 uses the alternate ending dialogue;
+                        // Marisa's MSG scripts start at offset index 10.
+                        let msg = if self.world.difficulty == Difficulty::Easy as u8
+                            && self.stage_num == 5 && t.arg0 == 1 {
+                            3
+                        } else {
+                            t.arg0
+                        };
+                        self.start_dialogue((msg + self.world.character as i32 * 10) as usize);
+                    }
                     9 => {
                         // MsgWait: hold the timeline while dialogue runs.
                         if self.dialogue.active && !self.dialogue.ecl_resumed {
@@ -1548,12 +2206,11 @@ impl Stage {
                         }
                     }
                     11 => self.world.power = t.arg0, // set power
-                    12 => {
+                    12
                         // Wait for the boss slot to clear.
-                        if self.enemies.iter().any(|e| e.is_boss && e.occupied) {
+                        if self.enemies.iter().any(|e| e.is_boss && e.occupied) => {
                             return; // do not advance time
                         }
-                    }
                     _ => {}
                 }
             }
@@ -1563,6 +2220,10 @@ impl Stage {
     }
 
     fn spawn(&mut self, req: SpawnReq) {
+        self.sync_enemy_slots();
+        if self.enemies.len() >= 256 && self.enemies.iter().all(|enemy| enemy.occupied) {
+            return;
+        }
         if std::env::var_os("TH06_TRACE").is_some() {
             eprintln!(
                 "[{}] spawn sub={} pos=({:.0},{:.0}) life={}",
@@ -1575,31 +2236,31 @@ impl Stage {
         self.flush_spawns();
     }
 
-    /// EnemyManager::SpawnEnemy (EnemyManager.cpp:92): place the enemy in the
-    /// first free slot (lowest index with `!occupied`), reusing slots freed by
-    /// dead enemies, exactly like the decomp's fixed `enemies[]` pool. Slots are
-    /// never compacted/reordered, so the processing (and bullet-firing) order
-    /// stays decomp-faithful. (#30)
-    fn insert_enemy(&mut self, e: Enemy) {
-        if let Some(slot) = self.enemies.iter().position(|x| !x.occupied) {
-            self.enemies[slot] = e;
-            self.anims[slot] = None;
-            self.sub_anims[slot] = Default::default();
-        } else {
-            self.enemies.push(e);
-            self.anims.push(None);
-            self.sub_anims.push(Default::default());
+    fn sync_enemy_slots(&mut self) {
+        self.world.enemy_slots.fill(false);
+        for (index, enemy) in self.enemies.iter().enumerate() {
+            self.world.enemy_slots[index] = enemy.occupied;
         }
     }
 
+    /// Children reserve their original fixed slot before their initialization
+    /// ECL runs, including nested ENEMYCREATE. Publish each initialized instance
+    /// at that reserved index rather than allocating again after RunEcl.
+    fn insert_enemy(&mut self, enemy: Enemy) {
+        let index = enemy.pool_index;
+        while self.enemies.len() <= index {
+            self.enemies.push(Enemy::vacant());
+            self.anims.push(None);
+            self.sub_anims.push(Default::default());
+        }
+        self.enemies[index] = enemy;
+        self.anims[index] = None;
+        self.sub_anims[index] = Default::default();
+    }
+
     fn flush_spawns(&mut self) {
-        // FIFO: the decomp spawns sequentially in creation order, each taking the
-        // next free slot. Draining front-to-back preserves that order.
-        while !self.world.pending_spawns.is_empty() {
-            let req = self.world.pending_spawns.remove(0);
-            if let Some(e) = Enemy::spawn(&self.ecl, &mut self.world, &req) {
-                self.insert_enemy(e);
-            }
+        for enemy in std::mem::take(&mut self.world.pending_spawns) {
+            self.insert_enemy(enemy);
         }
     }
 
@@ -1643,7 +2304,11 @@ impl Stage {
                     .get(i)
                     .and_then(|a| a.as_ref())
                     .and_then(|r| r.sprite)
-                    .and_then(|idx| self.enemy_scripts.get(&anm_script).and_then(|s| s.sprites.get(&idx)))
+                    .and_then(|idx| {
+                        self.enemy_scripts
+                            .get(&anm_script)
+                            .and_then(|s| s.sprites.get(&idx))
+                    })
                     .map(|sp| (sp.width, sp.height))
                     .unwrap_or((0.0, 0.0))
             };
@@ -1652,6 +2317,7 @@ impl Stage {
                 i += 1;
                 continue;
             }
+            self.sync_enemy_slots();
             self.enemies[i].handle_callbacks(&self.ecl, &mut self.world);
             self.apply_kill_trash(); // timeout/life-callback kill, before this enemy's RunEcl
             self.enemies[i].run_ecl(&self.ecl, &mut self.world);
@@ -1662,10 +2328,9 @@ impl Stage {
             // child in a slot ahead of its parent then gets its own RunEcl this
             // same frame via the loop above, keeping its ECL clock in step.
             self.flush_spawns();
-            // Boss timer ticks once per frame per enemy, unless time is stopped
-            // (EnemyManager.cpp:735).
-            if !self.world.time_stopped {
-                self.enemies[i].tick_boss_timer();
+            if !self.enemies[i].occupied {
+                i += 1;
+                continue;
             }
 
             // Refresh the ANM runner when the script changed.
@@ -1679,12 +2344,11 @@ impl Stage {
             }
             // ECL op128 ANMINTERRUPTMAIN: jump the primary runner to its queued
             // interrupt label before the tick (primaryVm.pendingInterrupt).
-            if let Some(n) = self.enemies[i].pending_interrupt.take() {
-                if n >= 0 {
-                    if let Some(anim) = &mut self.anims[i] {
-                        anim.interrupt(n as u32);
-                    }
-                }
+            if let Some(n) = self.enemies[i].pending_interrupt.take()
+                && n >= 0
+                && let Some(anim) = &mut self.anims[i]
+            {
+                anim.interrupt(n as u32);
             }
             if let Some(anim) = &mut self.anims[i] {
                 anim.tick();
@@ -1710,9 +2374,16 @@ impl Stage {
                         .map(|sc| AnmRunner::new(sc.instrs.clone()));
                 }
                 if let Some(sv) = &mut self.sub_anims[i][s] {
+                    if let Some(interrupt) = self.enemies[i].sub_interrupts[s].take()
+                        && interrupt != 0
+                    {
+                        sv.interrupt(interrupt as u32);
+                    }
                     sv.tick();
                 }
-                let pend = self.sub_anims[i][s].as_mut().and_then(|a| a.take_pending_random());
+                let pend = self.sub_anims[i][s]
+                    .as_mut()
+                    .and_then(|a| a.take_pending_random());
                 if let Some((base, range)) = pend {
                     let v = self.world.rng.u16_in_range(range) as u32;
                     if let Some(a) = &mut self.sub_anims[i][s] {
@@ -1720,24 +2391,16 @@ impl Stage {
                     }
                 }
             }
-            // Enemy::UpdateEffects: keep this enemy's spellcard bubbles on it.
+            self.collide_enemy(i);
+            // Enemy::UpdateEffects and phaseTimer follow this enemy's damage
+            // and death handling, before the next fixed slot runs its ECL.
             self.enemies[i].update_effects(&mut self.world);
+            if !self.world.time_stopped {
+                self.enemies[i].tick_boss_timer();
+            }
             i += 1;
         }
         self.flush_spawns();
-
-        // Death-effect particles (EnemyManager.cpp:641-706): a dead interactable
-        // enemy queues its splash/bubble effects here, in EnemyManager::OnUpdate
-        // (before the bullet update), so their RNG draws land at the faithful
-        // point. The drop/score/removal stay in collide(); this only spawns the
-        // effects (and fires once via death_fx_done). (#26)
-        for e in &mut self.enemies {
-            if e.occupied && e.interactable && e.life <= 0 && !e.death_fx_done {
-                e.spawn_death_effects(&mut self.world);
-            }
-        }
-        // No compaction: dead slots (occupied=false) stay in place and are reused
-        // by insert_enemy, keeping the slot pool decomp-faithful. (#30)
     }
 
     fn update_player(&mut self, input: &Input) {
@@ -1771,8 +2434,8 @@ impl Stage {
             d[0] *= inv;
             d[1] *= inv;
         }
-        self.pos[0] = (self.pos[0] + d[0] * speed).clamp(12.0, FIELD_W - 12.0);
-        self.pos[1] = (self.pos[1] + d[1] * speed).clamp(20.0, FIELD_H - 20.0);
+        self.pos[0] = (self.pos[0] + d[0] * speed).clamp(8.0, FIELD_W - 8.0);
+        self.pos[1] = (self.pos[1] + d[1] * speed).clamp(16.0, FIELD_H - 16.0);
 
         // Banking animation (HandlePlayerInputs): switch player ANM script on
         // the horizontal-speed sign transitions. Stopping scripts loop back
@@ -1794,7 +2457,9 @@ impl Stage {
         // Orb slide blend toward focused (1) / unfocused (0) over 8 frames.
         let target = if focus { 1.0 } else { 0.0 };
         self.focus_anim += (target - self.focus_anim).clamp(-0.125, 0.125);
+    }
 
+    fn update_player_fire(&mut self, input: &Input) {
         // Shooting and bombing are disabled during dialogue (Player.cpp gates
         // both on !HasCurrentMsgIdx), but the player can still move and dodge.
         let can_act = !self.dialogue.active;
@@ -1823,18 +2488,78 @@ impl Stage {
         } else {
             0
         };
+    }
 
+    /// Player_OnUpdate: bomb handling happens before the death/spawn state
+    /// machine, so a bomb in the six-frame respawnTimer window saves the stock
+    /// while Player::Die has already counted the miss and failed the capture.
+    fn update_player_lifecycle(&mut self, input: &Input) -> bool {
+        for rect in &mut self.bomb_projectiles {
+            rect.size[0] = 0.0;
+        }
+        for rect in &mut self.bomb_regions {
+            rect.size[0] = 0.0;
+        }
         if self.bomb_in_use {
             self.update_bomb();
-        } else if can_act && input.pressed(Key::Bomb) && self.bombs > 0 {
+        } else if !self.dialogue.active
+            && (matches!(self.state, PlayerState::Alive) || self.dying > 0)
+            && self.bombs > 0
+            && input.pressed(Key::Bomb)
+        {
             self.fire_bomb();
-        } else if self.dying > 0 {
-            // No bomb this frame: tick the deathbomb window, commit on expiry.
-            self.dying -= 1;
-            if self.dying == 0 {
-                self.commit_death();
+        }
+        if let PlayerState::Dead(elapsed) = self.state {
+            if self.dying > 0 {
+                self.dying -= 1;
+                if self.dying == 0 {
+                    self.commit_death();
+                }
+                self.state = PlayerState::Dead(elapsed + 1);
+            } else if elapsed >= 30 {
+                self.pos = [FIELD_W / 2.0, FIELD_H - 64.0];
+                self.invuln = 0;
+                self.set_player_script(0);
+                if self.lives <= 0 {
+                    self.state = PlayerState::GameOver;
+                    self.events.push(Event::GameOver(self.score));
+                    return true;
+                }
+                self.lives -= 1;
+                self.bombs = self.starting_bombs;
+                self.state = PlayerState::Spawning(0);
+            } else {
+                self.state = PlayerState::Dead(elapsed + 1);
             }
         }
+        if let PlayerState::Spawning(elapsed) = self.state {
+            self.bullet_grace_period = 90;
+            self.bomb_move_mult = 1.0;
+            if elapsed >= 30 {
+                self.state = PlayerState::Alive;
+                self.invuln = 240;
+            } else {
+                self.state = PlayerState::Spawning(elapsed + 1);
+            }
+        }
+        if self.bullet_grace_period > 0 {
+            self.bullet_grace_period -= 1;
+            self.world.despawn_all_bullets();
+        }
+        if matches!(self.state, PlayerState::Alive) {
+            self.invuln = self.invuln.saturating_sub(1);
+            self.update_player(input);
+        } else {
+            self.beam_dmg = 0;
+            self.fire_timer = -1;
+        }
+        self.player_runner.tick();
+        self.update_shots();
+        self.last_enemy_hit = None;
+        if matches!(self.state, PlayerState::Alive) {
+            self.update_player_fire(input);
+        }
+        false
     }
 
     /// Fire a bomb (Player::OnUpdate bomb branch): mark it in use, reset the
@@ -1842,7 +2567,11 @@ impl Stage {
     /// calc once for frame 0. Bullets are no longer cleared wholesale — the
     /// per-bomb `bombProjectiles` cancel them region-by-region in `collide`.
     fn fire_bomb(&mut self) {
-        self.dying = 0; // a bomb in the deathbomb window cancels the death
+        self.bombs_used += 1;
+        if self.dying > 0 {
+            self.state = PlayerState::Alive;
+        }
+        self.dying = 0; // a bomb in the deathbomb window cancels the stock loss
         self.bombs -= 1;
         self.world.decrease_subrank(200); // Player.cpp:185: bombing drops rank ~2
         self.spell_capturing = false; // bombing forfeits the capture
@@ -1944,6 +2673,7 @@ impl Stage {
     /// circuits on i==0, a ZUN quirk), each homing toward the lowest on-screen
     /// enemy and exploding into a 256²/200-damage burst once it has dealt 100
     /// damage or the bomb is in its last 30 frames.
+    #[allow(clippy::manual_clamp)] // Original ordered comparisons preserve NaN behavior.
     fn bomb_reimu_a(&mut self) {
         use std::f32::consts::{PI, TAU};
         if self.bomb_timer >= self.bomb_duration {
@@ -1955,7 +2685,10 @@ impl Stage {
             self.invuln = 360;
             self.seal_state = [0; 8];
             // 256² central blast; cleared next frame, so it cancels bullets once.
-            self.bomb_projectiles[8] = BombRect { pos: self.pos, size: [256.0, 256.0] };
+            self.bomb_projectiles[8] = BombRect {
+                pos: self.pos,
+                size: [256.0, 256.0],
+            };
         }
         if (60..180).contains(&self.bomb_timer) && self.bomb_timer % 16 == 0 {
             let i = ((self.bomb_timer - 60) / 16) as usize;
@@ -1964,12 +2697,16 @@ impl Stage {
                 self.seal_speed[i] = 4.0;
                 self.seal_pos[i] = self.pos;
                 let angle = self.world.rng.f32_zero_to_one() * TAU - PI;
-                self.seal_vel[i] = [angle.cos() * self.seal_speed[i], angle.sin() * self.seal_speed[i]];
+                self.seal_vel[i] = [
+                    angle.cos() * self.seal_speed[i],
+                    angle.sin() * self.seal_speed[i],
+                ];
                 self.bomb_dmg_accum[i] = 0;
                 // ExecuteAnmIdx the seal's 4 sprites (REIMU_A_BOMB_ARRAY = 133+k).
                 for k in 0..4 {
-                    self.bomb_sprites[i * 4 + k] =
-                        Some(AnmRunner::new(self.player_scripts[&(133 + k as i32)].clone()));
+                    self.bomb_sprites[i * 4 + k] = Some(AnmRunner::new(
+                        self.player_scripts[&(133 + k as i32)].clone(),
+                    ));
                 }
                 self.events.push(Event::Sfx(SFX_BY_IDX[13])); // SOUND_BOMB_REIMU_A
             }
@@ -1993,9 +2730,15 @@ impl Stage {
                 self.seal_speed[i] = len.min(10.0).max(1.0);
                 self.seal_vel[i] = [ax * self.seal_speed[i] / len, ay * self.seal_speed[i] / len];
 
-                self.bomb_regions[i] = BombRect { pos: self.seal_pos[i], size: [48.0, 48.0] };
+                self.bomb_regions[i] = BombRect {
+                    pos: self.seal_pos[i],
+                    size: [48.0, 48.0],
+                };
                 self.bomb_region_dmg[i] = 8;
-                self.bomb_projectiles[i] = BombRect { pos: self.seal_pos[i], size: [48.0, 48.0] };
+                self.bomb_projectiles[i] = BombRect {
+                    pos: self.seal_pos[i],
+                    size: [48.0, 48.0],
+                };
 
                 if self.bomb_dmg_accum[i] >= 100 || self.bomb_timer >= self.bomb_duration - 30 {
                     self.seal_state[i] = 2;
@@ -2044,8 +2787,9 @@ impl Stage {
             // ExecuteAnmIdx the 4 beam sprites (REIMU_B_BOMB_ARRAY = scripts 137+i);
             // their animated pos becomes each beam's posOffset.
             for i in 0..4 {
-                self.bomb_sprites[i] =
-                    Some(AnmRunner::new(self.player_scripts[&(137 + i as i32)].clone()));
+                self.bomb_sprites[i] = Some(AnmRunner::new(
+                    self.player_scripts[&(137 + i as i32)].clone(),
+                ));
             }
             // bombRegionPositions seeds (z layering is draw-only, omitted).
             self.seal_pos[0] = [self.pos[0], 224.0];
@@ -2064,14 +2808,17 @@ impl Stage {
             for i in 0..4 {
                 let off = if let Some(r) = self.bomb_sprites[i].as_mut() {
                     r.tick(); // ExecuteScript
-                    r.pos
+                    r.pos_offset
                 } else {
                     [0.0, 0.0]
                 };
                 if self.bomb_timer % 2 != 0 {
                     let pos = [self.seal_pos[i][0] + off[0], self.seal_pos[i][1] + off[1]];
                     self.bomb_projectiles[i].pos = pos;
-                    self.bomb_regions[i] = BombRect { pos, size: self.bomb_projectiles[i].size };
+                    self.bomb_regions[i] = BombRect {
+                        pos,
+                        size: self.bomb_projectiles[i].size,
+                    };
                     self.bomb_region_dmg[i] = 8;
                 }
             }
@@ -2093,8 +2840,9 @@ impl Stage {
             self.invuln = 300;
             for i in 0..8 {
                 // ExecuteAnmIdx the star sprite (BLUE/GREEN/RED = 5 + i%3).
-                self.bomb_sprites[i] =
-                    Some(AnmRunner::new(self.player_scripts[&(5 + (i % 3) as i32)].clone()));
+                self.bomb_sprites[i] = Some(AnmRunner::new(
+                    self.player_scripts[&(5 + (i % 3) as i32)].clone(),
+                ));
                 self.seal_pos[i] = self.pos;
                 let a = i as f32 * TAU / 8.0;
                 self.seal_vel[i] = [a.cos() * 2.0, a.sin() * 2.0];
@@ -2106,8 +2854,14 @@ impl Stage {
                 self.seal_pos[i][0] += self.seal_vel[i][0];
                 self.seal_pos[i][1] += self.seal_vel[i][1];
                 if self.bomb_timer % 3 != 0 {
-                    self.bomb_projectiles[i] = BombRect { pos: self.seal_pos[i], size: [128.0, 128.0] };
-                    self.bomb_regions[i] = BombRect { pos: self.seal_pos[i], size: [128.0, 128.0] };
+                    self.bomb_projectiles[i] = BombRect {
+                        pos: self.seal_pos[i],
+                        size: [128.0, 128.0],
+                    };
+                    self.bomb_regions[i] = BombRect {
+                        pos: self.seal_pos[i],
+                        size: [128.0, 128.0],
+                    };
                     self.bomb_region_dmg[i] = 8;
                 }
                 if let Some(r) = self.bomb_sprites[i].as_mut() {
@@ -2144,7 +2898,10 @@ impl Stage {
                 self.register_shake(200, 24.0, 0.0); // ScreenEffect SHAKE (200,24,0)
             }
             if self.bomb_timer % 4 != 0 {
-                let spark = BombRect { pos: [192.0, self.pos[1] / 2.0], size: [384.0, self.pos[1]] };
+                let spark = BombRect {
+                    pos: [192.0, self.pos[1] / 2.0],
+                    size: [384.0, self.pos[1]],
+                };
                 self.bomb_projectiles[0] = spark;
                 self.bomb_regions[0] = spark;
                 self.bomb_region_dmg[0] = 12;
@@ -2158,38 +2915,40 @@ impl Stage {
         self.bomb_timer += 1;
     }
 
-    /// Player::Die plus the respawn bookkeeping: lose a life, scatter items and
-    /// drop power. With lives left: 1 big + 5 small power items scatter and power
-    /// drops by 16 (Player.cpp). On the fatal death: 5 full-power items, power 0.
+    /// Player::Die runs at collision time, before the deathbomb window.
+    fn register_hit(&mut self) {
+        self.deaths += 1;
+        self.spell_capturing = false;
+        self.invuln = 0;
+        self.dying = DEATHBOMB_FRAMES;
+        self.state = PlayerState::Dead(0);
+        self.beam_dmg = 0;
+        let pos = [self.pos[0], self.pos[1], 0.0];
+        self.world
+            .spawn_particles(12, pos, 1, [0.251, 0.251, 1.0, 1.0]);
+        self.world.spawn_particles(6, pos, 16, [1.0, 1.0, 1.0, 1.0]);
+        self.events.push(Event::Sfx("pldead00"));
+    }
+
+    /// Expiring Player::respawnTimer scatters items and drops power. The stock
+    /// and bombs change later, when the thirty-frame death animation ends.
     fn commit_death(&mut self) {
-        self.lives -= 1;
-        self.world.decrease_subrank(1600); // Player.cpp:225: a miss drops rank ~16
+        self.world.decrease_subrank(1600);
         let pos = self.pos;
-        if self.lives >= 0 {
-            self.items.push(Item::scatter(pos, 2, &mut self.world.rng)); // POWER_BIG
+        if self.lives > 0 {
+            self.spawn_scatter_item(pos, 2);
             for _ in 0..5 {
-                self.items.push(Item::scatter(pos, 0, &mut self.world.rng)); // POWER_SMALL
+                self.spawn_scatter_item(pos, 0);
             }
             self.world.power = (self.world.power - 16).max(0);
         } else {
             for _ in 0..5 {
-                self.items.push(Item::scatter(pos, 4, &mut self.world.rng)); // FULL_POWER
+                self.spawn_scatter_item(pos, 4);
             }
             self.world.power = 0;
+            self.next_extend = EXTEND_SCORES.len();
         }
         self.power_item_count = 0;
-        self.bombs = 3;
-        self.spell_capturing = false; // dying forfeits the capture
-        self.world.bullets.clear();
-        self.world.time_stopped = false;
-        self.cancel_lasers();
-        // Player::Die spawns the real death effects (Player.cpp): one neon-blue
-        // UNK_12 puff, then sixteen white UNK_6 splash particles.
-        let dp = [self.pos[0], self.pos[1], 0.0];
-        self.world.spawn_particles(12, dp, 1, [0.251, 0.251, 1.0, 1.0]); // COLOR_NEONBLUE
-        self.world.spawn_particles(6, dp, 16, [1.0, 1.0, 1.0, 1.0]);
-        self.state = PlayerState::Dead(60);
-        self.events.push(Event::Sfx("pldead00"));
     }
 
     /// Switch the player ANM script (idle/banking) if it changed.
@@ -2209,7 +2968,10 @@ impl Stage {
         let a = self.focus_anim;
         let h = 24.0 - 16.0 * a;
         let v = -32.0 * a;
-        [[self.pos[0] - h, self.pos[1] + v], [self.pos[0] + h, self.pos[1] + v]]
+        [
+            [self.pos[0] - h, self.pos[1] + v],
+            [self.pos[0] + h, self.pos[1] + v],
+        ]
     }
 
     /// SpawnBullets / FireSingleBullet: fire every table entry of the current
@@ -2250,6 +3012,7 @@ impl Stage {
 
     /// UpdatePlayerBullets BULLET_TYPE_1: orb amulets steer toward the last
     /// enemy hit for their first 40 frames, then accelerate up to speed 10.
+    #[allow(clippy::manual_clamp)] // Preserve the original ordered min/max behavior, including NaN.
     fn home_shot(s: &mut Shot, target: Option<[f32; 2]>) {
         match target {
             Some(t) if s.age < 40 => {
@@ -2290,7 +3053,10 @@ impl Stage {
             s.age += 1;
         }
         self.shots.retain(|s| {
-            s.pos[1] > -50.0 && s.pos[1] < FIELD_H + 50.0 && s.pos[0] > -50.0 && s.pos[0] < FIELD_W + 50.0
+            s.pos[1] > -50.0
+                && s.pos[1] < FIELD_H + 50.0
+                && s.pos[0] > -50.0
+                && s.pos[0] < FIELD_W + 50.0
         });
     }
 
@@ -2503,155 +3269,130 @@ impl Stage {
         graze_size / 2.0
     }
 
-    fn collide(&mut self) {
-        // Player shots + bomb regions vs enemies (EnemyManager.cpp damage block /
-        // Player::CalcDamageToEnemy). Per enemy, sum every shot that hits it plus
-        // every overlapping bomb region, cap the total at 70, score (total/5)*10,
-        // then apply the spellcard penalty before subtracting life. Bomb regions
-        // also accumulate their raw damage into bomb_dmg_accum (unk_838) and flag
-        // the enemy as bomb-hit (local_8) while a bomb is active.
-        let n = self.enemies.len();
-        let mut enemy_dmg = vec![0i32; n];
-        let mut enemy_bombed = vec![false; n];
-
-        // Shots: each hits the first enemy it overlaps, then despawns.
-        for s in &mut self.shots {
-            for (ei, e) in self.enemies.iter().enumerate() {
-                if !e.occupied || !e.interactable {
-                    continue;
+    /// EnemyManager's per-slot damage/death pass runs immediately after that
+    /// enemy's ECL/ANM, before the following slot can fire or create children.
+    fn collide_enemy(&mut self, index: usize) {
+        if !self.enemies[index].ready_for_damage() {
+            return;
+        }
+        let (pos, hitbox, interactable, collidable, is_boss) = {
+            let enemy = &self.enemies[index];
+            (
+                enemy.pos,
+                enemy.hitbox,
+                enemy.interactable,
+                enemy.collidable,
+                enemy.is_boss,
+            )
+        };
+        if interactable && collidable {
+            let half = [hitbox[0] / 3.0, hitbox[1] / 3.0];
+            let bomb_intercepts = self.bomb_projectiles.iter().any(|rect| {
+                rect.size[0] > 0.0
+                    && (rect.pos[0] - pos[0]).abs() <= rect.size[0] / 2.0 + half[0]
+                    && (rect.pos[1] - pos[1]).abs() <= rect.size[1] / 2.0 + half[1]
+            });
+            if !bomb_intercepts
+                && (self.pos[0] - pos[0]).abs() <= half[0] + 1.25
+                && (self.pos[1] - pos[1]).abs() <= half[1] + 1.25
+            {
+                if matches!(self.state, PlayerState::Alive)
+                    && self.invuln == 0
+                    && std::env::var_os("TH06_GOD").is_none()
+                {
+                    self.register_hit();
                 }
-                let r = (e.hitbox[0].max(e.hitbox[1])) / 2.0 + 6.0;
-                let dx = s.pos[0] - e.pos[0];
-                let dy = s.pos[1] - e.pos[1];
-                if dx * dx + dy * dy < r * r {
-                    enemy_dmg[ei] += s.damage;
-                    s.pos[1] = -100.0;
-                    break;
+                if !is_boss {
+                    self.enemies[index].life -= 10;
                 }
             }
         }
-        self.shots.retain(|s| s.pos[1] > -90.0);
-
-        // Bomb regions: AABB overlap of each active region with each enemy's
-        // hitbox (Player::CalcDamageToEnemy bombRegion loop).
-        for ri in 0..self.bomb_regions.len() {
-            let reg = self.bomb_regions[ri];
-            if reg.size[0] <= 0.0 {
-                continue;
-            }
-            let (rl, rt) = (reg.pos[0] - reg.size[0] / 2.0, reg.pos[1] - reg.size[1] / 2.0);
-            let (rr, rb) = (reg.pos[0] + reg.size[0] / 2.0, reg.pos[1] + reg.size[1] / 2.0);
-            let dmg = self.bomb_region_dmg[ri];
-            for (ei, e) in self.enemies.iter().enumerate() {
-                if !e.occupied || !e.interactable {
-                    continue;
-                }
-                let (el, et) = (e.pos[0] - e.hitbox[0] / 2.0, e.pos[1] - e.hitbox[1] / 2.0);
-                let (er, eb) = (e.pos[0] + e.hitbox[0] / 2.0, e.pos[1] + e.hitbox[1] / 2.0);
-                if rl > er || rr < el || rt > eb || rb < et {
-                    continue;
-                }
-                enemy_dmg[ei] += dmg;
-                self.bomb_dmg_accum[ri] += dmg; // raw, drives ReimuA seal explosion
-                if self.bomb_in_use {
-                    enemy_bombed[ei] = true; // local_8 / hitWithLazerDuringBomb
-                }
-            }
+        if !interactable {
+            return;
         }
-
-        // Apply the aggregated per-enemy damage, scoring and spell penalty.
-        let spell = self.spell_active;
-        let used_bomb = self.spell_used_bomb;
-        let mut dmg_score: i64 = 0;
-        for (ei, e) in self.enemies.iter_mut().enumerate() {
-            let total = enemy_dmg[ei];
-            if total <= 0 {
-                continue;
-            }
-            let capped = total.min(70);
-            dmg_score += (capped / 5 * 10) as i64;
-            let effective = if spell {
-                if !enemy_bombed[ei] {
-                    if capped > 7 { capped / 7 } else { 1 }
-                } else if used_bomb {
-                    if capped > 3 { capped / 3 } else { 1 }
+        let mut damage = 0;
+        for shot in &mut self.shots {
+            let radius = hitbox[0].max(hitbox[1]) / 2.0 + 6.0;
+            let dx = shot.pos[0] - pos[0];
+            let dy = shot.pos[1] - pos[1];
+            if dx * dx + dy * dy < radius * radius {
+                damage += if self.bomb_in_use {
+                    (shot.damage / 3).max(1)
                 } else {
-                    0
+                    shot.damage
+                };
+                shot.pos[1] = -100.0;
+            }
+        }
+        self.shots.retain(|shot| shot.pos[1] > -90.0);
+        let mut hit_by_bomb = false;
+        for region in 0..self.bomb_regions.len() {
+            let rect = self.bomb_regions[region];
+            if rect.size[0] <= 0.0
+                || (rect.pos[0] - pos[0]).abs() > (rect.size[0] + hitbox[0]) / 2.0
+                || (rect.pos[1] - pos[1]).abs() > (rect.size[1] + hitbox[1]) / 2.0
+            {
+                continue;
+            }
+            damage += self.bomb_region_dmg[region];
+            self.bomb_dmg_accum[region] += self.bomb_region_dmg[region];
+            hit_by_bomb |= self.bomb_in_use;
+        }
+        if self.beam_dmg > 0
+            && self
+                .orb_positions()
+                .iter()
+                .any(|orb| (pos[0] - orb[0]).abs() < 10.0 && pos[1] <= orb[1])
+        {
+            damage += self.beam_dmg;
+        }
+        damage = damage.min(70);
+        self.score += (damage / 5 * 10) as i64;
+        if self.world.spellcard_active != 0 {
+            damage = if !hit_by_bomb {
+                if damage > 7 {
+                    damage / 7
+                } else {
+                    i32::from(damage != 0)
+                }
+            } else if self.spell_used_bomb {
+                if damage > 3 {
+                    damage / 3
+                } else {
+                    i32::from(damage != 0)
                 }
             } else {
-                capped
+                0
             };
-            if e.damageable {
-                e.life -= effective;
+        }
+        if self.enemies[index].damageable {
+            self.enemies[index].life -= damage;
+        }
+        if self
+            .last_enemy_hit
+            .is_none_or(|previous| previous[1] < pos[1])
+        {
+            self.last_enemy_hit = Some([pos[0], pos[1]]);
+        }
+        if self.enemies[index].life <= 0 {
+            let mode = self.enemies[index].death_mode;
+            let drop = self.enemies[index].item_drop;
+            if mode == 0 || mode == 1 {
+                self.score += self.enemies[index].score as i64;
             }
-        }
-        self.score += dmg_score;
-
-        // positionOfLastEnemyHit (EnemyManager.cpp:636): the lowest on-screen
-        // interactable enemy (max y), or None. Reset each frame; drives ReimuA's
-        // seal homing and the orb-amulet homing.
-        self.last_enemy_hit = self
-            .enemies
-            .iter()
-            .filter(|e| e.occupied && e.interactable)
-            .max_by(|a, b| a.pos[1].total_cmp(&b.pos[1]))
-            .map(|e| [e.pos[0], e.pos[1]]);
-
-        // MarisaB orb beams: damage enemies in each orb's vertical column.
-        if self.beam_dmg > 0 {
-            let orbs = self.orb_positions();
-            for e in &mut self.enemies {
-                if !e.occupied || !e.interactable || !e.damageable {
-                    continue;
-                }
-                for o in orbs {
-                    if (e.pos[0] - o[0]).abs() < 10.0 && e.pos[1] <= o[1] {
-                        e.life -= self.beam_dmg;
-                        self.score += (self.beam_dmg.min(70) / 5 * 10) as i64;
-                        break;
-                    }
-                }
+            self.enemies[index].spawn_death_effects(&mut self.world);
+            if mode != 3 {
+                self.spawn_drop([pos[0], pos[1]], drop, hit_by_bomb);
             }
-        }
-
-        // Enemy deaths award the enemy's score value (default 100).
-        let mut drops: Vec<([f32; 2], i16)> = Vec::new();
-        let mut boss_died = false;
-        for i in 0..self.enemies.len() {
-            let e = &mut self.enemies[i];
-            if e.occupied && e.interactable && e.life <= 0 {
-                // Per EnemyManager.cpp:645 death switch: modes 0/1 award score,
-                // modes 0/1/2 drop items, mode 3 (survived final spell) does
-                // neither and leaves the boss alive.
-                let dm = e.death_mode;
-                if dm != 3 {
-                    drops.push(([e.pos[0], e.pos[1]], e.item_drop));
-                }
-                if dm == 0 || dm == 1 {
-                    self.score += e.score as i64;
-                }
-                // Faithful death particles (EnemyManager.cpp:641-706): the etama4
-                // bubble + splash, drawn by the EffectManager. Idempotent via
-                // death_fx_done. Player kills reach here (life set in collide), so
-                // without this they only got the placeholder spawn_burst.
-                e.spawn_death_effects(&mut self.world);
-                if e.is_boss && dm != 3 {
-                    boss_died = true;
-                }
-                e.on_death(&self.ecl, &mut self.world);
-                self.events.push(Event::Sfx("enep00"));
+            if is_boss && mode != 3 && self.world.spellcard_active == 0 {
+                self.despawn_bullets(false);
             }
+            self.enemies[index].on_death(&self.ecl, &mut self.world);
+            self.events.push(Event::Sfx("enep00"));
         }
-        // A boss death cancels the field for the bonus (EnemyManager.cpp:693
-        // DespawnBullets(12800, false)) — bonus only, no point items.
-        if boss_died {
-            self.despawn_bullets(false);
-        }
-        for (pos, drop) in drops {
-            self.spawn_drop(pos, drop);
-        }
-        self.flush_spawns();
+    }
 
+    fn collide_bullets(&mut self) {
         // Bomb projectiles cancel bullets every frame, regardless of player state
         // (BulletManager.cpp:919-943: CheckGraze / CalcKillBoxCollision return 2 →
         // the bullet despawns and drops a homing point item). A not-yet-grazed
@@ -2659,12 +3400,20 @@ impl Stage {
         // its kill box (CalcKillBoxCollision) — both cancel.
         if self.bomb_projectiles.iter().any(|r| r.size[0] != 0.0) {
             let projs = self.bomb_projectiles;
-            let radii: Vec<f32> = self.world.bullets.iter().map(|b| self.bullet_radius(b)).collect();
+            let radii: Vec<f32> = self
+                .world
+                .bullets
+                .iter()
+                .map(|b| self.bullet_radius(b))
+                .collect();
             let mut cancelled: Vec<[f32; 2]> = Vec::new();
             let mut i = 0;
             self.world.bullets.retain(|b| {
                 let m = radii[i] + if b.grazed { 0.0 } else { 20.0 };
                 i += 1;
+                if b.despawn_timer > 0 {
+                    return true;
+                }
                 let (bl, bt) = (b.pos[0] - m, b.pos[1] - m);
                 let (br, bb) = (b.pos[0] + m, b.pos[1] + m);
                 for r in projs.iter() {
@@ -2681,7 +3430,7 @@ impl Stage {
                 true
             });
             for pos in cancelled {
-                self.items.push(Item::homing(pos, 6)); // ITEM_POINT_BULLET
+                self.spawn_item(Item::homing(pos, 6)); // ITEM_POINT_BULLET
             }
         }
 
@@ -2690,17 +3439,26 @@ impl Stage {
         // or 48 (lasers) for grazes. Grazing is allowed during the post-respawn
         // invulnerability, but never while dying or bombing.
         const PH: f32 = 1.25;
-        let can_graze = matches!(self.state, PlayerState::Alive) && self.dying == 0 && self.bombing == 0;
+        let can_graze =
+            matches!(self.state, PlayerState::Alive) && self.dying == 0 && self.bombing == 0;
         if !can_graze {
             return;
         }
         let can_be_hit = self.invuln == 0;
         let p = self.pos;
-        let radii: Vec<f32> = self.world.bullets.iter().map(|b| self.bullet_radius(b)).collect();
+        let radii: Vec<f32> = self
+            .world
+            .bullets
+            .iter()
+            .map(|b| self.bullet_radius(b))
+            .collect();
 
         let mut kill = false;
         let mut graze_count: i64 = 0;
         for (b, &r) in self.world.bullets.iter_mut().zip(&radii) {
+            if b.despawn_timer > 0 {
+                continue;
+            }
             let dx = (b.pos[0] - p[0]).abs();
             let dy = (b.pos[1] - p[1]).abs();
             if can_be_hit && dx < r + PH && dy < r + PH {
@@ -2727,7 +3485,8 @@ impl Stage {
             let along = dx * c + dy * s;
             let across = (-dx * s + dy * c).abs();
             let half = l.width / 4.0;
-            if can_be_hit && along >= l.start_offset && along <= l.end_offset && across < half + PH {
+            if can_be_hit && along >= l.start_offset && along <= l.end_offset && across < half + PH
+            {
                 kill = true;
             } else if along >= l.start_offset - 48.0
                 && along <= l.end_offset + 48.0
@@ -2736,30 +3495,13 @@ impl Stage {
                 graze_count += 1; // lasers graze every frame, like the original
             }
         }
-        if can_be_hit
-            && self.enemies.iter().any(|e| {
-                if !e.occupied || !e.collidable || !e.interactable {
-                    return false;
-                }
-                // EnemyManager.cpp:588 tests the body as an AABB: enemyHitbox =
-                // hitboxDimensions / 1.5, against the player's 1.25 half-extent
-                // (CalcKillBoxCollision), per-axis — not a circle.
-                let hx = e.hitbox[0] / 1.5 / 2.0;
-                let hy = e.hitbox[1] / 1.5 / 2.0;
-                (e.pos[0] - p[0]).abs() < hx + PH && (e.pos[1] - p[1]).abs() < hy + PH
-            })
-        {
-            kill = true;
-        }
-
         if graze_count > 0 {
             self.graze += graze_count;
             self.score += 500 * graze_count;
             self.events.push(Event::Sfx("graze"));
         }
         if kill && std::env::var_os("TH06_GOD").is_none() {
-            // Open the deathbomb window; commit_death fires if it expires unbombed.
-            self.dying = DEATHBOMB_FRAMES;
+            self.register_hit();
         }
     }
 
@@ -2771,23 +3513,50 @@ impl Stage {
         if std::env::var_os("TH06_NO_DIALOGUE").is_some() {
             return;
         }
-        let Some(&off) = self.msg.offsets.get(idx) else { return };
-        self.dialogue = Dialogue { active: true, off, ..Default::default() };
-        // Dialogue clears the field of bullets in practice.
-        self.world.bullets.clear();
-        self.cancel_lasers();
-        // The boss theme starts at the pre-boss confrontation. Stage 1's MSG
-        // has no MUSIC instruction, so the first dialogue is the cue (the
-        // midboss has no dialogue, so it keeps the stage theme).
-        if !self.boss_bgm_started {
-            self.boss_bgm_started = true;
-            self.events.push(Event::Bgm(self.boss_bgm));
+        let Some(&off) = self.msg.offsets.get(idx) else {
+            return;
+        };
+        self.dialogue = Dialogue {
+            active: true,
+            msg_idx: idx,
+            off,
+            ..Default::default()
+        };
+        if self.stage_num == 7
+            && matches!(idx, 0 | 10)
+            && let Some(asset) = &self.extra_boss_portrait
+            && let Some(first) = self.boss_portraits.first_mut()
+        {
+            *first = asset.clone();
         }
     }
 
-    /// Port of GuiImpl::RunMsg (text/wait/music subset).
+    /// Gui executes portrait animation even while a WAIT or MSGHALT holds.
     fn run_dialogue(&mut self, input: &Input) {
+        self.run_dialogue_instructions(input);
+        if self.dialogue.active {
+            for runner in self
+                .dialogue
+                .portraits
+                .iter_mut()
+                .chain(self.dialogue.line_runners.iter_mut())
+                .chain(self.dialogue.intro_runners.iter_mut())
+                .flatten()
+            {
+                runner.tick();
+            }
+        }
+    }
+
+    fn run_dialogue_instructions(&mut self, input: &Input) {
         let d = &mut self.dialogue;
+        d.ecl_resumed = false;
+        if d.skippable
+            && input.held(Key::Skip)
+            && let Some(i) = self.msg.instr_at(d.off)
+        {
+            d.timer = i.time;
+        }
         loop {
             let Some(i) = self.msg.instr_at(d.off) else {
                 d.active = false;
@@ -2820,59 +3589,125 @@ impl Stage {
                     d.lines[line] = th06_engine::text::decode_shiftjis(&raw);
                     d.line_colors[line] = color;
                     d.line_tex[line] = self.dialogue_tex.get(&off).copied();
+                    d.line_runners[line] = self
+                        .dialogue_scripts
+                        .get(&(2 + line as u32))
+                        .map(|script| AnmRunner::new(script.clone()));
                     d.frames_pause = 0;
                 }
                 4 => {
                     // WAIT n frames; Z after 8 frames advances.
                     let wait = i.arg_i32(0) as u16;
-                    let advance = (input.pressed(Key::Shoot) || input.pressed(Key::Enter))
-                        && d.frames_pause >= 8;
+                    let advance = (d.skippable && input.held(Key::Skip))
+                        || (input.pressed(Key::Shoot) && d.frames_pause >= 8);
                     if d.frames_pause < wait && !advance {
                         d.frames_pause += 1;
                         return; // time frozen during the pause
                     }
                 }
-                1 | 2 => {
-                    // PORTRAITANMSCRIPT / PORTRAITANMSPRITE: pick portrait
-                    // side and expression. anmScriptIdx's parity selects one
-                    // of the two expression sprites in the face sheet.
+                1 => {
                     let idx = i.arg_i16(0).clamp(0, 1) as usize;
-                    let expr = (i.arg_i16(2).max(0) as usize) & 1;
-                    d.portrait_shown[idx] = true;
-                    d.portrait_expr[idx] = expr;
-                    d.portrait_active = idx as i32;
+                    let script = i.arg_i16(2) as u32 + if idx == 0 { 0 } else { 2 };
+                    d.portraits[idx] = self
+                        .player_portraits
+                        .first()
+                        .and_then(|asset| asset.entry.scripts.iter().find(|(id, _)| *id == script))
+                        .map(|(_, instrs)| AnmRunner::new(instrs.clone()));
+                }
+                2 => {
+                    let idx = i.arg_i16(0).clamp(0, 1) as usize;
+                    if let Some(portrait) = &mut d.portraits[idx] {
+                        portrait.set_sprite(i.arg_i16(2) as u32 + if idx == 0 { 0 } else { 8 });
+                    }
+                }
+                5 => {
+                    let idx = i.arg_i16(0) as usize;
+                    let runner = if idx < 2 {
+                        d.portraits.get_mut(idx)
+                    } else {
+                        d.line_runners.get_mut(idx - 2)
+                    };
+                    if let Some(Some(runner)) = runner {
+                        runner.interrupt(i.args.get(2).copied().unwrap_or(0) as u32);
+                    }
                 }
                 6 => d.ecl_resumed = true, // ECLRESUME
                 7 => {
                     // MUSIC: stage 1 track 1 is the boss theme.
                     let track = i.arg_i32(0);
-                    self.boss_bgm_started = true;
+                    self.boss_bgm_started = track == 1;
                     self.events.push(Event::Bgm(if track == 1 {
                         self.boss_bgm
                     } else {
                         self.stage_bgm
                     }));
                 }
+                8 => {
+                    let color = i.arg_i16(0).clamp(0, 1) as usize;
+                    let line = i.arg_i16(2).clamp(0, 1) as usize;
+                    let raw = &i.args[4.min(i.args.len())..];
+                    let end = raw.iter().position(|&byte| byte == 0).unwrap_or(raw.len());
+                    d.intro_lines[line] = th06_engine::text::decode_shiftjis(&raw[..end]);
+                    d.intro_colors[line] = color;
+                    d.intro_tex[line] = self.dialogue_tex.get(&d.off).copied();
+                    d.intro_runners[line] = self
+                        .dialogue_scripts
+                        .get(&(4 + line as u32))
+                        .map(|script| AnmRunner::new(script.clone()));
+                    d.frames_pause = 0;
+                }
+                9 => {
+                    let bonus = stage_clear_bonus(
+                        self.stage_num,
+                        self.graze - self.graze_start,
+                        self.world.power as i64,
+                        self.point_items,
+                        self.lives as i64,
+                        self.bombs as i64,
+                        self.world.difficulty,
+                        self.starting_lives,
+                    );
+                    self.score += bonus;
+                    self.clear_bonus = bonus;
+                    self.hiscore = self.hiscore.max(self.score);
+                    self.events.push(Event::SaveScore(self.hiscore));
+                    self.state = PlayerState::Results;
+                    if self.stage_num >= 6 {
+                        self.next_extend = EXTEND_SCORES.len();
+                    }
+                }
                 10 => {
-                    // MSGHALT: nothing left to show.
+                    // MSGHALT keeps the current message/timer in place.
+                    return;
+                }
+                11 => {
+                    self.gui_score = self.score;
+                    self.next_score_inc = 0;
+                    self.events.push(Event::NextStage);
                     d.active = false;
                     return;
                 }
-                _ => {} // portraits / anm interrupts: later
+                12 => self.events.push(Event::BgmFade(4.0)),
+                13 => d.skippable = i.arg_i32(0) != 0,
+                _ => {}
             }
             d.off += i.size;
         }
         d.timer += 1;
+        if d.skippable && input.held(Key::Skip) && d.timer < 60 {
+            d.timer = 60;
+        }
     }
 
-    fn spawn_drop(&mut self, pos: [f32; 2], drop: i16) {
+    fn spawn_drop(&mut self, pos: [f32; 2], drop: i16, hit_by_bomb: bool) {
         let kind = match drop {
-            -2 => return,            // ITEM_NO_ITEM
+            -2 => return, // ITEM_NO_ITEM
             -1 => {
                 // ITEM_RANDOM_ITEM: every third enemy drops, following the
                 // fixed pattern table.
+                let drop = self.rand_item_spawn.is_multiple_of(3);
                 self.rand_item_spawn += 1;
-                if (self.rand_item_spawn - 1) % 3 != 0 {
+                if !drop {
                     return;
                 }
                 let k = RANDOM_ITEMS[self.rand_item_table];
@@ -2881,7 +3716,41 @@ impl Stage {
             }
             k => k as i32,
         };
-        self.items.push(Item::fall(pos, kind));
+        self.spawn_item(if hit_by_bomb {
+            Item::homing(pos, kind)
+        } else {
+            Item::fall(pos, kind)
+        });
+    }
+
+    fn reserve_item_slot(&mut self) -> Option<(usize, usize)> {
+        for _ in 0..512 {
+            let candidate = self.next_item_index;
+            self.next_item_index = (candidate + 1) % 512;
+            if let Err(insert_at) = self
+                .items
+                .binary_search_by_key(&candidate, |item| item.pool_index)
+            {
+                return Some((candidate, insert_at));
+            }
+        }
+        None
+    }
+
+    fn spawn_item(&mut self, mut item: Item) {
+        if let Some((pool_index, insert_at)) = self.reserve_item_slot() {
+            item.pool_index = pool_index;
+            self.items.insert(insert_at, item);
+        }
+    }
+
+    fn spawn_scatter_item(&mut self, pos: [f32; 2], kind: i32) {
+        // SpawnItem reserves its fixed slot before drawing a scatter target.
+        if let Some((pool_index, insert_at)) = self.reserve_item_slot() {
+            let mut item = Item::scatter(pos, kind, &mut self.world.rng);
+            item.pool_index = pool_index;
+            self.items.insert(insert_at, item);
+        }
     }
 
     /// Burst of fading puffs, used for enemy deaths and pickups. Purely cosmetic:
@@ -2890,8 +3759,7 @@ impl Stage {
     /// The faithful gameplay effect RNG is handled by World::spawn_particles.
     fn spawn_burst(&mut self, pos: [f32; 2], count: u32, speed: f32, color: [f32; 3], size: f32) {
         for i in 0..count {
-            let a = i as f32 / count as f32 * std::f32::consts::TAU
-                + self.fx_rng.f32_in_range(0.5);
+            let a = i as f32 / count as f32 * std::f32::consts::TAU + self.fx_rng.f32_in_range(0.5);
             let s = speed * (0.5 + self.fx_rng.f32_zero_to_one());
             self.particles.push(Particle {
                 pos,
@@ -2918,107 +3786,113 @@ impl Stage {
     fn update_items(&mut self) {
         let player = self.pos;
         let alive = matches!(self.state, PlayerState::Alive);
-        // Point of collection: at max power, crossing y<128 latches every
-        // falling item to homing (state 1). Once latched it stays homing even
-        // if the player drops back below the line; only items spawned afterwards
-        // (still state 0) keep falling. Matches ItemManager::OnUpdate.
-        let poc = alive && self.world.power >= 128 && player[1] < 128.0;
-        let mut collected: Vec<(i32, [f32; 2])> = Vec::new();
-        for it in &mut self.items {
-            if it.state == 2 {
-                // Scatter arc: lerp to target over 60 frames, then fall.
-                it.timer += 1;
-                if it.timer < 60 {
-                    let f = it.timer as f32 / 60.0;
-                    it.pos[0] = f * it.target[0] + it.start[0] * (1.0 - f);
-                    it.pos[1] = f * it.target[1] + it.start[1] * (1.0 - f);
-                } else {
-                    if it.timer == 60 {
-                        it.vy = 0.0;
-                    }
-                    it.vy = (it.vy + 0.03).min(3.0);
-                    it.pos[1] += it.vy;
-                }
-            } else {
-                if poc {
-                    it.state = 1;
-                }
-                if it.state == 1 {
-                    let dx = player[0] - it.pos[0];
-                    let dy = player[1] - it.pos[1];
-                    let len = (dx * dx + dy * dy).sqrt().max(0.001);
-                    it.pos[0] += dx / len * 8.0;
-                    it.pos[1] += dy / len * 8.0;
-                } else {
-                    it.vy = (it.vy + 0.03).min(3.0);
-                    it.pos[1] += it.vy;
-                }
-            }
-            if alive {
-                let dx = player[0] - it.pos[0];
-                let dy = player[1] - it.pos[1];
-                if dx * dx + dy * dy < 18.0 * 18.0 {
-                    collected.push((it.kind, it.pos));
-                    it.kind = -100; // mark
-                }
-            }
-        }
-        // Items that fall off the bottom uncollected drop rank (ItemManager.cpp:145).
-        let lost = self
-            .items
-            .iter()
-            .filter(|it| it.kind != -100 && it.pos[1] >= FIELD_H + 16.0)
-            .count();
-        if lost > 0 {
-            self.world.decrease_subrank(3 * lost as i32);
-        }
-        self.items.retain(|it| it.kind != -100 && it.pos[1] < FIELD_H + 16.0);
-        for (kind, pos) in collected {
-            let color = match kind {
-                1 | 6 => [0.5, 0.7, 1.0],   // point / point-bullet = blue
-                3 | 5 => [1.0, 0.6, 0.6],   // bomb/life = red
-                _ => [1.0, 0.4, 0.4],       // power = red
+        // Visit original fixed slots in order. Items spawned by a full-power
+        // pickup can themselves update later in this same ItemManager frame.
+        for pool_index in 0..512 {
+            let Ok(index) = self
+                .items
+                .binary_search_by_key(&pool_index, |item| item.pool_index)
+            else {
+                continue;
             };
-            // Per-item subrank (ItemManager.cpp collect switch): small power +1,
-            // point +30 (high) / +3, bomb +5, life +200; big/full power and
-            // point-bullet give none.
-            match kind {
-                0 => self.collect_power(1),
-                2 => self.collect_power(8),
-                4 => {
-                    // ITEM_FULL_POWER: reaching max cancels bullets into points.
-                    if self.world.power < 128 {
-                        self.bullets_to_points();
+            let item = &mut self.items[index];
+            let interpolating = item.state == 2 && item.timer < 60;
+            if interpolating {
+                let fraction = item.timer as f32 / 60.0;
+                item.pos[0] = fraction * item.target[0] + item.start[0] * (1.0 - fraction);
+                item.pos[1] = fraction * item.target[1] + item.start[1] * (1.0 - fraction);
+            } else {
+                let mut horizontal_velocity = 0.0;
+                if item.state == 2 {
+                    if item.timer == 60 {
+                        item.vy = 0.0;
                     }
-                    self.world.power = 128;
-                    self.score += 1000;
+                } else if item.state == 1 || self.world.power >= 128 && player[1] < 128.0 {
+                    let angle = (player[1] - item.pos[1]).atan2(player[0] - item.pos[0]);
+                    let (sin, cos) = angle.sin_cos();
+                    horizontal_velocity = cos * 8.0;
+                    item.vy = sin * 8.0;
+                    item.state = 1;
+                } else if item.vy < -2.2 {
+                    item.vy = -2.2;
                 }
-                1 => {
-                    // ITEM_POINT (Normal, calculatePointScore): 100000 at the
-                    // collection line (y < 128), else 60000 - (y-128)*100.
-                    let y = pos[1] as i64;
-                    self.score += if y < 128 { 100_000 } else { (60_000 - (y - 128) * 100).max(0) };
-                    self.point_items += 1;
-                    self.world.increase_subrank(if pos[1] < 128.0 { 30 } else { 3 });
+                item.pos[0] += horizontal_velocity;
+                item.pos[1] += item.vy;
+                if item.pos[1] >= FIELD_H + 16.0 {
+                    self.items.remove(index);
+                    self.world.decrease_subrank(3);
+                    continue;
                 }
-                6 => {
-                    // ITEM_POINT_BULLET: (grazeInStage/3)*10 + 500, or 100 while
-                    // a bomb is active.
-                    self.score += if self.bombing > 0 { 100 } else { (self.graze / 3) * 10 + 500 };
+                // Original OnUpdate applies gravity after movement; the step
+                // can overshoot 3.0 once before the next callback clamps it.
+                if item.vy < 3.0 {
+                    item.vy += 0.03;
+                } else {
+                    item.vy = 3.0;
                 }
-                3 => self.bombs = (self.bombs + 1).min(8),
-                5 => self.lives = (self.lives + 1).min(8),
-                _ => {}
             }
-            match kind {
-                0 => self.world.increase_subrank(1),
-                3 => self.world.increase_subrank(5),
-                5 => self.world.increase_subrank(200),
-                _ => {}
+            let dx = (player[0] - item.pos[0]).abs();
+            let dy = (player[1] - item.pos[1]).abs();
+            // CalcItemBoxCollision: player's 12px half-box plus the 16px item.
+            if alive && dx <= 20.0 && dy <= 20.0 {
+                let item = self.items.remove(index);
+                self.collect_item(item.kind, item.pos);
+            } else {
+                item.timer += 1;
             }
-            self.spawn_burst(pos, 4, 1.5, color, 6.0);
-            self.events.push(Event::Sfx("item00"));
         }
+    }
+
+    fn collect_item(&mut self, kind: i32, pos: [f32; 2]) {
+        let color = match kind {
+            1 | 6 => [0.5, 0.7, 1.0], // point / point-bullet = blue
+            3 | 5 => [1.0, 0.6, 0.6], // bomb/life = red
+            _ => [1.0, 0.4, 0.4],     // power = red
+        };
+        // Per-item subrank (ItemManager.cpp collect switch): small power +1,
+        // point +30 (high) / +3, bomb +5, life +200; big/full power and
+        // point-bullet give none.
+        match kind {
+            0 => self.collect_power(1),
+            2 => self.collect_power(8),
+            4 => {
+                // ITEM_FULL_POWER: reaching max cancels bullets into points.
+                if self.world.power < 128 {
+                    self.bullets_to_points();
+                }
+                self.world.power = 128;
+                self.score += 1000;
+            }
+            1 => {
+                let difficulty = Difficulty::ALL[self.world.difficulty as usize];
+                self.score += difficulty.point_score(pos[1]);
+                self.point_items += 1;
+                self.point_items_total += 1;
+                self.world
+                    .increase_subrank(if pos[1] < 128.0 { 30 } else { 3 });
+            }
+            6 => {
+                // ITEM_POINT_BULLET: (grazeInStage/3)*10 + 500, or 100 while
+                // a bomb is active.
+                let graze_in_stage = self.graze - self.graze_start;
+                self.score += if self.bombing > 0 {
+                    100
+                } else {
+                    (graze_in_stage / 3) * 10 + 500
+                };
+            }
+            3 => self.bombs = (self.bombs + 1).min(8),
+            5 => self.lives = (self.lives + 1).min(8),
+            _ => {}
+        }
+        match kind {
+            0 => self.world.increase_subrank(1),
+            3 => self.world.increase_subrank(5),
+            5 => self.world.increase_subrank(200),
+            _ => {}
+        }
+        self.spawn_burst(pos, 4, 1.5, color, 6.0);
+        self.events.push(Event::Sfx("item00"));
     }
 
     /// ItemManager power-item collection: below max, +`amount` power and +10
@@ -3039,48 +3913,28 @@ impl Stage {
         }
     }
 
-    fn cancel_lasers(&mut self) {
-        for l in &mut self.world.lasers {
-            if l.in_use && l.state < 2 {
-                l.state = 2;
-                l.timer = 0;
-            }
-        }
-    }
-
     /// BulletManager::TurnAllBulletsIntoPoints: each live bullet becomes a
     /// homing point-bullet item; lasers are cancelled too. Used on full power,
     /// spellcard start, and spellcard capture.
     fn bullets_to_points(&mut self) {
-        for b in &self.world.bullets {
-            self.items.push(Item::homing(b.pos, 6));
+        let points = self.world.turn_bullets_into_points();
+        for pos in points {
+            self.spawn_item(Item::homing(pos, 6));
         }
-        self.world.bullets.clear();
-        self.cancel_lasers();
     }
 
     /// BulletManager::DespawnBullets: cancel every bullet/laser, awarding an
     /// escalating bonus (2000, +10 each, capped at 12800), optionally as point
     /// items, then add it to the score and show the "BONUS" popup.
     fn despawn_bullets(&mut self, award_points: bool) {
-        const MAX_BONUS: i64 = 12800;
-        let positions: Vec<[f32; 2]> = self.world.bullets.iter().map(|b| b.pos).collect();
-        let laser_count = self.world.lasers.iter().filter(|l| l.in_use && l.state < 2).count();
-        let mut bullet_score = 2000i64;
-        let mut total = 0i64;
-        for pos in &positions {
-            if award_points {
-                self.items.push(Item::homing(*pos, 6));
-            }
-            total += bullet_score;
-            bullet_score = (bullet_score + 10).min(MAX_BONUS);
+        let (points, total) = self.world.despawn_bullets_for_bonus(award_points);
+        self.award_bullet_cancel(points, total);
+    }
+
+    fn award_bullet_cancel(&mut self, points: Vec<[f32; 2]>, total: i64) {
+        for pos in points {
+            self.spawn_item(Item::homing(pos, 6));
         }
-        for _ in 0..laser_count {
-            total += bullet_score;
-            bullet_score = (bullet_score + 10).min(MAX_BONUS);
-        }
-        self.world.bullets.clear();
-        self.cancel_lasers();
         self.score += total;
         if total != 0 {
             self.bonus_score_amount = total;
@@ -3103,17 +3957,33 @@ impl Stage {
                     self.spell_name = th06_engine::text::decode_shiftjis(&raw);
                     self.spell_name_cur = self.spell_name_tex.get(&id).copied();
                     self.spell_id = id;
-                    self.spell_portrait_sprite = sprite;
+                    if !self.is_replay
+                        && let Some(record) = self.spellcard_records.get_mut(id as usize)
+                    {
+                        let checksum = raw.iter().fold(0u8, |sum, &byte| sum.wrapping_add(byte));
+                        if checksum != record.name_checksum {
+                            record.attempts = 0;
+                            record.successes = 0;
+                            record.name_checksum = checksum;
+                        }
+                        record.name = raw.clone();
+                        record.capture_score =
+                            SPELLCARD_SCORE.get(id as usize).copied().unwrap_or(0) as u32;
+                        if record.attempts < 9999 {
+                            record.attempts += 1;
+                        }
+                    }
                     self.spell_capturing = true;
                     self.spell_used_bomb = false; // fresh spellcardInfo
                     // Start the name announce + portrait slide-in (ShowSpellcard).
                     self.spell_name_runner = Some(AnmRunner::new(self.spell_name_script.clone()));
                     self.portrait_runner = Some(AnmRunner::new(self.portrait_script.clone()));
-                    // SPELLCARDSTART cancels the prior pattern into point items.
-                    self.bullets_to_points();
+                    if let Some(portrait) = &mut self.portrait_runner {
+                        portrait.set_sprite(8 + sprite as u32);
+                    }
                     self.events.push(Event::Sfx("cat00"));
                 }
-                WorldEvent::SpellcardEnd => {
+                WorldEvent::SpellcardEnd { points, bonus } => {
                     // SPELLCARDEND (EclManager.cpp): a no-op unless a spellcard is
                     // active (isActive != 0). Only then does it run the bullet-
                     // cancel DespawnBullets (+ capture bonus). Non-spell attacks —
@@ -3127,8 +3997,18 @@ impl Stage {
                         if let Some(r) = &mut self.spell_name_runner {
                             r.interrupt(1);
                         }
-                        self.despawn_bullets(true);
+                        self.award_bullet_cancel(points, bonus);
                         if captured {
+                            self.spellcards_captured += 1;
+                            if !self.is_replay
+                                && let Some(record) =
+                                    self.spellcard_records.get_mut(self.spell_id as usize)
+                            {
+                                record.successes = record.successes.wrapping_add(1);
+                                record.character_shot_type.copy_within(0..4, 1);
+                                record.character_shot_type[0] =
+                                    self.world.character * 2 + self.world.shot_type;
+                            }
                             let base = SPELLCARD_SCORE
                                 .get(self.spell_id.max(0) as usize)
                                 .copied()
@@ -3148,12 +4028,11 @@ impl Stage {
                     // drift out over the donut anm rather than vanishing
                     // (EnemyManager.cpp:421). (#14)
                     self.spell_capturing = false;
-                    self.world.despawn_all_bullets();
-                    self.cancel_lasers();
                 }
-                WorldEvent::BulletCancel => {
-                    self.world.bullets.clear();
-                    self.cancel_lasers();
+                WorldEvent::BulletCancel(points) => {
+                    for pos in points {
+                        self.spawn_item(Item::homing(pos, 6));
+                    }
                 }
                 WorldEvent::BossSet(_present) => {
                     // Boss music is driven by the pre-boss dialogue, not here:
@@ -3162,7 +4041,7 @@ impl Stage {
                 }
                 WorldEvent::DropItem(pos, kind) => {
                     if kind >= 0 {
-                        self.items.push(Item::fall(pos, kind));
+                        self.spawn_item(Item::fall(pos, kind));
                     }
                 }
                 WorldEvent::Unpause => {
@@ -3179,9 +4058,15 @@ impl Stage {
     /// id renders that character's own bullet art.
     fn shot_sprite_ref(&self, script_id: i32) -> Option<SpriteRef> {
         let script = self.player_scripts.get(&script_id)?;
-        let idx = script.iter().find(|i| i.opcode == 1).map(|i| i.arg_u32(0))?;
+        let idx = script
+            .iter()
+            .find(|i| i.opcode == 1)
+            .map(|i| i.arg_u32(0))?;
         let sp = self.player_sprites.get(&idx)?;
-        Some(SpriteRef { tex: self.player_tex, rect: [sp.x, sp.y, sp.width, sp.height] })
+        Some(SpriteRef {
+            tex: self.player_tex,
+            rect: [sp.x, sp.y, sp.width, sp.height],
+        })
     }
 
     /// Draw one bomb sprite runner (player sheet) centred at screen (cx,cy).
@@ -3221,7 +4106,10 @@ impl Stage {
         if self.background.is_some() {
             // The 3D background fills the field; only dim it during spells.
             if self.spell_active {
-                cmds.push(rect([FIELD_X, FIELD_Y, FIELD_W, FIELD_H], [0.0, 0.0, 0.05, 0.45]));
+                cmds.push(rect(
+                    [FIELD_X, FIELD_Y, FIELD_W, FIELD_H],
+                    [0.0, 0.0, 0.05, 0.45],
+                ));
             }
         } else {
             let base = if self.spell_active { 0.02 } else { 0.07 };
@@ -3230,7 +4118,6 @@ impl Stage {
                 [base, base * 0.6, base * 0.9, 1.0],
             ));
         }
-
 
         // Enemies via their ANM state. The decomp (EnemyManager::OnDraw) draws
         // sub-vms 0-3, then the primary vm, then sub-vms 4-7, each at the enemy's
@@ -3241,30 +4128,46 @@ impl Stage {
             }
             let (ex, ey) = (FIELD_X + e.pos[0], FIELD_Y + e.pos[1]);
             let draw_sub = |s: usize, cmds: &mut Vec<DrawCmd>| {
-                let Some(sv) = &self.sub_anims[i][s] else { return };
+                let Some(sv) = &self.sub_anims[i][s] else {
+                    return;
+                };
                 if !sv.visible() {
                     return; // an ended/spriteless sub-vm is inactive (anmFileIndex < 0)
                 }
-                let Some(script) = self.enemy_scripts.get(&e.sub_scripts[s]) else { return };
+                let Some(script) = self.enemy_scripts.get(&e.sub_scripts[s]) else {
+                    return;
+                };
                 // op26 SetAutoRotate: the sub-vm faces the enemy's angle
                 // (EnemyManager.cpp:794), like the primary vm's rotateAnm flag.
                 let rot = if sv.auto_rotate { e.angle } else { sv.rotation };
-                if let Some(cmd) =
-                    sprite_cmd_from(sv, script, ex + sv.pos[0], ey + sv.pos[1], rot, sv.additive)
-                {
+                if let Some(cmd) = sprite_cmd_from(
+                    sv,
+                    script,
+                    ex + sv.pos_offset[0],
+                    ey + sv.pos_offset[1],
+                    rot,
+                    sv.additive,
+                ) {
                     cmds.push(cmd);
                 }
             };
             for s in 0..4 {
                 draw_sub(s, &mut cmds);
             }
-            if let Some(anim) = &self.anims[i] {
-                if let Some(script) = self.enemy_scripts.get(&e.anm_script) {
-                    // op120 ANMFLAGROTATION: face the movement angle when flagged.
-                    let rot = if e.rotate_anm { e.angle } else { 0.0 };
-                    if let Some(cmd) = sprite_cmd_from(anim, script, ex, ey, rot, false) {
-                        cmds.push(cmd);
-                    }
+            if let Some(anim) = &self.anims[i]
+                && let Some(script) = self.enemy_scripts.get(&e.anm_script)
+            {
+                // op120 ANMFLAGROTATION: face the movement angle when flagged.
+                let rot = if e.rotate_anm { e.angle } else { anim.rotation };
+                if let Some(cmd) = sprite_cmd_from(
+                    anim,
+                    script,
+                    ex + anim.pos_offset[0],
+                    ey + anim.pos_offset[1],
+                    rot,
+                    anim.additive,
+                ) {
+                    cmds.push(cmd);
                 }
             }
             for s in 4..8 {
@@ -3295,7 +4198,12 @@ impl Stage {
                     sp.width,
                     sp.height,
                 ],
-                src: [sp.x / btw, sp.y / bth, (sp.x + sp.width) / btw, (sp.y + sp.height) / bth],
+                src: [
+                    sp.x / btw,
+                    sp.y / bth,
+                    (sp.x + sp.width) / btw,
+                    (sp.y + sp.height) / bth,
+                ],
                 tint: [1.0, 1.0, 1.0, 1.0],
                 rot: 0.0,
                 additive: false,
@@ -3330,9 +4238,30 @@ impl Stage {
         }
 
         // Player: the player anm runner drives the idle/banking sprite.
-        if matches!(self.state, PlayerState::Alive | PlayerState::Cleared(_)) {
-            let blink = (self.invuln > 0 || self.dying > 0) && (self.anim / 4) % 2 == 0;
-            if !blink {
+        if !matches!(self.state, PlayerState::GameOver) {
+            let (scale, alpha, additive) = match self.state {
+                PlayerState::Dead(elapsed) if self.dying == 0 => {
+                    let factor = elapsed.saturating_sub(1) as f32 / 30.0;
+                    (
+                        [1.0 - factor, 3.0 * factor + 1.0],
+                        ((255.0 - elapsed.saturating_sub(1) as f32 * 255.0 / 30.0) as u32 & 255)
+                            as f32
+                            / 255.0,
+                        true,
+                    )
+                }
+                PlayerState::Spawning(elapsed) => {
+                    let timer = elapsed.saturating_sub(1);
+                    let factor = 1.0 - timer as f32 / 30.0;
+                    (
+                        [1.0 - factor, 2.0 * factor + 1.0],
+                        ((timer * 255 / 30) & 255) as f32 / 255.0,
+                        true,
+                    )
+                }
+                _ => ([1.0, 1.0], 1.0, false),
+            };
+            {
                 let [ptw, pth] = self.player_tex_size;
                 let sp = self
                     .player_runner
@@ -3346,19 +4275,21 @@ impl Stage {
                 cmds.push(DrawCmd {
                     tex: self.player_tex,
                     dst: [
-                        FIELD_X + self.pos[0] - sp.width / 2.0,
-                        FIELD_Y + self.pos[1] - sp.height / 2.0,
-                        sp.width,
-                        sp.height,
+                        FIELD_X + self.pos[0] - sp.width * scale[0] / 2.0,
+                        FIELD_Y + self.pos[1] - sp.height * scale[1] / 2.0,
+                        sp.width * scale[0],
+                        sp.height * scale[1],
                     ],
                     src: [u0, sp.y / pth, u1, (sp.y + sp.height) / pth],
-                    tint: [1.0, 1.0, 1.0, 1.0],
+                    tint: [1.0, 1.0, 1.0, alpha],
                     rot: 0.0,
-                    additive: false,
+                    additive,
                 });
             }
             // Floating option orbs (appear at power >= 8).
-            if self.world.power >= 8 {
+            if self.world.power >= 8
+                && matches!(self.state, PlayerState::Alive | PlayerState::Cleared(_))
+            {
                 for o in self.orb_positions() {
                     let mut orb = sprite_at(AMULET, o, 0.8);
                     orb.tint = [1.0, 0.6, 0.7, 0.95];
@@ -3387,7 +4318,10 @@ impl Stage {
             } else {
                 176.0
             };
-            cmds.push(rect([FIELD_X, FIELD_Y, FIELD_W, FIELD_H], [0.0, 0.0, 0.0, level / 255.0]));
+            cmds.push(rect(
+                [FIELD_X, FIELD_Y, FIELD_W, FIELD_H],
+                [0.0, 0.0, 0.0, level / 255.0],
+            ));
         }
 
         // Bomb sprites, drawn from the player sheet via each bomb's anm runner —
@@ -3404,9 +4338,11 @@ impl Stage {
                         }
                         for k in 0..4 {
                             let slot = idx * 4 + k;
-                            let Some(r) = self.bomb_sprites[slot].as_ref() else { continue };
-                            let cx = FIELD_X + self.seal_pos[idx][0] + r.pos[0];
-                            let cy = FIELD_Y + self.seal_pos[idx][1] + r.pos[1];
+                            let Some(r) = self.bomb_sprites[slot].as_ref() else {
+                                continue;
+                            };
+                            let cx = FIELD_X + self.seal_pos[idx][0] + r.pos_offset[0];
+                            let cy = FIELD_Y + self.seal_pos[idx][1] + r.pos_offset[1];
                             if let Some(c) = self.bomb_sprite_cmd(slot, cx, cy, 0.0, None) {
                                 cmds.push(c);
                             }
@@ -3416,9 +4352,11 @@ impl Stage {
                 // BombReimuBDraw: each beam at its seed + posOffset, with rotation.
                 1 => {
                     for i in 0..4 {
-                        let Some(r) = self.bomb_sprites[i].as_ref() else { continue };
-                        let cx = FIELD_X + self.seal_pos[i][0] + r.pos[0];
-                        let cy = FIELD_Y + self.seal_pos[i][1] + r.pos[1];
+                        let Some(r) = self.bomb_sprites[i].as_ref() else {
+                            continue;
+                        };
+                        let cx = FIELD_X + self.seal_pos[i][0] + r.pos_offset[0];
+                        let cy = FIELD_Y + self.seal_pos[i][1] + r.pos_offset[1];
                         let rot = r.rotation;
                         if let Some(c) = self.bomb_sprite_cmd(i, cx, cy, rot, None) {
                             cmds.push(c);
@@ -3429,7 +4367,9 @@ impl Stage {
                 // scale 3.2 / 2.2 / 1.0 (offsets built from its velocity).
                 2 => {
                     for idx in 0..8 {
-                        let Some(r) = self.bomb_sprites[idx].as_ref() else { continue };
+                        let Some(r) = self.bomb_sprites[idx].as_ref() else {
+                            continue;
+                        };
                         let rot = r.rotation;
                         let a = self.seal_pos[idx];
                         let v = self.seal_vel[idx];
@@ -3439,9 +4379,13 @@ impl Stage {
                             ([a[0] - v[0] * 10.0, a[1] - v[1] * 10.0], 1.0),
                         ];
                         for (p, sc) in trail {
-                            if let Some(c) =
-                                self.bomb_sprite_cmd(idx, FIELD_X + p[0], FIELD_Y + p[1], rot, Some([sc, sc]))
-                            {
+                            if let Some(c) = self.bomb_sprite_cmd(
+                                idx,
+                                FIELD_X + p[0],
+                                FIELD_Y + p[1],
+                                rot,
+                                Some([sc, sc]),
+                            ) {
                                 cmds.push(c);
                             }
                         }
@@ -3451,7 +4395,9 @@ impl Stage {
                 // offset along their angle by half the (scaled) sprite height.
                 _ => {
                     for i in 0..4 {
-                        let Some(r) = self.bomb_sprites[i].as_ref() else { continue };
+                        let Some(r) = self.bomb_sprites[i].as_ref() else {
+                            continue;
+                        };
                         let Some(sp) = r.sprite.and_then(|s| self.player_sprites.get(&s)) else {
                             continue;
                         };
@@ -3475,7 +4421,12 @@ impl Stage {
             let s = p.size * (1.5 - a); // expand as it fades
             cmds.push(DrawCmd {
                 tex: TEX_WHITE,
-                dst: [FIELD_X + p.pos[0] - s / 2.0, FIELD_Y + p.pos[1] - s / 2.0, s, s],
+                dst: [
+                    FIELD_X + p.pos[0] - s / 2.0,
+                    FIELD_Y + p.pos[1] - s / 2.0,
+                    s,
+                    s,
+                ],
                 src: [0.25, 0.25, 0.75, 0.75],
                 tint: [p.color[0], p.color[1], p.color[2], a * 0.8],
                 rot: 0.0,
@@ -3490,9 +4441,21 @@ impl Stage {
         let [etw, eth] = self.eff_tex_size;
         for e in self.world.effects.iter().flatten() {
             let Some(idx) = e.runner.sprite else { continue };
-            let Some(sp) = self.eff_sprites.get(&idx) else { continue };
-            let src = [sp.x / etw, sp.y / eth, (sp.x + sp.width) / etw, (sp.y + sp.height) / eth];
-            let tint = [e.color[0], e.color[1], e.color[2], e.runner.alpha * e.color[3]];
+            let Some(sp) = self.eff_sprites.get(&idx) else {
+                continue;
+            };
+            let src = [
+                sp.x / etw,
+                sp.y / eth,
+                (sp.x + sp.width) / etw,
+                (sp.y + sp.height) / eth,
+            ];
+            let tint = [
+                e.color[0],
+                e.color[1],
+                e.color[2],
+                e.runner.alpha * e.color[3],
+            ];
             if e.spell_bubble {
                 // Draw3: the bubble lives at a 3D world point. Project its centre
                 // and a half-width/height offset through the stage camera, so the
@@ -3522,7 +4485,12 @@ impl Stage {
             let h = sp.height * e.runner.scale[1].abs();
             cmds.push(DrawCmd {
                 tex: self.eff_tex,
-                dst: [FIELD_X + e.pos[0] - w / 2.0, FIELD_Y + e.pos[1] - h / 2.0, w, h],
+                dst: [
+                    FIELD_X + e.pos[0] - w / 2.0,
+                    FIELD_Y + e.pos[1] - h / 2.0,
+                    w,
+                    h,
+                ],
                 src,
                 tint,
                 rot: e.runner.rotation,
@@ -3534,7 +4502,9 @@ impl Stage {
         // flag in etama3.anm) face their travel angle; round types stay upright.
         let [tw, th] = self.bullet_tex_size;
         for b in &self.world.bullets {
-            let Some(sp) = self.bullet_sprites.get(&b.sprite) else { continue };
+            let Some(sp) = self.bullet_sprites.get(&b.sprite) else {
+                continue;
+            };
             let rot = if self.bullet_autorotate[bullet_type_of(b.sprite)] {
                 // Decomp: rotation.z = pi/2 - angle, applied with the matrix
                 // [cos sin; -sin cos] (TranslateRotation). Our engine rotates with
@@ -3552,7 +4522,12 @@ impl Stage {
                     sp.width,
                     sp.height,
                 ],
-                src: [sp.x / tw, sp.y / th, (sp.x + sp.width) / tw, (sp.y + sp.height) / th],
+                src: [
+                    sp.x / tw,
+                    sp.y / th,
+                    (sp.x + sp.width) / tw,
+                    (sp.y + sp.height) / th,
+                ],
                 tint: [1.0, 1.0, 1.0, 1.0],
                 rot,
                 additive: false,
@@ -3585,7 +4560,12 @@ impl Stage {
                 cmds.push(DrawCmd {
                     tex: TEX_BULLET,
                     dst: [cx - len / 2.0, cy - width / 2.0, len, width],
-                    src: [sp.x / tw, sp.y / th, (sp.x + sp.width) / tw, (sp.y + sp.height) / th],
+                    src: [
+                        sp.x / tw,
+                        sp.y / th,
+                        (sp.x + sp.width) / tw,
+                        (sp.y + sp.height) / th,
+                    ],
                     tint: [1.0, 1.0, 1.0, 1.0],
                     rot: l.angle,
                     additive: true, // laser beam glows (etama3 laser op13)
@@ -3603,20 +4583,25 @@ impl Stage {
                 });
             }
             // Glowing ball at the laser base, while it is warming up or active.
-            if l.state < 2 {
-                if let Some(sp) = self.bullet_sprites.get(&(140 + color)) {
-                    let ox = FIELD_X + l.pos[0] + l.angle.cos() * l.start_offset;
-                    let oy = FIELD_Y + l.pos[1] + l.angle.sin() * l.start_offset;
-                    let s = (width * 2.0).max(sp.width);
-                    cmds.push(DrawCmd {
-                        tex: TEX_BULLET,
-                        dst: [ox - s / 2.0, oy - s / 2.0, s, s],
-                        src: [sp.x / tw, sp.y / th, (sp.x + sp.width) / tw, (sp.y + sp.height) / th],
-                        tint: [1.0, 1.0, 1.0, 1.0],
-                        rot: 0.0,
-                        additive: true, // SpawnLaserPattern sets vm1 blendMode = One
-                    });
-                }
+            if l.state < 2
+                && let Some(sp) = self.bullet_sprites.get(&(140 + color))
+            {
+                let ox = FIELD_X + l.pos[0] + l.angle.cos() * l.start_offset;
+                let oy = FIELD_Y + l.pos[1] + l.angle.sin() * l.start_offset;
+                let s = (width * 2.0).max(sp.width);
+                cmds.push(DrawCmd {
+                    tex: TEX_BULLET,
+                    dst: [ox - s / 2.0, oy - s / 2.0, s, s],
+                    src: [
+                        sp.x / tw,
+                        sp.y / th,
+                        (sp.x + sp.width) / tw,
+                        (sp.y + sp.height) / th,
+                    ],
+                    tint: [1.0, 1.0, 1.0, 1.0],
+                    rot: 0.0,
+                    additive: true, // SpawnLaserPattern sets vm1 blendMode = One
+                });
             }
         }
 
@@ -3638,141 +4623,116 @@ impl Stage {
             } else {
                 [1.0, 0.251, 0.251, 1.0] // COLOR4 0xff4040
             };
-            draw_text(&mut cmds, [FIELD_X + FIELD_W - 28.0, FIELD_Y + 8.0], 16.0, tint, &format!("{secs:02}"));
+            draw_text(
+                &mut cmds,
+                [FIELD_X + FIELD_W - 28.0, FIELD_Y + 8.0],
+                16.0,
+                tint,
+                &format!("{secs:02}"),
+            );
         }
 
         // Boss spellcard portrait (enemySpellcardPortrait): the boss face sprite
         // selected by spellcardSprite, slid in from (480,240) to (320,240) and
         // faded out by face*.anm script 3.
         if let Some(r) = &self.portrait_runner {
-            if r.visible() {
-                let psx = if self.spell_portrait_sprite == 0 { 0.0 } else { 128.0 };
-                let w = 128.0 * r.scale[0];
-                let h = 256.0 * r.scale[1];
-                cmds.push(DrawCmd {
-                    tex: self.face_boss_tex,
-                    dst: [r.pos[0] - w / 2.0, r.pos[1] - h / 2.0, w, h],
-                    src: [psx / 256.0, 0.0, (psx + 128.0) / 256.0, 1.0],
-                    tint: [1.0, 1.0, 1.0, r.alpha],
-                    rot: 0.0,
-                    additive: false,
-                });
-            }
+            self.draw_portrait(r, &mut cmds);
         }
 
         // Spellcard name announce: driven by text.anm script 7's VM (fly-in at
         // (256,312) scale 3 -> shrink to 1 -> fly to (256,40) -> off). The name
         // sprite is centre-anchored at the VM pos; the blue bar (front.anm
         // script 24, enemySpellcardBackground) follows it, width strlen*15/2+16.
-        if let Some(r) = &self.spell_name_runner {
-            if r.visible() {
-                if let Some((slot, tw, th)) = self.spell_name_cur {
-                    let scale = r.scale[0].max(0.01);
-                    // The VM x is fixed at 256 until the fly-off; centre the name
-                    // in the playfield, then follow the VM x once it flies off.
-                    let cx = if r.pos[0] > 256.5 { r.pos[0] } else { FIELD_X + FIELD_W / 2.0 };
-                    let nw = tw * scale;
-                    let nh = th * scale;
-                    // Blue bar (front.anm 24) sized to the name texture + padding.
-                    let bar_len = nw + 20.0 * scale;
-                    if let Some(([sx, sy, sw, sh], _, bscale, _)) = self.hud.script_state(24) {
-                        let ts = self.hud.tex_size();
-                        let bh = sh * bscale[1];
-                        cmds.push(DrawCmd {
-                            tex: self.hud.tex(),
-                            dst: [cx - bar_len / 2.0, r.pos[1] - bh / 2.0, bar_len, bh],
-                            src: [sx / ts, sy / ts, (sx + sw) / ts, (sy + sh) / ts],
-                            tint: [1.0, 1.0, 1.0, r.alpha],
-                            rot: 0.0,
-                            additive: false,
-                        });
-                    }
-                    // Pre-baked JP name texture, centred at `cx`, scaled by the VM.
-                    cmds.push(DrawCmd {
-                        tex: slot,
-                        dst: [cx - nw / 2.0, r.pos[1] - nh / 2.0, nw, nh],
-                        src: [0.0, 0.0, 1.0, 1.0],
-                        tint: [1.0, 1.0, 1.0, r.alpha],
-                        rot: 0.0,
-                        additive: false,
-                    });
-                }
-            }
-        }
-
-        // Stage-name intro (text.anm script 0): the STD stage title, lower-left,
-        // fading with the VM. The VM pos is playfield-relative; y follows it.
-        if let Some(r) = &self.stage_name_runner {
-            if r.visible() {
-                if let Some((slot, tw, th)) = self.stage_name_tex {
-                    let x = FIELD_X + 24.0;
-                    let y = FIELD_Y + r.pos[1].max(0.0);
-                    cmds.push(DrawCmd {
-                        tex: slot,
-                        dst: [x, y, tw, th],
-                        src: [0.0, 0.0, 1.0, 1.0],
-                        tint: [1.0, 1.0, 1.0, r.alpha],
-                        rot: 0.0,
-                        additive: false,
-                    });
-                }
-            }
-        }
-
-        // Dialogue box.
-        if self.dialogue.active && (!self.dialogue.lines[0].is_empty() || !self.dialogue.lines[1].is_empty()) {
-            // Portraits: player (Reimu) lower-left, boss (Rumia) lower-right,
-            // the active speaker at full brightness. Each face sheet holds
-            // two 128x256 expression columns.
-            let pw = 96.0;
-            let ph = 192.0;
-            let py = FIELD_Y + FIELD_H - 80.0 - ph;
-            for (idx, tex) in [(0usize, self.face_player_tex), (1usize, self.face_boss_tex)] {
-                if !self.dialogue.portrait_shown[idx] {
-                    continue;
-                }
-                let lit = self.dialogue.portrait_active == idx as i32;
-                let c = if lit { 1.0 } else { 0.45 };
-                let expr = self.dialogue.portrait_expr[idx] as f32;
-                let u0 = expr * 128.0 / 256.0;
-                let (px, flip_u0, flip_u1) = if idx == 0 {
-                    (FIELD_X + 4.0, u0, u0 + 128.0 / 256.0)
-                } else {
-                    // Mirror the boss portrait to face left.
-                    (FIELD_X + FIELD_W - pw - 4.0, u0 + 128.0 / 256.0, u0)
-                };
+        if let Some(r) = &self.spell_name_runner
+            && r.visible()
+            && let Some((slot, tw, th)) = self.spell_name_cur
+        {
+            let scale = r.scale[0].max(0.01);
+            // The VM x is fixed at 256 until the fly-off; centre the name
+            // in the playfield, then follow the VM x once it flies off.
+            let cx = if r.pos[0] > 256.5 {
+                r.pos[0]
+            } else {
+                FIELD_X + FIELD_W / 2.0
+            };
+            let nw = tw * scale;
+            let nh = th * scale;
+            // Blue bar (front.anm 24) sized to the name texture + padding.
+            let bar_len = nw + 20.0 * scale;
+            if let Some(([sx, sy, sw, sh], _, bscale, _)) = self.hud.script_state(24) {
+                let ts = self.hud.tex_size();
+                let bh = sh * bscale[1];
                 cmds.push(DrawCmd {
-                    tex,
-                    dst: [px, py, pw, ph],
-                    src: [flip_u0, 0.0, flip_u1, 1.0],
-                    tint: [c, c, c, 1.0],
+                    tex: self.hud.tex(),
+                    dst: [cx - bar_len / 2.0, r.pos[1] - bh / 2.0, bar_len, bh],
+                    src: [sx / ts, sy / ts, (sx + sw) / ts, (sy + sh) / ts],
+                    tint: [1.0, 1.0, 1.0, r.alpha],
                     rot: 0.0,
                     additive: false,
                 });
             }
+            // Pre-baked JP name texture, centred at `cx`, scaled by the VM.
+            cmds.push(DrawCmd {
+                tex: slot,
+                dst: [cx - nw / 2.0, r.pos[1] - nh / 2.0, nw, nh],
+                src: [0.0, 0.0, 1.0, 1.0],
+                tint: [1.0, 1.0, 1.0, r.alpha],
+                rot: 0.0,
+                additive: false,
+            });
+        }
 
-            let box_y = FIELD_Y + FIELD_H - 80.0;
-            cmds.push(rect([FIELD_X + 8.0, box_y, FIELD_W - 16.0, 64.0], [0.0, 0.0, 0.0, 0.65]));
-            for li in 0..2 {
-                let tint = if self.dialogue.line_colors[li] == 0 {
-                    [1.0, 1.0, 1.0, 1.0] // player
-                } else {
-                    [1.0, 0.55, 0.55, 1.0] // boss
-                };
-                let y = box_y + 10.0 + li as f32 * 24.0;
-                if let Some((slot, tw, th)) = self.dialogue.line_tex[li] {
-                    cmds.push(DrawCmd {
-                        tex: slot,
-                        dst: [FIELD_X + 20.0, y, tw, th],
-                        src: [0.0, 0.0, 1.0, 1.0],
-                        tint,
-                        rot: 0.0,
-                        additive: false,
-                    });
-                } else if !self.dialogue.lines[li].is_empty() {
-                    // Fallback (no baked texture): the ASCII glyph path.
-                    draw_text(&mut cmds, [FIELD_X + 20.0, y], 14.0, tint, &self.dialogue.lines[li]);
-                }
+        // Stage-name intro (text.anm script 0): the STD stage title, lower-left,
+        // fading with the VM. The VM pos is playfield-relative; y follows it.
+        if let Some(r) = &self.stage_name_runner
+            && r.visible()
+            && let Some((slot, tw, th)) = self.stage_name_tex
+        {
+            let x = FIELD_X + 24.0;
+            let y = FIELD_Y + r.pos[1].max(0.0);
+            cmds.push(DrawCmd {
+                tex: slot,
+                dst: [x, y, tw, th],
+                src: [0.0, 0.0, 1.0, 1.0],
+                tint: [1.0, 1.0, 1.0, r.alpha],
+                rot: 0.0,
+                additive: false,
+            });
+        }
+
+        // Gui draws the original portrait VMs and the dialogue box even before
+        // the first text line. Stage 6's post-boss message only drives results.
+        if self.dialogue.active && !(self.stage_num == 6 && matches!(self.dialogue.msg_idx, 1 | 11))
+        {
+            for portrait in self.dialogue.portraits.iter().flatten() {
+                self.draw_portrait(portrait, &mut cmds);
+            }
+            let height = (self.dialogue.timer.min(60) as f32) * 48.0 / 60.0;
+            // Gui.cpp uses a vertical alpha gradient (0xd0 -> 0x90).
+            for y in 0..height.ceil() as u32 {
+                let alpha = (208.0 - 64.0 * y as f32 / height.max(1.0)) / 255.0;
+                cmds.push(rect(
+                    [80.0, 384.0 + y as f32, 288.0, 1.0f32.min(height - y as f32)],
+                    [0.0, 0.0, 0.0, alpha],
+                ));
+            }
+            for line in 0..2 {
+                self.draw_dialogue_line(
+                    &mut cmds,
+                    self.dialogue.line_runners[line].as_ref(),
+                    self.dialogue.line_tex[line],
+                    &self.dialogue.lines[line],
+                    self.dialogue.line_colors[line],
+                    [96.0, 388.0 + line as f32 * 24.0],
+                );
+                self.draw_dialogue_line(
+                    &mut cmds,
+                    self.dialogue.intro_runners[line].as_ref(),
+                    self.dialogue.intro_tex[line],
+                    &self.dialogue.intro_lines[line],
+                    self.dialogue.intro_colors[line],
+                    [112.0, 336.0 + line as f32 * 16.0],
+                );
             }
         }
 
@@ -3794,6 +4754,10 @@ impl Stage {
 
     /// Roll the displayed score toward the real score (GameManager guiScore).
     fn roll_gui_score(&mut self) {
+        // GameManager_OnUpdate clamps score before rolling the display.
+        if self.score > 999_999_999 {
+            self.score = 999_999_990;
+        }
         if self.gui_score == self.score {
             return;
         }
@@ -3814,6 +4778,20 @@ impl Stage {
             self.next_score_inc = 0;
             self.gui_score = self.score;
         }
+        // One threshold per frame, checked against the rolling score, even if
+        // the life stock is already full. Extra starts at the unreachable fifth
+        // threshold (GameManager_AddedCallback / GameManager_OnUpdate).
+        if let Some(&threshold) = EXTEND_SCORES.get(self.next_extend)
+            && self.gui_score >= threshold
+        {
+            if self.lives < 8 {
+                self.lives += 1;
+                self.events.push(Event::Sfx("extend"));
+            }
+            self.next_extend += 1;
+            self.world.increase_subrank(200);
+        }
+        self.hiscore = self.hiscore.max(self.gui_score);
     }
 
     /// Ease the boss health bar toward the boss's life fraction (Gui
@@ -3869,7 +4847,12 @@ impl Stage {
         if let Some(([sx, sy, sw, sh], _, scale, alpha)) = self.hud.script_state(21) {
             cmds.push(DrawCmd {
                 tex: self.hud.tex(),
-                dst: [FIELD_X + 96.0, FIELD_Y + 24.0, self.boss_bar * 288.0, sh * scale[1]],
+                dst: [
+                    FIELD_X + 96.0,
+                    FIELD_Y + 24.0,
+                    self.boss_bar * 288.0,
+                    sh * scale[1],
+                ],
                 src: [sx / ts, sy / ts, (sx + sw) / ts, (sy + sh) / ts],
                 tint: [1.0, 1.0, 1.0, alpha],
                 rot: 0.0,
@@ -3933,10 +4916,12 @@ impl Stage {
 
         // Lives (vms[16]) / bombs (vms[17]) stars, x=496 + idx*16.
         for i in 0..self.lives.max(0) {
-            self.hud.draw_sprite(cmds, 16, vx + i as f32 * 16.0, 122.0, 1.0);
+            self.hud
+                .draw_sprite(cmds, 16, vx + i as f32 * 16.0, 122.0, 1.0);
         }
         for i in 0..self.bombs.max(0) {
-            self.hud.draw_sprite(cmds, 17, vx + i as f32 * 16.0, 146.0, 1.0);
+            self.hud
+                .draw_sprite(cmds, 17, vx + i as f32 * 16.0, 146.0, 1.0);
         }
 
         // Power bar: the decomp's gradient quad, width = currentPower px
@@ -3974,7 +4959,12 @@ impl Stage {
             } else {
                 104.0
             };
-            draw_num(cmds, [px, 232.0], [0.753, 0.690, 1.0, 1.0], "Full Power Mode!!");
+            draw_num(
+                cmds,
+                [px, 232.0],
+                [0.753, 0.690, 1.0, 1.0],
+                "Full Power Mode!!",
+            );
         }
 
         // "BONUS %8d" popup (Gui.cpp:179-183,891-906): light yellow, slides in
@@ -3986,7 +4976,12 @@ impl Stage {
             } else {
                 104.0
             };
-            draw_num(cmds, [px, 32.0], [1.0, 1.0, 0.502, 1.0], &format!("BONUS {:8}", self.bonus_score_amount));
+            draw_num(
+                cmds,
+                [px, 32.0],
+                [1.0, 1.0, 0.502, 1.0],
+                &format!("BONUS {:8}", self.bonus_score_amount),
+            );
         }
 
         // "Spell Card Bonus!" + "+N" popup (Gui.cpp:192-210), centred near top.
@@ -3996,16 +4991,25 @@ impl Stage {
             draw_num(cmds, [tx, FIELD_Y + 64.0], [1.0, 0.0, 0.0, 1.0], title);
             let amt = format!("+{}", self.spell_bonus_amount);
             let ax = (FIELD_W - amt.len() as f32 * 32.0) / 2.0 + FIELD_X;
-            draw_num_scaled(cmds, [ax, FIELD_Y + 80.0], 2.0, [1.0, 0.502, 0.502, 1.0], &amt);
+            draw_num_scaled(
+                cmds,
+                [ax, FIELD_Y + 80.0],
+                2.0,
+                [1.0, 0.502, 0.502, 1.0],
+                &amt,
+            );
         }
 
         self.draw_boss_ui(cmds);
 
         match self.state {
-            PlayerState::GameOver(_) => {
-                cmds.push(rect([FIELD_X, FIELD_Y, FIELD_W, FIELD_H], [0.0, 0.0, 0.0, 0.6]));
+            PlayerState::GameOver => {
+                cmds.push(rect(
+                    [FIELD_X, FIELD_Y, FIELD_W, FIELD_H],
+                    [0.0, 0.0, 0.0, 0.6],
+                ));
             }
-            PlayerState::Cleared(_) => {
+            PlayerState::Cleared(_) | PlayerState::Results => {
                 // Stage-clear bonus breakdown (Gui.cpp:88-172), drawn over the
                 // field at (GAME_REGION_LEFT+42, TOP+112).
                 let x = FIELD_X + 42.0;
@@ -4017,25 +5021,91 @@ impl Stage {
                     4 => ("Extra Rank     * 2.0", 0),
                     _ => ("Normal Rank    * 1.0", 0),
                 };
-                draw_num(cmds, [x, FIELD_Y + 112.0], [1.0, 1.0, 0.251, 1.0], "Stage Clear");
-                draw_num(cmds, [x, FIELD_Y + 144.0], [1.0, 1.0, 1.0, 1.0], &format!("Stage * 1000 = {:5}", self.stage_num as i64 * 1000));
-                draw_num(cmds, [x, FIELD_Y + 160.0], [0.878, 0.878, 1.0, 1.0], &format!("Power *  100 = {:5}", self.world.power as i64 * 100));
-                draw_num(cmds, [x, FIELD_Y + 176.0], [0.816, 0.816, 1.0, 1.0], &format!("Graze *   10 = {:5}", graze_in * 10));
-                draw_num(cmds, [x, FIELD_Y + 192.0], [1.0, 0.502, 0.502, 1.0], &format!("    * Point Item {:3}", self.point_items));
-                draw_num(cmds, [x, FIELD_Y + 224.0], [1.0, 0.502, 0.502, 1.0], diff_text);
-                draw_num(cmds, [x, FIELD_Y + 240.0], [1.0, 1.0, 1.0, 1.0], &format!("Total     = {:8}", self.clear_bonus));
+                draw_num(
+                    cmds,
+                    [x, FIELD_Y + 112.0],
+                    [1.0, 1.0, 0.251, 1.0],
+                    "Stage Clear",
+                );
+                draw_num(
+                    cmds,
+                    [x, FIELD_Y + 144.0],
+                    [1.0, 1.0, 1.0, 1.0],
+                    &format!("Stage * 1000 = {:5}", self.stage_num as i64 * 1000),
+                );
+                draw_num(
+                    cmds,
+                    [x, FIELD_Y + 160.0],
+                    [0.878, 0.878, 1.0, 1.0],
+                    &format!("Power *  100 = {:5}", self.world.power as i64 * 100),
+                );
+                draw_num(
+                    cmds,
+                    [x, FIELD_Y + 176.0],
+                    [0.816, 0.816, 1.0, 1.0],
+                    &format!("Graze *   10 = {:5}", graze_in * 10),
+                );
+                draw_num(
+                    cmds,
+                    [x, FIELD_Y + 192.0],
+                    [1.0, 0.502, 0.502, 1.0],
+                    &format!("    * Point Item {:3}", self.point_items),
+                );
+                draw_num(
+                    cmds,
+                    [x, FIELD_Y + 224.0],
+                    [1.0, 0.502, 0.502, 1.0],
+                    diff_text,
+                );
+                draw_num(
+                    cmds,
+                    [x, FIELD_Y + 240.0],
+                    [1.0, 1.0, 1.0, 1.0],
+                    &format!("Total     = {:8}", self.clear_bonus),
+                );
             }
             _ => {}
         }
 
-        if self.paused {
-            cmds.push(rect([0.0, 0.0, 640.0, 480.0], [0.0, 0.0, 0.0, 0.62]));
-            draw_text(cmds, [FIELD_X + FIELD_W / 2.0 - 36.0, 150.0], 24.0, [1.0, 1.0, 1.0, 1.0], "PAUSE");
-            for (i, opt) in Self::PAUSE_OPTIONS.iter().enumerate() {
-                let sel = i == self.pause_cursor;
-                let tint = if sel { [1.0, 1.0, 0.4, 1.0] } else { [0.65, 0.65, 0.65, 1.0] };
-                let label = if sel { format!("> {opt}") } else { opt.to_string() };
-                draw_text(cmds, [FIELD_X + 40.0, 220.0 + i as f32 * 34.0], 18.0, tint, &label);
+        if self.paused
+            && let Some(asset) = &self.pause_asset
+        {
+            for runner in self.pause_runners.iter().flatten() {
+                if !runner.visible() {
+                    continue;
+                }
+                let Some(sprite) = runner.sprite.and_then(|idx| {
+                    asset
+                        .entry
+                        .sprites
+                        .iter()
+                        .find(|sprite| sprite.index == idx)
+                }) else {
+                    continue;
+                };
+                let w = sprite.width * runner.scale[0];
+                let h = sprite.height * runner.scale[1];
+                let x = runner.pos[0] + runner.pos_offset[0];
+                let y = runner.pos[1] + runner.pos_offset[1];
+                let (tw, th) = (asset.tex_size.0 as f32, asset.tex_size.1 as f32);
+                cmds.push(DrawCmd {
+                    tex: asset.tex,
+                    dst: [x - w / 2.0, y - h / 2.0, w, h],
+                    src: [
+                        sprite.x / tw,
+                        sprite.y / th,
+                        (sprite.x + sprite.width) / tw,
+                        (sprite.y + sprite.height) / th,
+                    ],
+                    tint: [
+                        runner.color[0],
+                        runner.color[1],
+                        runner.color[2],
+                        runner.alpha,
+                    ],
+                    rot: 0.0,
+                    additive: false,
+                });
             }
         }
     }
@@ -4079,7 +5149,7 @@ const LASER_COLORS: [[f32; 4]; 16] = [
 /// `(stage*1000 + grazeInStage*10 + power*100) * pointItems`, then (final stage
 /// only) `+lives*3M + bombs*1M`, then the difficulty multiplier with a `-= %10`
 /// round-down. `difficulty`: 0 Easy, 1 Normal, 2 Hard, 3 Lunatic, 4 Extra.
-/// (The lifeCount-config penalty isn't modelled — the port has no such option.)
+#[allow(clippy::too_many_arguments)] // Original data-table/function argument layout.
 fn stage_clear_bonus(
     stage: i32,
     graze_in_stage: i64,
@@ -4088,6 +5158,7 @@ fn stage_clear_bonus(
     lives: i64,
     bombs: i64,
     difficulty: u8,
+    starting_spare_lives: i32,
 ) -> i64 {
     let mut s = stage as i64 * 1000;
     s += graze_in_stage * 10;
@@ -4098,12 +5169,22 @@ fn stage_clear_bonus(
         s += bombs * 1_000_000;
     }
     s = match difficulty {
-        0 => s / 2,          // Easy
-        2 => s * 12 / 10,    // Hard
-        3 => s * 15 / 10,    // Lunatic
-        4 => s * 2,          // Extra
-        _ => return s,       // Normal: no multiplier, no round-down
+        0 => s / 2,       // Easy
+        2 => s * 12 / 10, // Hard
+        3 => s * 15 / 10, // Lunatic
+        4 => s * 2,       // Extra
+        _ => s,           // Normal: no multiplier
     };
+    if difficulty != Difficulty::Normal as u8 {
+        s -= s % 10;
+    }
+    // Gui::OnUpdate uses defaultConfig.lifeCount (1.02h), captured at the
+    // beginning of the run, rather than the player's remaining life stock.
+    match starting_spare_lives {
+        3 => s = s * 5 / 10,
+        4 => s = s * 2 / 10,
+        _ => return s,
+    }
     s - s % 10
 }
 
@@ -4173,14 +5254,26 @@ pub fn draw_text(cmds: &mut Vec<DrawCmd>, pos: [f32; 2], size: f32, tint: [f32; 
 }
 
 fn rect(dst: [f32; 4], tint: [f32; 4]) -> DrawCmd {
-    DrawCmd { tex: TEX_WHITE, dst, src: [0.25, 0.25, 0.75, 0.75], tint, rot: 0.0, additive: false }
+    DrawCmd {
+        tex: TEX_WHITE,
+        dst,
+        src: [0.25, 0.25, 0.75, 0.75],
+        tint,
+        rot: 0.0,
+        additive: false,
+    }
 }
 
 fn sprite_at(s: SpriteRef, field_pos: [f32; 2], alpha: f32) -> DrawCmd {
     let [x, y, w, h] = s.rect;
     DrawCmd {
         tex: s.tex,
-        dst: [FIELD_X + field_pos[0] - w / 2.0, FIELD_Y + field_pos[1] - h / 2.0, w, h],
+        dst: [
+            FIELD_X + field_pos[0] - w / 2.0,
+            FIELD_Y + field_pos[1] - h / 2.0,
+            w,
+            h,
+        ],
         src: [x / 256.0, y / 256.0, (x + w) / 256.0, (y + h) / 256.0],
         tint: [1.0, 1.0, 1.0, alpha],
         rot: 0.0,
@@ -4188,3 +5281,870 @@ fn sprite_at(s: SpriteRef, field_pos: [f32; 2], alpha: f32) -> DrawCmd {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn stage(difficulty: Difficulty, practice: bool, number: i32, lives: i32) -> Stage {
+        let entry = Entry {
+            width: 256,
+            height: 256,
+            format: 0,
+            name: String::new(),
+            alpha_name: None,
+            sprites: Vec::new(),
+            scripts: Vec::new(),
+        };
+        Stage::new(
+            Ecl {
+                data: Vec::new(),
+                sub_offsets: Vec::new(),
+                timeline_offset: 0,
+            },
+            HashMap::new(),
+            &entry,
+            &entry,
+            0,
+            &entry,
+            0,
+            Character::ReimuA,
+            Msg {
+                data: Vec::new(),
+                offsets: Vec::new(),
+            },
+            None,
+            Hud::new(&entry, 0),
+            StageConfig {
+                face_player_tex: 0,
+                face_boss_tex: 0,
+                stage_bgm: "",
+                boss_bgm: "",
+                stage_num: number,
+                difficulty,
+                practice,
+                starting_lives: lives,
+                starting_bombs: 2,
+                rng_seed: 0x1234,
+            },
+            Vec::new(),
+            Vec::new(),
+            HashMap::new(),
+            HashMap::new(),
+            Vec::new(),
+            None,
+        )
+    }
+
+    #[test]
+    fn item_motion_applies_velocity_before_gravity_and_interpolates_at_timer_zero() {
+        let mut s = stage(Difficulty::Normal, false, 1, 3);
+        s.spawn_item(Item::fall([100.0, 100.0], 1));
+        s.update_items();
+        assert_eq!(s.items[0].pos, [100.0, 100.0 - 2.2]);
+        assert_eq!((s.items[0].vy, s.items[0].timer), (-2.2 + 0.03, 1));
+        s.items.clear();
+        s.spawn_scatter_item([100.0, 100.0], 0);
+        let target = s.items[0].target;
+        s.update_items();
+        assert_eq!(s.items[0].pos, [100.0, 100.0]);
+        s.update_items();
+        let fraction = 1.0 / 60.0;
+        assert_eq!(
+            s.items[0].pos,
+            [
+                fraction * target[0] + 100.0 * (1.0 - fraction),
+                fraction * target[1] + 100.0 * (1.0 - fraction)
+            ]
+        );
+        s.items.clear();
+        s.state = PlayerState::Alive;
+        s.spawn_item(Item::fall([s.pos[0] + 20.0, s.pos[1] + 20.0], 1));
+        s.update_items();
+        assert!(s.items.is_empty());
+    }
+
+    #[test]
+    fn new_player_shots_stay_at_spawn_position_until_next_player_callback() {
+        let mut s = stage(Difficulty::Normal, false, 1, 3);
+        s.update_player_lifecycle(&Input::from_buttons(1, 0));
+        assert!(!s.shots.is_empty());
+        assert!(s.shots.iter().all(|shot| shot.age == 0));
+        let position = s.shots[0].pos;
+        let velocity = s.shots[0].vel;
+        s.update_player_lifecycle(&Input::from_buttons(1, 1));
+        assert_eq!(s.shots[0].age, 1);
+        assert_eq!(
+            s.shots[0].pos,
+            [position[0] + velocity[0], position[1] + velocity[1]]
+        );
+    }
+
+    #[test]
+    fn enemy_death_drops_before_bullet_callback_and_spell_disables_boss_cancel() {
+        use crate::ecl_vm::{BulletProps, spawn_bullet_pattern};
+        let mut s = stage(Difficulty::Normal, false, 1, 3);
+        let mut enemy = Enemy::default();
+        enemy.pool_index = 0;
+        enemy.pos = [100.0, 100.0, 0.0];
+        enemy.life = 1;
+        enemy.item_drop = 1;
+        enemy.is_boss = true;
+        enemy.update_bounds(16.0, 16.0);
+        s.enemies.push(enemy);
+        s.shots.push(Shot {
+            pos: [100.0, 100.0],
+            vel: [0.0; 2],
+            damage: 70,
+            bt: 0,
+            anm_script: 0,
+            age: 0,
+            spd: 0.0,
+        });
+        spawn_bullet_pattern(
+            &mut s.world,
+            &BulletProps {
+                count1: 1,
+                count2: 1,
+                ..Default::default()
+            },
+        );
+        s.world.spellcard_active = 1;
+        s.collide_enemy(0);
+        assert!(!s.enemies[0].occupied);
+        assert_eq!(s.items.len(), 1);
+        assert_eq!(s.world.bullets[0].despawn_timer, 0);
+        assert_eq!(s.score, 240); // capped70 damage /5*10 + enemy100
+    }
+
+    #[test]
+    fn player_hit_deathbomb_and_respawn_follow_original_callback_frames() {
+        let mut s = stage(Difficulty::Normal, false, 1, 3);
+        s.update_player_lifecycle(&Input::default());
+        assert!(matches!(s.state, PlayerState::Alive));
+        assert_eq!(
+            (s.pos, s.invuln, s.bullet_grace_period),
+            ([192.0, 384.0], 239, 89)
+        );
+        s.world.power = 128;
+        s.spell_capturing = true;
+        s.register_hit();
+        assert_eq!((s.deaths, s.dying, s.lives), (1, 6, 2));
+        assert!(!s.spell_capturing);
+        for frame in 1..=30 {
+            let old_position = s.pos;
+            assert!(!s.update_player_lifecycle(&Input::from_buttons(0x10, 0)));
+            assert_eq!(s.pos, old_position, "movement while dead, frame {frame}");
+            assert_eq!(s.lives, 2);
+            if frame == 6 {
+                assert_eq!((s.world.power, s.items.len()), (112, 6));
+            }
+        }
+        s.update_player_lifecycle(&Input::default());
+        assert!(matches!(s.state, PlayerState::Spawning(1)));
+        assert_eq!((s.lives, s.bombs, s.bullet_grace_period), (1, 2, 89));
+        for _ in 0..29 {
+            s.update_player_lifecycle(&Input::default());
+        }
+        assert!(matches!(s.state, PlayerState::Spawning(30)));
+        s.update_player_lifecycle(&Input::default());
+        assert!(matches!(s.state, PlayerState::Alive));
+        assert_eq!((s.invuln, s.bullet_grace_period), (239, 89));
+
+        s.spell_capturing = true;
+        s.register_hit();
+        s.update_player_lifecycle(&Input::from_buttons(2, 0));
+        assert!(matches!(s.state, PlayerState::Alive));
+        assert_eq!((s.deaths, s.lives, s.bombs, s.dying), (2, 1, 1, 0));
+        assert!(!s.spell_capturing);
+    }
+
+    #[test]
+    fn fatal_hit_reports_game_over_after_death_animation_without_clearing_field() {
+        let mut s = stage(Difficulty::Normal, false, 1, 1);
+        s.update_player_lifecycle(&Input::default());
+        s.register_hit();
+        for _ in 0..30 {
+            assert!(!s.update_player_lifecycle(&Input::default()));
+        }
+        assert_eq!((s.items.len(), s.next_extend), (5, EXTEND_SCORES.len()));
+        assert!(s.update_player_lifecycle(&Input::default()));
+        assert!(matches!(s.state, PlayerState::GameOver));
+        assert!(
+            s.events
+                .iter()
+                .any(|event| matches!(event, Event::GameOver(_)))
+        );
+    }
+
+    #[test]
+    fn replay_restores_pre_item_draw_seed_and_initial_progress() {
+        let mut live = stage(Difficulty::Hard, false, 3, 3);
+        live.set_rng_seed(0xbeef);
+        live.world.rank = 25;
+        live.world.power = 128;
+        live.lives = 5;
+        live.bombs = 7;
+        live.point_items_total = 312;
+        live.power_item_count = 24;
+        let state = live.replay_state();
+        assert_eq!(state.random_seed, 0xbeef);
+        let mut playback = stage(Difficulty::Hard, false, 3, 3);
+        playback.restore_replay_state(&state, 12_000_000);
+        assert_eq!(playback.world.rng, live.world.rng);
+        assert_eq!(
+            (playback.rand_item_spawn, playback.rand_item_table),
+            (live.rand_item_spawn, live.rand_item_table)
+        );
+        assert_eq!(
+            (
+                playback.lives,
+                playback.bombs,
+                playback.world.power,
+                playback.world.rank
+            ),
+            (5, 7, 128, 25)
+        );
+        assert_eq!(
+            (
+                playback.point_items_total,
+                playback.power_item_count,
+                playback.next_extend
+            ),
+            (312, 24, 1)
+        );
+        assert!(!playback.can_continue());
+    }
+
+    #[test]
+    fn fixed_bullet_pool_stops_before_rng_and_reuses_circular_slot() {
+        use crate::ecl_vm::{BulletProps, spawn_bullet_pattern};
+        let mut s = stage(Difficulty::Extra, false, 7, 3);
+        let mut props = BulletProps {
+            count1: 640,
+            count2: 1,
+            aim_mode: 8,
+            angle1: 1.0,
+            speed1: 2.0,
+            ..Default::default()
+        };
+        spawn_bullet_pattern(&mut s.world, &props);
+        assert_eq!(s.world.bullets.len(), 640);
+        let rng = s.world.rng;
+        props.count1 = 10;
+        spawn_bullet_pattern(&mut s.world, &props);
+        assert_eq!(s.world.rng, rng);
+        assert_eq!(s.world.next_bullet_index, 0);
+        s.world.bullets.remove(100);
+        props.count1 = 1;
+        spawn_bullet_pattern(&mut s.world, &props);
+        assert_eq!(s.world.next_bullet_index, 101);
+        assert!(
+            s.world
+                .bullets
+                .iter()
+                .enumerate()
+                .all(|(index, bullet)| bullet.pool_index == index)
+        );
+    }
+
+    #[test]
+    fn bullet_cancels_sample_lasers_and_bonus_counts_fading_bullets_only() {
+        use crate::ecl_vm::{BulletProps, Laser, spawn_bullet_pattern};
+        let mut s = stage(Difficulty::Normal, false, 1, 3);
+        spawn_bullet_pattern(
+            &mut s.world,
+            &BulletProps {
+                count1: 3,
+                count2: 1,
+                ..Default::default()
+            },
+        );
+        s.world.bullets[1].despawn_timer = 5;
+        s.world.lasers.push(Laser {
+            in_use: true,
+            pos: [10.0, 20.0],
+            angle: 0.0,
+            speed: 0.0,
+            start_offset: 16.0,
+            end_offset: 90.0,
+            start_length: 90.0,
+            width: 8.0,
+            start_time: 0,
+            duration: 20,
+            despawn_duration: 16,
+            hitbox_start: 0,
+            state: 1,
+            timer: 10,
+            color: 0,
+        });
+        let points = s.world.turn_bullets_into_points();
+        assert_eq!(points.len(), 5);
+        assert_eq!(&points[2..], &[[26.0, 20.0], [58.0, 20.0], [90.0, 20.0]]);
+        assert_eq!(s.world.bullets.len(), 1);
+        assert_eq!((s.world.lasers[0].state, s.world.lasers[0].timer), (2, 0));
+        s.world.lasers[0].state = 1;
+        let (points, bonus) = s.world.despawn_bullets_for_bonus(true);
+        assert_eq!(points.len(), 5);
+        assert_eq!(bonus, 2000);
+        assert_eq!(s.world.bullets[0].despawn_timer, 5);
+    }
+
+    #[test]
+    fn item_pool_full_scatter_does_not_draw_rng() {
+        let mut s = stage(Difficulty::Normal, false, 1, 3);
+        for _ in 0..512 {
+            s.spawn_item(Item::fall([0.0, 0.0], 0));
+        }
+        let rng = s.world.rng;
+        s.spawn_scatter_item([0.0, 0.0], 0);
+        assert_eq!(s.world.rng, rng);
+        assert_eq!(s.items.len(), 512);
+        s.items.remove(100);
+        s.spawn_scatter_item([0.0, 0.0], 0);
+        assert_eq!(s.next_item_index, 101);
+        assert_ne!(s.world.rng, rng);
+    }
+
+    #[test]
+    fn spellcard_attempts_and_capture_history_match_original_catk() {
+        let mut s = stage(Difficulty::Hard, false, 3, 3);
+        let name = b"spell".to_vec();
+        let checksum = name.iter().fold(0u8, |sum, &byte| sum.wrapping_add(byte));
+        s.spellcard_records[8] = SpellcardRecord {
+            name_checksum: checksum,
+            attempts: 9999,
+            successes: 5,
+            character_shot_type: [0, 1, 2, 3, 0],
+            ..Default::default()
+        };
+        s.world.character = 1;
+        s.world.shot_type = 1;
+        s.world.events.push(WorldEvent::SpellcardStart(8, 0, name));
+        s.drain_world_events();
+        s.spell_secs = 10;
+        s.world.events.push(WorldEvent::SpellcardEnd {
+            points: Vec::new(),
+            bonus: 2000,
+        });
+        s.drain_world_events();
+        let record = &s.spellcard_records[8];
+        assert_eq!(
+            (record.attempts, record.successes, record.capture_score),
+            (9999, 6, SPELLCARD_SCORE[8] as u32)
+        );
+        assert_eq!(record.character_shot_type, [3, 0, 1, 2, 3]);
+        assert_eq!(
+            (s.spellcards_captured, s.score),
+            (1, 2000 + SPELLCARD_SCORE[8] * 2)
+        );
+    }
+
+    #[test]
+    fn pause_uses_original_confirmation_default_and_twenty_frame_close() {
+        let mut s = stage(Difficulty::Normal, false, 1, 3);
+        s.paused = true;
+        s.run_pause_menu(&Input::default());
+        for _ in 0..4 {
+            s.run_pause_menu(&Input::default());
+        }
+        s.run_pause_menu(&Input::synthetic(&[], &[Key::Down]));
+        assert_eq!(s.pause_state, 2);
+        s.run_pause_menu(&Input::synthetic(&[], &[Key::Shoot]));
+        assert_eq!(s.pause_state, 5);
+        for _ in 0..4 {
+            s.run_pause_menu(&Input::default());
+        }
+        s.run_pause_menu(&Input::synthetic(&[], &[Key::Shoot]));
+        assert_eq!(s.pause_state, 2);
+        s.run_pause_menu(&Input::synthetic(&[], &[Key::Pause]));
+        assert_eq!(s.pause_state, 3);
+        for _ in 0..19 {
+            s.run_pause_menu(&Input::default());
+        }
+        assert!(s.paused);
+        s.run_pause_menu(&Input::default());
+        assert!(!s.paused);
+    }
+
+    fn original_stage(
+        base: &str,
+        difficulty: Difficulty,
+        number: i32,
+        character: Character,
+    ) -> Stage {
+        use th06_formats::{anm0::Anm0, std::Std};
+        let directory = |kind: &str| {
+            let direct = format!("{base}/{kind}");
+            if std::path::Path::new(&direct).is_dir() {
+                direct
+            } else {
+                format!("{base}/{kind}-assets")
+            }
+        };
+        let cm = directory("cm");
+        let st = directory("st");
+        let inn = directory("inn");
+        let read = |dir: &str, name: &str| std::fs::read(format!("{dir}/{name}")).unwrap();
+        let anm = |dir: &str, name: &str| Anm0::parse(&read(dir, name)).unwrap();
+        let etama = anm(&cm, "etama3.anm");
+        let eff = anm(&cm, "etama4.anm");
+        let player = anm(
+            &cm,
+            if character.is_marisa() {
+                "player01.anm"
+            } else {
+                "player00.anm"
+            },
+        );
+        let front = anm(&cm, "front.anm");
+        let text = anm(&inn, "text.anm");
+        let ascii = anm(&inn, "ascii.anm");
+        let enemy = anm(&st, &format!("stg{number}enm.anm"));
+        let enemy2_name = format!("stg{number}enm2.anm");
+        let enemy2 = std::path::Path::new(&format!("{st}/{enemy2_name}"))
+            .is_file()
+            .then(|| anm(&st, &enemy2_name));
+        let mut pairs = vec![(&enemy.entries[0], 4)];
+        if let Some(enemy2) = &enemy2 {
+            pairs.push((&enemy2.entries[0], 5));
+        }
+        let bg = anm(&st, &format!("stg{number}bg.anm"));
+        let background = Background::new(
+            Std::parse(&read(&st, &format!("stage{number}.std"))).unwrap(),
+            &bg.entries[0],
+            11,
+        );
+        let player_portraits = ["a", "b", "c"]
+            .iter()
+            .enumerate()
+            .map(|(slot, suffix)| {
+                let name = format!("face{:02}{suffix}.anm", u8::from(character.is_marisa()));
+                PortraitAsset::new(20 + slot, &anm(&cm, &name).entries[0])
+            })
+            .collect::<Vec<_>>();
+        const FACES: [&[&str]; 7] = [
+            &["face03a", "face03b"],
+            &["face05a"],
+            &["face06a", "face06b"],
+            &["face08a", "face08b"],
+            &["face09a", "face09b"],
+            &["face09b", "face10a", "face10b"],
+            &["face08a", "face12a", "face12b"],
+        ];
+        let bosses = FACES[(number - 1) as usize]
+            .iter()
+            .enumerate()
+            .map(|(slot, name)| {
+                PortraitAsset::new(30 + slot, &anm(&st, &format!("{name}.anm")).entries[0])
+            })
+            .collect();
+        let script = |id| {
+            text.entries[0]
+                .scripts
+                .iter()
+                .find(|(index, _)| *index == id)
+                .unwrap()
+                .1
+                .clone()
+        };
+        let mut result = Stage::new(
+            Ecl::parse(read(&st, &format!("ecldata{number}.ecl"))).unwrap(),
+            build_enemy_scripts(&pairs),
+            &etama.entries[0],
+            &eff.entries[0],
+            14,
+            &player.entries[0],
+            2,
+            character,
+            Msg::parse(read(&st, &format!("msg{number}.dat"))).unwrap(),
+            Some(background),
+            Hud::new(&front.entries[0], 6),
+            StageConfig {
+                face_player_tex: 20,
+                face_boss_tex: 30,
+                stage_bgm: "stage",
+                boss_bgm: "boss",
+                stage_num: number,
+                difficulty,
+                practice: false,
+                starting_lives: 3,
+                starting_bombs: 3,
+                rng_seed: 0x1234,
+            },
+            script(7),
+            Vec::new(),
+            HashMap::new(),
+            HashMap::new(),
+            script(0),
+            None,
+        );
+        result.set_portrait_assets(player_portraits, bosses);
+        result.set_dialogue_scripts(&text.entries[0]);
+        result.set_pause_art(PortraitAsset::new(8, &ascii.entries[0]));
+        if number == 7 {
+            result.set_extra_boss_portrait(PortraitAsset::new(
+                33,
+                &anm(&st, "face12c.anm").entries[0],
+            ));
+        }
+        result
+    }
+
+    fn frame_hash(stage: &Stage, cmds: &[DrawCmd]) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        (
+            stage.tick,
+            stage.timeline_off,
+            stage.timeline_time,
+            stage.score,
+            stage.gui_score,
+            stage.graze,
+            stage.point_items,
+            stage.lives,
+            stage.bombs,
+            stage.world.rank,
+            stage.world.sub_rank,
+            stage.world.rng.seed(),
+        )
+            .hash(&mut h);
+        (
+            stage.world.power,
+            stage.world.next_bullet_index,
+            stage.world.next_effect_index,
+            stage.world.spellcard_active,
+            stage.dialogue.off,
+            stage.dialogue.timer,
+            stage.bombing,
+            stage.dying,
+        )
+            .hash(&mut h);
+        stage.state.hash(&mut h);
+        (
+            stage.invuln,
+            stage.bullet_grace_period,
+            stage.beam_dmg,
+            stage.fire_timer,
+        )
+            .hash(&mut h);
+        for value in stage.pos {
+            value.to_bits().hash(&mut h);
+        }
+        for enemy in &stage.enemies {
+            (
+                enemy.occupied,
+                enemy.is_boss,
+                enemy.life,
+                enemy.spell_seconds_left(),
+            )
+                .hash(&mut h);
+            for value in enemy.pos {
+                value.to_bits().hash(&mut h);
+            }
+        }
+        for bullet in &stage.world.bullets {
+            (
+                bullet.pool_index,
+                bullet.sprite,
+                bullet.timer,
+                bullet.spawn_delay,
+                bullet.despawn_timer,
+                bullet.ex_flags,
+            )
+                .hash(&mut h);
+            for value in [bullet.pos[0], bullet.pos[1], bullet.angle, bullet.speed] {
+                value.to_bits().hash(&mut h);
+            }
+        }
+        for item in &stage.items {
+            (item.kind, item.state, item.timer).hash(&mut h);
+            for value in item.pos {
+                value.to_bits().hash(&mut h);
+            }
+        }
+        for cmd in cmds {
+            cmd.tex.hash(&mut h);
+            cmd.additive.hash(&mut h);
+            for value in cmd
+                .dst
+                .into_iter()
+                .chain(cmd.src)
+                .chain(cmd.tint)
+                .chain([cmd.rot])
+            {
+                value.to_bits().hash(&mut h);
+            }
+        }
+        h.finish()
+    }
+
+    #[test]
+    #[ignore = "requires original ST/CM/IN assets in TH06_REFERENCE_DIR; full gameplay and T6RP regression"]
+    fn original_assets_all_routes_and_replays_match_every_frame() {
+        use th06_formats::replay::Replay;
+        let base =
+            std::env::var("TH06_REFERENCE_DIR").unwrap_or_else(|_| "/tmp/th06-reference".into());
+        let stage_filter = std::env::var("TH06_GAMEPLAY_STAGE")
+            .ok()
+            .and_then(|v| v.parse::<i32>().ok());
+        // Invulnerability allows the automated coverage bot to exercise every
+        // original phase. Both recording and playback use the same debug flag.
+        assert!(
+            std::env::var_os("TH06_GOD").is_some(),
+            "run this isolated regression with TH06_GOD=1"
+        );
+        let mut cases = 0;
+        for number in 1..=7 {
+            if stage_filter.is_some_and(|filter| filter != number) {
+                continue;
+            }
+            for difficulty in Difficulty::ALL {
+                if (number == 7) != (difficulty == Difficulty::Extra)
+                    || (number == 6 && difficulty == Difficulty::Easy)
+                {
+                    continue;
+                }
+                for (shot, character) in [
+                    Character::ReimuA,
+                    Character::ReimuB,
+                    Character::MarisaA,
+                    Character::MarisaB,
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    let mut live = original_stage(&base, difficulty, number, character);
+                    if number > 1 {
+                        live.set_power(128);
+                    }
+                    let mut initial = live.replay_state();
+                    let mut traces = Vec::new();
+                    let mut previous = 0;
+                    let mut finished = false;
+                    for frame in 0..100_000 {
+                        let mut buttons = 1 | 4 | 256;
+                        if let Some(x) = live.target_x() {
+                            if x < live.pos[0] - 3.0 {
+                                buttons |= 64;
+                            } else if x > live.pos[0] + 3.0 {
+                                buttons |= 128;
+                            }
+                        }
+                        if frame % 1800 == 900 {
+                            buttons |= 2;
+                        }
+                        initial.record(frame, buttons);
+                        let input = Input::from_buttons(buttons, previous);
+                        previous = buttons;
+                        let cmds = live.update(&input);
+                        traces.push(frame_hash(&live, &cmds));
+                        finished = live
+                            .events
+                            .iter()
+                            .any(|event| matches!(event, Event::NextStage));
+                        live.events.clear();
+                        assert!(
+                            live.world.bullets.len() <= 640
+                                && live.world.lasers.len() <= 64
+                                && live.enemies.len() <= 256
+                        );
+                        if finished {
+                            break;
+                        }
+                    }
+                    assert!(
+                        finished,
+                        "stage {number} {difficulty:?} shot {shot} failed to reach its original MSG stage end: timeline={} dialog={} off={} boss={}",
+                        live.timeline_time,
+                        live.dialogue.active,
+                        live.dialogue.off,
+                        live.world.boss_present
+                    );
+                    initial.finish(traces.len() as i32, live.score as u32);
+                    let mut replay = Replay {
+                        character: shot as u8,
+                        difficulty: difficulty as u8,
+                        date: "10/12/26".into(),
+                        name: "TEST".into(),
+                        score: live.score as u32,
+                        slowdown: 0.0,
+                        stages: std::array::from_fn(|_| None),
+                    };
+                    replay.stages[(number - 1) as usize] = Some(initial);
+                    let roundtrip = Replay::parse(&replay.encode()).unwrap();
+                    let state = roundtrip.stages[(number - 1) as usize].as_ref().unwrap();
+                    let mut playback = original_stage(&base, difficulty, number, character);
+                    playback.restore_replay_state(state, 0);
+                    previous = 0;
+                    for (frame, expected) in traces.iter().enumerate() {
+                        let buttons = state.buttons_at(frame as i32);
+                        let input = Input::from_buttons(buttons, previous);
+                        previous = buttons;
+                        let cmds = playback.update(&input);
+                        assert_eq!(
+                            frame_hash(&playback, &cmds),
+                            *expected,
+                            "stage {number} {difficulty:?} shot {shot} replay diverges at frame {frame}"
+                        );
+                        playback.events.clear();
+                    }
+                    cases += 1;
+                    eprintln!(
+                        "stage {number} {difficulty:?} shot {shot}: {} frames, score {}, replay identical",
+                        traces.len(),
+                        live.score
+                    );
+                }
+            }
+        }
+        assert_eq!(
+            cases,
+            if stage_filter == Some(7) {
+                4
+            } else if stage_filter == Some(6) {
+                12
+            } else if stage_filter.is_some() {
+                16
+            } else {
+                96
+            }
+        );
+    }
+
+    #[test]
+    fn difficulty_rank_and_practice_initialization_match_game_manager() {
+        for difficulty in Difficulty::ALL {
+            let s = stage(difficulty, false, 1, 5);
+            assert_eq!(
+                (s.world.rank, s.world.min_rank, s.world.max_rank),
+                difficulty.rank_limits()
+            );
+            assert_eq!(
+                s.lives,
+                if difficulty == Difficulty::Extra {
+                    2
+                } else {
+                    4
+                }
+            );
+            assert_eq!(
+                s.bombs,
+                if difficulty == Difficulty::Extra {
+                    3
+                } else {
+                    2
+                }
+            );
+        }
+        for (number, power) in [(1, 0), (2, 64), (3, 128), (6, 128)] {
+            let s = stage(Difficulty::Hard, true, number, 5);
+            assert_eq!(s.world.power, power);
+            assert_eq!((s.lives, s.bombs), (2, 3));
+            assert!(!s.can_continue());
+        }
+    }
+
+    #[test]
+    fn stage_transition_preserves_rank_rng_and_run_counters_but_resets_subrank() {
+        let mut first = stage(Difficulty::Hard, false, 1, 3);
+        first.world.rank = 23;
+        first.world.sub_rank = 74;
+        first.world.rng.u32();
+        first.gui_score = 123;
+        first.score = 456;
+        first.next_extend = 2;
+        first.continues_used = 1;
+        first.graze = 96;
+        first.point_items_total = 21;
+        first.deaths = 3;
+        let carry = first.carry();
+        let mut expected_rng = first.world.rng;
+        let item_phase = expected_rng.u16_in_range(3);
+        let item_table = expected_rng.u16_in_range(8);
+        let mut next = stage(Difficulty::Hard, false, 2, 3);
+        next.apply_carry(carry);
+        assert_eq!(next.world.rng, expected_rng);
+        assert_eq!(
+            (next.rand_item_spawn, next.rand_item_table),
+            (item_phase as usize, item_table as usize)
+        );
+        assert_eq!((next.world.rank, next.world.sub_rank), (23, 0));
+        assert_eq!((next.score, next.gui_score), (456, 456));
+        assert_eq!(
+            (next.next_extend, next.continues_used, next.deaths),
+            (2, 1, 3)
+        );
+        assert_eq!(
+            (next.graze_start, next.point_items, next.point_items_total),
+            (96, 0, 21)
+        );
+    }
+
+    #[test]
+    fn continue_resets_only_original_retry_fields_and_stops_after_three() {
+        let mut s = stage(Difficulty::Lunatic, false, 4, 4);
+        s.world.rank = 13;
+        s.world.sub_rank = 19;
+        s.graze = 84;
+        s.point_items = 20;
+        s.world.power = 128;
+        let rng = s.world.rng;
+        for retry in 1..=3 {
+            assert!(s.continue_run());
+            assert_eq!((s.score, s.gui_score), (retry, retry));
+            assert_eq!((s.lives, s.bombs, s.world.power), (3, 2, 0));
+            assert_eq!((s.graze_start, s.point_items), (84, 0));
+            assert_eq!((s.world.rank, s.world.sub_rank), (13, 19));
+            assert_eq!(s.world.rng, rng);
+        }
+        assert!(!s.continue_run());
+        assert!(!stage(Difficulty::Extra, false, 7, 3).can_continue());
+    }
+
+    #[test]
+    fn original_point_values_include_difficulty_and_integer_y_boundary() {
+        for (difficulty, top, line, bottom) in [
+            (Difficulty::Normal, 100_000, 60_000, 30_000),
+            (Difficulty::Hard, 150_000, 100_000, 46_000),
+            (Difficulty::Lunatic, 200_000, 150_000, 69_000),
+            (Difficulty::Extra, 300_000, 200_000, 80_000),
+        ] {
+            assert_eq!(difficulty.point_score(127.99), top);
+            assert_eq!(difficulty.point_score(128.99), line);
+            assert_eq!(difficulty.point_score(428.0), bottom);
+        }
+    }
+
+    #[test]
+    fn clear_bonus_applies_difficulty_before_configured_life_penalty() {
+        let normal = stage_clear_bonus(1, 5, 16, 3, 2, 3, Difficulty::Normal as u8, 2);
+        assert_eq!(normal, 7950);
+        assert_eq!(
+            stage_clear_bonus(1, 5, 16, 3, 2, 3, Difficulty::Hard as u8, 3),
+            4770
+        );
+        assert_eq!(
+            stage_clear_bonus(1, 5, 16, 3, 2, 3, Difficulty::Easy as u8, 4),
+            790
+        );
+    }
+
+    #[test]
+    fn score_extends_follow_rolling_score_once_and_are_disabled_in_extra() {
+        let mut normal = stage(Difficulty::Normal, false, 1, 3);
+        normal.score = 10_000_000;
+        normal.gui_score = 9_999_990;
+        normal.roll_gui_score();
+        assert_eq!(
+            (normal.lives, normal.next_extend, normal.world.rank),
+            (3, 1, 18)
+        );
+        normal.roll_gui_score();
+        assert_eq!(normal.lives, 3);
+        let mut extra = stage(Difficulty::Extra, false, 7, 3);
+        extra.score = 10_000_000;
+        extra.gui_score = 9_999_990;
+        extra.roll_gui_score();
+        assert_eq!(extra.lives, 2);
+    }
+}

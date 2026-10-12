@@ -2,3 +2,6 @@ target/
 logs/
 web/pkg/
 .DS_Store
+*.zip
+*.ZIP
+oracle/*/build/

@@ -89,16 +89,26 @@ int main(int argc, char** argv) {
     const char* eclPath = argc > 1 ? argv[1] : "ecldata5.ecl";
     int frames = argc > 2 ? atoi(argv[2]) : 16000;
 
+    int stage = argc > 3 ? atoi(argv[3]) : 5;
+    g_GameManager.currentStage = stage;
     g_Rng.seed = 0x1234;
     g_Rng.generationCount = 0;
-    g_GameManager.difficulty = NORMAL;
+    g_GameManager.difficulty = stage == 7 ? EXTRA : NORMAL;
+    if (stage == 7) {
+        g_GameManager.minRank = 14;
+        g_GameManager.maxRank = 18;
+    }
     g_GameManager.rank = 16;
     g_Supervisor.effectiveFramerateMultiplier = 1.0f;
-    g_Player.positionCenter = D3DXVECTOR3(192.0f, 408.0f, 0.0f);
+    g_Player.positionCenter = D3DXVECTOR3(192.0f, 384.0f, 0.0f);
 
     g_BulletManager.InitializeToZero();
     BulletManager::AddedCallback(&g_BulletManager); // init bulletTypeTemplates
     g_EnemyManager.Initialize();
+    // EnemyManager::AddedCallback seeds the item-drop phases before any ECL
+    // random draw. Stage::set_rng_seed performs the same two 16-bit draws.
+    g_EnemyManager.randomItemSpawnIndex = g_Rng.GetRandomU16InRange(3);
+    g_EnemyManager.randomItemTableIndex = g_Rng.GetRandomU16InRange(8);
 
     // Custom 64-bit ECL loader: the file uses 32-bit offsets, but EclRawHeader
     // declares them as 8-byte pointers, so the decomp's Load misreads on 64-bit.
@@ -118,7 +128,7 @@ int main(int argc, char** argv) {
     g_EclManager.timeline = (EclTimelineInstr*)(buf + u32at(4));
 
     for (int fr = 0; fr < frames; fr++) {
-        g_Player.positionCenter = D3DXVECTOR3(192.0f, 408.0f, 0.0f);
+        g_Player.positionCenter = D3DXVECTOR3(192.0f, 384.0f, 0.0f);
         EnemyManager::OnUpdate(&g_EnemyManager);
         EffectManager::OnUpdate(&g_EffectManager); // chain prio 10 (between enemy 9 and bullet 11)
         BulletManager::OnUpdate(&g_BulletManager);

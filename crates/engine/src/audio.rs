@@ -3,6 +3,31 @@
 //! the browser — every wav is uploaded by the player and held in memory).
 //! Both fail soft: with no output the game runs silent.
 
+/// CStreamingSound::UpdateFadeOut uses DirectSound hundredths of a dB.
+#[derive(Default)]
+struct Fade {
+    remaining: i32,
+    total: i32,
+}
+impl Fade {
+    fn start(&mut self, seconds: f32) {
+        self.total = (seconds * 60.0) as i32;
+        self.remaining = self.total.max(1);
+        self.total = self.remaining;
+    }
+    fn tick(&mut self) -> Option<f32> {
+        if self.remaining == 0 {
+            return None;
+        }
+        self.remaining -= 1;
+        if self.remaining == 0 {
+            return Some(0.0);
+        }
+        let db100 = self.remaining * 5000 / self.total - 5000;
+        Some(10.0_f32.powf(db100 as f32 / 2000.0))
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
     use std::collections::HashMap;
@@ -21,6 +46,7 @@ mod native {
         /// Per-track loop points (loop_start, loop_end) in sample-frames, from
         /// the track's `.pos` file — mirrors the decomp's LoadPos.
         bgm_loop: HashMap<String, (u32, u32)>,
+        fade: super::Fade,
     }
 
     /// A BGM source that plays the intro once then loops the `[start, end)`
@@ -45,7 +71,14 @@ mod native {
             loop_start: usize,
             loop_end: usize,
         ) -> Self {
-            LoopSource { samples, channels, rate, pos: 0, loop_start, loop_end }
+            LoopSource {
+                samples,
+                channels,
+                rate,
+                pos: 0,
+                loop_start,
+                loop_end,
+            }
         }
     }
 
@@ -87,6 +120,7 @@ mod native {
                 sfx: HashMap::new(),
                 bgm_data: HashMap::new(),
                 bgm_loop: HashMap::new(),
+                fade: super::Fade::default(),
             })
         }
 
@@ -114,8 +148,30 @@ mod native {
             }
         }
 
+        pub fn fade_bgm(&mut self, seconds: f32) {
+            self.fade.start(seconds);
+        }
+        pub fn tick(&mut self) {
+            if let Some(volume) = self.fade.tick() {
+                if let Some(sink) = &self.bgm {
+                    sink.set_volume(volume);
+                }
+                if volume == 0.0 {
+                    self.stop_bgm();
+                }
+            }
+        }
+        pub fn stop_bgm(&mut self) {
+            if let Some(old) = self.bgm.take() {
+                old.stop();
+            }
+            self.bgm_name = None;
+        }
+
         /// Play a registered BGM track on infinite loop. No-op when already
         /// playing it.
+        pub fn resume(&self) {}
+
         pub fn play_bgm(&mut self, name: &str) {
             if self.bgm_name.as_deref() == Some(name) {
                 return;
@@ -123,9 +179,14 @@ mod native {
             if let Some(old) = self.bgm.take() {
                 old.stop();
             }
-            let Some(data) = self.bgm_data.get(name) else { return };
+            self.fade = super::Fade::default();
+            let Some(data) = self.bgm_data.get(name) else {
+                return;
+            };
             let cursor = Cursor::new(data.clone());
-            let Ok(decoder) = Decoder::new(BufReader::new(cursor)) else { return };
+            let Ok(decoder) = Decoder::new(BufReader::new(cursor)) else {
+                return;
+            };
             let channels = decoder.channels();
             let rate = decoder.sample_rate();
             let samples: Vec<f32> = decoder.convert_samples().collect();
@@ -144,8 +205,17 @@ mod native {
                 loop_start = 0;
                 loop_end = total;
             }
-            let source = LoopSource { samples, channels, rate, pos: 0, loop_start, loop_end };
-            let Ok(sink) = Sink::try_new(&self.handle) else { return };
+            let source = LoopSource {
+                samples,
+                channels,
+                rate,
+                pos: 0,
+                loop_start,
+                loop_end,
+            };
+            let Ok(sink) = Sink::try_new(&self.handle) else {
+                return;
+            };
             sink.set_volume(0.6);
             sink.append(source);
             self.bgm = Some(sink);
@@ -172,7 +242,10 @@ mod tests {
         // "samples" 0..8 as f32; loop [4,8) (frames == samples here, 1 channel).
         let src = LoopSource::for_test((0..8).map(|i| i as f32).collect(), 1, 44100, 4, 8);
         // intro 0..4 plays once, then 4..8 repeats — never back to 0.
-        assert_eq!(take(src, 14), vec![0, 1, 2, 3, 4, 5, 6, 7, 4, 5, 6, 7, 4, 5]);
+        assert_eq!(
+            take(src, 14),
+            vec![0, 1, 2, 3, 4, 5, 6, 7, 4, 5, 6, 7, 4, 5]
+        );
     }
 
     #[test]
@@ -186,6 +259,8 @@ mod tests {
 #[cfg(target_arch = "wasm32")]
 mod web {
     use std::collections::HashMap;
+    use std::{cell::RefCell, rc::Rc};
+    use wasm_bindgen::{JsCast, closure::Closure};
 
     use web_sys::{AudioBuffer, AudioBufferSourceNode, AudioContext, GainNode};
 
@@ -194,11 +269,12 @@ mod web {
         ctx: AudioContext,
         bgm_gain: GainNode,
         sfx: HashMap<String, AudioBuffer>,
-        bgm: HashMap<String, AudioBuffer>,
-        bgm_node: Option<AudioBufferSourceNode>,
-        bgm_name: Option<String>,
+        bgm: HashMap<String, Rc<[u8]>>,
+        bgm_node: Rc<RefCell<Option<AudioBufferSourceNode>>>,
+        bgm_name: Rc<RefCell<Option<String>>>,
         /// (loop_start, loop_end) in sample-frames from the track's `.pos`.
         bgm_loop: HashMap<String, (u32, u32)>,
+        fade: super::Fade,
     }
 
     impl Audio {
@@ -206,6 +282,22 @@ mod web {
             let ctx = AudioContext::new().ok()?;
             // Built during the file-select user gesture, so this is allowed.
             let _ = ctx.resume();
+            // Loading files and the GPU crosses async boundaries. Safari needs
+            // resume() directly inside a subsequent trusted gesture callback.
+            if let Some(document) = web_sys::window().and_then(|w| w.document()) {
+                for event in ["keydown", "pointerdown"] {
+                    let context = ctx.clone();
+                    let callback = Closure::<dyn FnMut()>::new(move || {
+                        let _ = context.resume();
+                    });
+                    if document
+                        .add_event_listener_with_callback(event, callback.as_ref().unchecked_ref())
+                        .is_ok()
+                    {
+                        callback.forget();
+                    }
+                }
+            }
             let bgm_gain = ctx.create_gain().ok()?;
             bgm_gain.gain().set_value(0.6);
             let _ = bgm_gain.connect_with_audio_node(&ctx.destination());
@@ -214,9 +306,10 @@ mod web {
                 bgm_gain,
                 sfx: HashMap::new(),
                 bgm: HashMap::new(),
-                bgm_node: None,
-                bgm_name: None,
+                bgm_node: Rc::new(RefCell::new(None)),
+                bgm_name: Rc::new(RefCell::new(None)),
                 bgm_loop: HashMap::new(),
+                fade: super::Fade::default(),
             })
         }
 
@@ -229,16 +322,18 @@ mod web {
         /// Web has no filesystem; BGM wavs are registered by name from the
         /// player's uploaded `bgm/` folder.
         pub fn register_bgm(&mut self, name: &str, wav: Vec<u8>, loop_frames: Option<(u32, u32)>) {
-            if let Some(buf) = self.decode_wav(&wav) {
-                self.bgm.insert(name.to_string(), buf);
-            }
+            // Keep compressed bytes until this track plays. Decoding all 17
+            // tracks up front retains hundreds of MB of PCM unnecessarily.
+            self.bgm.insert(name.to_string(), wav.into());
             if let Some(lp) = loop_frames {
                 self.bgm_loop.insert(name.to_string(), lp);
             }
         }
 
         pub fn play_sfx(&self, name: &str) {
-            let Some(buf) = self.sfx.get(name) else { return };
+            let Some(buf) = self.sfx.get(name) else {
+                return;
+            };
             if let Ok(src) = self.ctx.create_buffer_source() {
                 src.set_buffer(Some(buf));
                 let _ = src.connect_with_audio_node(&self.ctx.destination());
@@ -246,35 +341,77 @@ mod web {
             }
         }
 
-        /// Play a registered BGM track on infinite loop. No-op when already
-        /// playing it. `name` is the wav basename (e.g. "th06_03.wav").
-        pub fn play_bgm(&mut self, name: &str) {
-            if self.bgm_name.as_deref() == Some(name) {
-                return;
+        pub fn fade_bgm(&mut self, seconds: f32) {
+            self.fade.start(seconds);
+        }
+        pub fn tick(&mut self) {
+            if let Some(volume) = self.fade.tick() {
+                self.bgm_gain.gain().set_value(volume * 0.6);
+                if volume == 0.0 {
+                    self.stop_bgm();
+                }
             }
-            if let Some(old) = self.bgm_node.take() {
-                // web-sys marks both stop() forms deprecated; it is still the
-                // correct way to halt a source node.
+        }
+        pub fn stop_bgm(&mut self) {
+            if let Some(old) = self.bgm_node.borrow_mut().take() {
                 #[allow(deprecated)]
                 let _ = old.stop();
             }
-            let Some(buf) = self.bgm.get(name) else { return };
-            let Ok(src) = self.ctx.create_buffer_source() else { return };
-            src.set_buffer(Some(buf));
-            src.set_loop(true);
-            // Loop at the track's `.pos` points (Web Audio loopStart/loopEnd are
-            // in seconds) so the intro isn't replayed; else loop the whole track.
-            if let Some(&(s, e)) = self.bgm_loop.get(name) {
-                let rate = buf.sample_rate() as f64;
-                if rate > 0.0 && e > s {
-                    src.set_loop_start(s as f64 / rate);
-                    src.set_loop_end(e as f64 / rate);
-                }
+            *self.bgm_name.borrow_mut() = None;
+        }
+
+        /// Play a registered BGM track on infinite loop. No-op when already
+        /// playing it. `name` is the wav basename (e.g. "th06_03.wav").
+        pub fn play_bgm(&mut self, name: &str) {
+            if self.bgm_name.borrow().as_deref() == Some(name) {
+                return;
             }
-            let _ = src.connect_with_audio_node(&self.bgm_gain);
-            let _ = src.start();
-            self.bgm_node = Some(src);
-            self.bgm_name = Some(name.to_string());
+            self.stop_bgm();
+            self.fade = super::Fade::default();
+            self.bgm_gain.gain().set_value(0.6);
+            let Some(bytes) = self.bgm.get(name) else {
+                return;
+            };
+            let bytes = js_sys::Uint8Array::from(bytes.as_ref()).buffer();
+            let Ok(promise) = self.ctx.decode_audio_data(&bytes) else {
+                return;
+            };
+            let ctx = self.ctx.clone();
+            let gain = self.bgm_gain.clone();
+            let active_name = self.bgm_name.clone();
+            let active_node = self.bgm_node.clone();
+            let name = name.to_string();
+            let loop_frames = self.bgm_loop.get(&name).copied();
+            *active_name.borrow_mut() = Some(name.clone());
+            wasm_bindgen_futures::spawn_local(async move {
+                let Ok(value) = wasm_bindgen_futures::JsFuture::from(promise).await else {
+                    if active_name.borrow().as_deref() == Some(&name) {
+                        *active_name.borrow_mut() = None;
+                    }
+                    return;
+                };
+                if active_name.borrow().as_deref() != Some(&name) {
+                    return;
+                }
+                let Ok(buf) = value.dyn_into::<AudioBuffer>() else {
+                    return;
+                };
+                let Ok(src) = ctx.create_buffer_source() else {
+                    return;
+                };
+                src.set_buffer(Some(&buf));
+                src.set_loop(true);
+                if let Some((s, e)) = loop_frames {
+                    let rate = buf.sample_rate() as f64;
+                    if rate > 0.0 && e > s && e <= buf.length() {
+                        src.set_loop_start(s as f64 / rate);
+                        src.set_loop_end(e as f64 / rate);
+                    }
+                }
+                let _ = src.connect_with_audio_node(&gain);
+                let _ = src.start();
+                *active_node.borrow_mut() = Some(src);
+            });
         }
 
         /// Browsers suspend AudioContext until a user gesture; call this from
@@ -318,7 +455,8 @@ mod web {
         let mut data: Option<&[u8]> = None;
         while pos + 8 <= d.len() {
             let id = &d[pos..pos + 4];
-            let size = u32::from_le_bytes([d[pos + 4], d[pos + 5], d[pos + 6], d[pos + 7]]) as usize;
+            let size =
+                u32::from_le_bytes([d[pos + 4], d[pos + 5], d[pos + 6], d[pos + 7]]) as usize;
             let body = pos + 8;
             if body + size > d.len() {
                 break;
@@ -326,9 +464,8 @@ mod web {
             match id {
                 b"fmt " if size >= 16 => {
                     channels = u16::from_le_bytes([d[body + 2], d[body + 3]]) as u32;
-                    sample_rate = u32::from_le_bytes([
-                        d[body + 4], d[body + 5], d[body + 6], d[body + 7],
-                    ]);
+                    sample_rate =
+                        u32::from_le_bytes([d[body + 4], d[body + 5], d[body + 6], d[body + 7]]);
                     bits = u16::from_le_bytes([d[body + 14], d[body + 15]]);
                 }
                 b"data" => data = Some(&d[body..body + size]),

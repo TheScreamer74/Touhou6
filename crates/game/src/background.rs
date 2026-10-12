@@ -202,7 +202,17 @@ pub fn dbg_quad_run(
         let vis = (vm.visible && !vm.dead) as i32;
         out.push(format!(
             "{:.0} {:.0} {:.4} {:.4} {:.5} {:.5} {:.5} {:08x} {:.5} {:.5} {}",
-            w, h, vm.scale[0], vm.scale[1], vm.rot[0], vm.rot[1], vm.rot[2], argb, vm.uv[0], vm.uv[1], vis
+            w,
+            h,
+            vm.scale[0],
+            vm.scale[1],
+            vm.rot[0],
+            vm.rot[1],
+            vm.rot[2],
+            argb,
+            vm.uv[0],
+            vm.uv[1],
+            vis
         ));
     }
     out
@@ -256,6 +266,8 @@ pub struct Background {
     unpause_flag: bool,
 }
 
+pub type QuadGeometry = (i16, [f32; 3], [f32; 2], [[f32; 2]; 4], f32);
+
 fn fbits(i: i32) -> f32 {
     f32::from_bits(i as u32)
 }
@@ -278,16 +290,23 @@ impl Background {
             .map(|s| (s.index, [s.x, s.y, s.width, s.height]))
             .collect();
         // Background anm scripts by id, to instantiate per quad.
-        let script_map: HashMap<i32, &Vec<Instr>> =
-            bg.scripts.iter().map(|(id, instrs)| (*id as i32, instrs)).collect();
+        let script_map: HashMap<i32, &Vec<Instr>> = bg
+            .scripts
+            .iter()
+            .map(|(id, instrs)| (*id as i32, instrs))
+            .collect();
 
         // One live VM per drawn quad (instance x object quad). Draw position is
         // quad + instance - stage (obj.pos is only the cull bound).
         let mut quads = Vec::new();
         for inst in &std.instances {
-            let Some(obj) = std.objects.get(inst.id as usize) else { continue };
+            let Some(obj) = std.objects.get(inst.id as usize) else {
+                continue;
+            };
             for q in &obj.quads {
-                let Some(instrs) = script_map.get(&(q.anm_script as i32)) else { continue };
+                let Some(instrs) = script_map.get(&(q.anm_script as i32)) else {
+                    continue;
+                };
                 quads.push(DrawQuad {
                     base: [
                         q.pos[0] + inst.pos[0],
@@ -303,7 +322,6 @@ impl Background {
         }
         let mut draw_order: Vec<usize> = (0..quads.len()).collect();
         draw_order.sort_by_key(|&i| quads[i].z);
-
 
         Self {
             std,
@@ -362,8 +380,7 @@ impl Background {
         // frame — e.g. the pause block after an unpause release — are processed
         // on the same frame in the decomp, so they start their timer at 0.
         let mut crossed_poskey = false;
-        loop {
-            let Some(ins) = self.std.script.get(self.script_idx) else { break };
+        while let Some(ins) = self.std.script.get(self.script_idx) {
             if ins.frame < 0 {
                 break;
             }
@@ -383,8 +400,11 @@ impl Background {
                     for next in &self.std.script[self.script_idx + 1..] {
                         if next.opcode == 0 {
                             self.interp_end = next.frame as f32;
-                            self.cam_final =
-                                Vec3::new(fbits(next.args[0]), fbits(next.args[1]), fbits(next.args[2]));
+                            self.cam_final = Vec3::new(
+                                fbits(next.args[0]),
+                                fbits(next.args[1]),
+                                fbits(next.args[2]),
+                            );
                             break;
                         }
                     }
@@ -573,7 +593,10 @@ impl Background {
         }
         let nx = clip.x / clip.w;
         let ny = clip.y / clip.w;
-        Some([(nx * 0.5 + 0.5) * FIELD_W, (1.0 - (ny * 0.5 + 0.5)) * FIELD_H])
+        Some([
+            (nx * 0.5 + 0.5) * FIELD_W,
+            (1.0 - (ny * 0.5 + 0.5)) * FIELD_H,
+        ])
     }
 
     pub fn scene(&self) -> BgScene {
@@ -590,13 +613,23 @@ impl Background {
                 continue;
             }
             let Some(sprite) = vm.sprite else { continue };
-            let Some(&[sx, sy, sw, sh]) = self.sprite_tbl.get(&sprite) else { continue };
+            let Some(&[sx, sy, sw, sh]) = self.sprite_tbl.get(&sprite) else {
+                continue;
+            };
 
             // Exact decomp sizing: a 256-unit base quad (vertices at ±128)
             // scaled by scaleX/scaleY, where scaleX = quad.size.x / sprite.widthPx
             // when the quad size is set, else the anm scale (op2).
-            let scale_x = if dq.size[0] != 0.0 { dq.size[0] / sw } else { vm.scale[0] };
-            let scale_y = if dq.size[1] != 0.0 { dq.size[1] / sh } else { vm.scale[1] };
+            let scale_x = if dq.size[0] != 0.0 {
+                dq.size[0] / sw
+            } else {
+                vm.scale[0]
+            };
+            let scale_y = if dq.size[1] != 0.0 {
+                dq.size[1] / sh
+            } else {
+                vm.scale[1]
+            };
             // Draw3 seeds worldTransform from vm->matrix, whose diagonal holds
             // widthPx/textureWidth (AnmManager.cpp:487-488), so the world half-
             // extent is 128 * (spriteW/texW) * scaleX, not 128 * scaleX. Omitting
@@ -647,14 +680,23 @@ impl Background {
                 let p = if let Some(m) = rotm { m * p } else { p };
                 let pos = [ox + p.x, oy + p.y, oz + p.z];
                 let depth = (view * glam::Vec4::new(pos[0], pos[1], pos[2], 1.0)).z;
-                Vertex3 { pos, uv: [u, v], depth, color }
+                Vertex3 {
+                    pos,
+                    uv: [u, v],
+                    depth,
+                    color,
+                }
             };
 
             let tl = vtx(-hw, hh, u0, v0);
             let tr = vtx(hw, hh, u1, v0);
             let br = vtx(hw, -hh, u1, v1);
             let bl = vtx(-hw, -hh, u0, v1);
-            let out = if vm.blend_add { &mut verts_add } else { &mut verts };
+            let out = if vm.blend_add {
+                &mut verts_add
+            } else {
+                &mut verts
+            };
             out.extend_from_slice(&[tl, tr, br, tl, br, bl]);
         }
 
@@ -675,7 +717,7 @@ impl Background {
     /// quad size, and the four screen-space corners (tl,tr,br,bl) the port
     /// projects. Also returns the camera facing (for the oracle's SetupCamera).
     /// Corner math is identical to `scene()`.
-    pub fn dbg_quad_geom(&self) -> ([f32; 3], Vec<(i16, [f32; 3], [f32; 2], [[f32; 2]; 4], f32)>) {
+    pub fn dbg_quad_geom(&self) -> ([f32; 3], Vec<QuadGeometry>) {
         let mvp = self.view_proj();
         let [tw, th] = self.tex_size;
         let mut out = Vec::new();
@@ -686,10 +728,20 @@ impl Background {
                 continue;
             }
             let Some(sprite) = vm.sprite else { continue };
-            let Some(&[sx, sy, sw, sh]) = self.sprite_tbl.get(&sprite) else { continue };
+            let Some(&[sx, sy, sw, sh]) = self.sprite_tbl.get(&sprite) else {
+                continue;
+            };
             let _ = (sx, sy);
-            let scale_x = if dq.size[0] != 0.0 { dq.size[0] / sw } else { vm.scale[0] };
-            let scale_y = if dq.size[1] != 0.0 { dq.size[1] / sh } else { vm.scale[1] };
+            let scale_x = if dq.size[0] != 0.0 {
+                dq.size[0] / sw
+            } else {
+                vm.scale[0]
+            };
+            let scale_y = if dq.size[1] != 0.0 {
+                dq.size[1] / sh
+            } else {
+                vm.scale[1]
+            };
             let hw = 128.0 * scale_x * sw / tw;
             let hh = 128.0 * scale_y * sh / th;
             let (ax, ay) = if vm.corner {
@@ -717,12 +769,27 @@ impl Background {
                 let clip = mvp * glam::Vec4::new(ox + p.x, oy + p.y, oz + p.z, 1.0);
                 let ndcx = clip.x / clip.w;
                 let ndcy = clip.y / clip.w;
-                ([32.0 + (ndcx * 0.5 + 0.5) * 384.0, 16.0 + (0.5 - ndcy * 0.5) * 448.0], clip.w)
+                (
+                    [
+                        32.0 + (ndcx * 0.5 + 0.5) * 384.0,
+                        16.0 + (0.5 - ndcy * 0.5) * 448.0,
+                    ],
+                    clip.w,
+                )
             };
-            let cs = [corner(-hw, hh), corner(hw, hh), corner(hw, -hh), corner(-hw, -hh)];
+            let cs = [
+                corner(-hw, hh),
+                corner(hw, hh),
+                corner(hw, -hh),
+                corner(-hw, -hh),
+            ];
             let corners = [cs[0].0, cs[1].0, cs[2].0, cs[3].0];
             let min_w = cs.iter().map(|c| c.1).fold(f32::INFINITY, f32::min);
-            let posrel = [dq.base[0] - self.cam.x, dq.base[1] - self.cam.y, dq.base[2] - self.cam.z];
+            let posrel = [
+                dq.base[0] - self.cam.x,
+                dq.base[1] - self.cam.y,
+                dq.base[2] - self.cam.z,
+            ];
             out.push((dq.anm_script, posrel, dq.size, corners, min_w));
         }
         ([self.facing.x, self.facing.y, self.facing.z], out)

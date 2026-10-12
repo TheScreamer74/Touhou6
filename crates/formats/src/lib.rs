@@ -4,4 +4,6 @@ pub mod ecl;
 pub mod lzss;
 pub mod msg;
 pub mod pbg3;
+pub mod replay;
+pub mod score;
 pub mod std;

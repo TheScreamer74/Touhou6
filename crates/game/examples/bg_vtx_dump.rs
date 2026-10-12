@@ -27,7 +27,10 @@ fn main() {
     }
     let (facing, quads) = background.dbg_quad_geom();
 
-    let mut ql = format!("F {} FACE {:.5} {:.5} {:.5}\n", frame, facing[0], facing[1], facing[2]);
+    let mut ql = format!(
+        "F {} FACE {:.5} {:.5} {:.5}\n",
+        frame, facing[0], facing[1], facing[2]
+    );
     for (anm, pos, size, corners, min_w) in &quads {
         ql.push_str(&format!(
             "{} {:.4} {:.4} {:.4} {:.4} {:.4}\n",

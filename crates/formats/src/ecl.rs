@@ -60,7 +60,11 @@ impl Ecl {
             }
             sub_offsets.push(u32_at(&data, off));
         }
-        Ok(Self { data, sub_offsets, timeline_offset })
+        Ok(Self {
+            data,
+            sub_offsets,
+            timeline_offset,
+        })
     }
 
     /// Parse the sub instruction at an absolute byte offset.

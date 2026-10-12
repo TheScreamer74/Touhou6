@@ -1,0 +1,299 @@
+{
+  "date": "2026-10-12",
+  "scope": "Focused static observations and native reference comparisons; no whole-game equivalence claim. No Windows target was executed. No original game asset is included in this report.",
+  "reference": {
+    "repository": "https://github.com/happyhavoc/th06",
+    "commit": "bd90685fa40eaf2e16789dcf788843b304e6e02d",
+    "source_archive_sha256": "f09629ea2d227bbc9430c03dc51f87e2cc408e6cf6337797f449fcfde225e3cf",
+    "ST_DAT_sha256": "0f834a35aef2d73b05cffecc830c017dacbcc6f11b9a0611a9da2f3970a112e7"
+  },
+  "rea": {
+    "package": "reverse-engineer-anything@6.4.0",
+    "cli_source_commit": "b3dec005bcb89b5afe6e0aa41e5251f8a3a31de7",
+    "node": "24.11.0",
+    "ghidra": "12.1.4",
+    "jdk": "24.0.1",
+    "wabt": "1.0.42",
+    "original_exe_sha256": "7f38496b31b8625196900a69cd1bfed243cab1f9612073e7881dc354b876fd39",
+    "observed_function": "Ending::ParseEndFile",
+    "address": "0x40f7c0",
+    "evidence_id": "ev_84a19ffb89ed6f638e594c58df7491eb63ed1ccc744701ec4ec4c2c4c5e370c8",
+    "raw_evidence_sha256": "86ebcd2122b57e8a884321559318b7c84dd54ed51bf332237b4ea43ca67882c7",
+    "tooling_patch_sha256": "8a8f7170c13cd4dbbbaafb01268edff9bad2c0b9f73d07e47ece998f2988ae4b",
+    "limits": [
+      "Original function decompilation and provider doctor succeeded; upstream conformance verifier encountered stale error-message assertion.",
+      "Deployed JavaScript inventory: 2 files, 14664 AST nodes, 0 parse failures, 3716 semantic unknowns.",
+      "Deployed WASM 9132905 bytes: local input cap changed from 8 to 16 MiB, then WAT output exceeded unchanged 32 MiB cap; no complete semantic recovery."
+    ]
+  },
+  "oracles": {
+    "bullet_patterns": {
+      "status": "pass",
+      "aim_modes": 9,
+      "bullets": 139,
+      "precision": "6 decimals",
+      "reference_sha256": "16818cf59bebf3fa2a59185c70679821d7aabb8b5c5881116364727a8f496fbf",
+      "port_sha256": "16818cf59bebf3fa2a59185c70679821d7aabb8b5c5881116364727a8f496fbf"
+    },
+    "background_anm": {
+      "status": "pass",
+      "stages": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "frames_per_script": 600,
+      "pair_count": 71,
+      "observation_rows": 42600,
+      "scripts_by_stage": {
+        "1": 34,
+        "2": 2,
+        "3": 12,
+        "4": 7,
+        "5": 4,
+        "6": 8,
+        "7": 4
+      },
+      "aggregate_sha256": "03eb9aec0a8e9c36ab577e3ea9f133c9ea33c84eeb385c6f212249ef51a3d6ea",
+      "digest_method": "SHA256 of sorted reference filenames, NUL, then each file SHA256 bytes; all port files match their reference pair"
+    },
+    "background_camera_fog": {
+      "status": "pass",
+      "stages": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "frames_per_stage": 1200,
+      "pair_count": 7,
+      "observation_rows": 8400,
+      "scripts_by_stage": {
+        "1": 1,
+        "2": 1,
+        "3": 1,
+        "4": 1,
+        "5": 1,
+        "6": 1,
+        "7": 1
+      },
+      "aggregate_sha256": "00df9794a45173820741ede2a251c9cb53c3da3477618a0f7ea4d23378143a18",
+      "digest_method": "SHA256 of sorted reference filenames, NUL, then each file SHA256 bytes; all port files match their reference pair"
+    },
+    "projected_quads": {
+      "status": "pass_with_existing_exclusions",
+      "frame": 300,
+      "threshold_px": 1.5,
+      "observed_max_px": 0.01,
+      "checked_quads": 7577,
+      "excluded_quads": 390,
+      "per_stage": [
+        {
+          "stage": 1,
+          "checked": 1889,
+          "excluded": 0,
+          "max_px": 0.01,
+          "port_sha256": "f34197459fd6895c8d4dddcbaf8120e9799e8c671dc6bc8e1832fd840c0bcdc3",
+          "reference_sha256": "bff739ec30921661b2e3a0291866b0d41083472ab92d074b9e15899443c28307"
+        },
+        {
+          "stage": 2,
+          "checked": 88,
+          "excluded": 28,
+          "max_px": 0,
+          "port_sha256": "0bddaa503ea7f0e18047aff2efd4408f31a18bf463f68d1ad62a8672257e97e8",
+          "reference_sha256": "669dc03163b3a718408d3958377742e5409a4fc07bc05529dfca8fe913e552a0"
+        },
+        {
+          "stage": 3,
+          "checked": 1254,
+          "excluded": 0,
+          "max_px": 0.01,
+          "port_sha256": "ab93c0015bf96a8032d65e3f8309ce9c782ecb912f62ca8ba08cd216581cd398",
+          "reference_sha256": "bbd004833bc8690216cf5f5a5a015a9c413593fc04a0fcf0a948aec5cc48db96"
+        },
+        {
+          "stage": 4,
+          "checked": 1014,
+          "excluded": 196,
+          "max_px": 0.01,
+          "port_sha256": "69f1af1952da3b5d48443cba1be9e1112f425406b0424cb402a92dc4314f4d81",
+          "reference_sha256": "ae9a48ceb2929a51547d494731f13347ec0cfe26937507dd80b4eb9e70a7bdc6"
+        },
+        {
+          "stage": 5,
+          "checked": 1626,
+          "excluded": 27,
+          "max_px": 0.01,
+          "port_sha256": "2ee229e0341e05bbf27f63cd5e7f33a5cd73df7bfae612cbb4ea8eaa298a62bf",
+          "reference_sha256": "79fec97bed131b4120828ba6e3faceddb9addb2319085a856081d83e6a1e464f"
+        },
+        {
+          "stage": 6,
+          "checked": 80,
+          "excluded": 112,
+          "max_px": 0.01,
+          "port_sha256": "7beac9c720c1e50ba32898df953b4195cd47856734948b180bb52079ec848706",
+          "reference_sha256": "f81791ef01ed76c08de9f1e6b9033ec9a9a32224641172aee88ee62ec2d9afa6"
+        },
+        {
+          "stage": 7,
+          "checked": 1626,
+          "excluded": 27,
+          "max_px": 0.01,
+          "port_sha256": "af86a1989a5b7105e660ac1f05777fdaf831cc65c87c956a8bf844805b3c4bd9",
+          "reference_sha256": "2c21af2feb695c49ccea603b74deb930d60aa488784d91c10eeb0b10b7e91635"
+        }
+      ]
+    },
+    "full_vm": {
+      "status": "divergence_under_partial_stub_harness",
+      "stage": 5,
+      "frames_executed": 6000,
+      "seed": "0x1234",
+      "initial_item_table_u16_draws": 2,
+      "difficulty": "Normal",
+      "initial_rank": 16,
+      "player_position": [
+        192,
+        384
+      ],
+      "character": "Reimu A",
+      "damage": false,
+      "dialogue": "stubbed",
+      "exact_matching_frame_prefix": 1202,
+      "first_formatted_difference": {
+        "frame": 1202,
+        "reference_only": [
+          " 8.0908 132.5381 0.3223 1.3777"
+        ],
+        "port_only": [
+          " 8.0909 132.5381 0.3223 1.3777"
+        ],
+        "position_delta_px": 0.0001
+      },
+      "first_larger_difference": {
+        "frame": 3574,
+        "reference_bullet_speed": 3.2313,
+        "port_bullet_speed": 3.2
+      },
+      "first_count_difference": {
+        "frame": 3608,
+        "reference": 106,
+        "port": 107
+      },
+      "limitations": [
+        "ItemManager SpawnItem and OnUpdate are no-op stubs. Original item loss subtracts 3 subrank (ItemManager.cpp:145), while the port simulates it.",
+        "Graze and presentation are stubbed; rank divergence cannot be assigned to ECL alone.",
+        "Strict formatted diff remains failing; no tolerance was added to conceal the difference."
+      ],
+      "reference_output_sha256": "a53d37ce9b2234a4c8a37f9a2dd2ee3d8de133df05d5063c626ebbafc0a4d2c2",
+      "port_output_sha256": "88166532b0374c4dc393a954dc37bf517c411b93abe6b01889cde224e5e39b4b",
+      "port_binary_sha256": "58cf47bf57e5e2640c09aafce45932e6dee701ace988621c63a6b642bb32ea95",
+      "reference_binary_sha256": "0ae3a6d94399dc884aa1e86c3677ec238954fdf5740e81389c30c34be3f0a03d",
+      "ecl_sha256": "50b5c4777a56910148466c7e5ea1c8dadc126e706420604d52421a49bf861d1b",
+      "port_source_manifest": "validation-2026-10-12-port-sources.sha256",
+      "port_source_manifest_sha256": "501cf9aca14b2c980e3d4ec9f8c66b12a266c704b95b3b5dfffde7c53aa51214",
+      "source_unchanged_during_run": true
+    }
+  },
+  "endings": {
+    "result": "pass",
+    "unit_tests_passed": 9,
+    "original_endings_test": "Six original END routes reach staff00.end, use th06_16 then th06_17, display final staff sprite16, terminate @z and scroll to y0. Native Metal rendering and texture loading succeeded.",
+    "screenshots": [
+      {
+        "path": "/tmp/th06-reference/evidence/screenshots/ending.png",
+        "sha256": "f387d9f23c550c3b38a070e6c0d7b365b7eb88456d32d015e79bf5684f6a7582",
+        "size": "640x480",
+        "inspection": "Artwork and text/staff sprite positions visible; no overflow; staff background cropped and title centered."
+      },
+      {
+        "path": "/tmp/th06-reference/evidence/screenshots/staff.png",
+        "sha256": "a57840c85b1b0a56e60c834981aa67323ae59c500d723affea9ab0e3a40e0a6c",
+        "size": "640x480",
+        "inspection": "Artwork and text/staff sprite positions visible; no overflow; staff background cropped and title centered."
+      }
+    ],
+    "original_binary_corroboration": {
+      "address": "0x40f7c0",
+      "evidence_id": "ev_84a19ffb89ed6f638e594c58df7491eb63ed1ccc744701ec4ec4c2c4c5e370c8",
+      "sha256": "7f38496b31b8625196900a69cd1bfed243cab1f9612073e7881dc354b876fd39",
+      "observed": "Text reads in pairs, two32byte blocks, scripts0x708+slot, 16slots, shadow0xc0d0d0, minimum-wait branches, @F load plus fallthroughR."
+    },
+    "visual_limits": [
+      "Font renderer uses the existing bundled Noto Sans JP substitute rather than Windows GDI/MS Gothic.",
+      "No Windows target executable was run; pixel equivalence to original runtime has not been established."
+    ]
+  },
+  "web_loader": {
+    "result": "pass",
+    "checks": [
+      "canonical accepted filenames",
+      "reject unrelated executables",
+      "reject cross-origin/credentials/unsafe URL",
+      "reject duplicate/missing manifest keys",
+      "filter folder reads",
+      "reject oversized input before reading",
+      "prototype-free maps",
+      "two concurrent hosted streams",
+      "cancel oversized streamed body"
+    ],
+    "original_bgm": "310MiB",
+    "input_limit_per_file": 67108864,
+    "input_limit_total": 1073741824
+  },
+  "reproduction": "See ../oracle/README.md and REVERSE_ENGINEERING.md. Raw local observations are under /tmp/th06-reference/evidence; reports contain checksums instead of game assets.",
+  "known_fidelity_limits": [
+    "Player shots use circular hit tests and disappear on first hit; original CalcDamageToEnemy uses boxes and keeps Marisa A missile explosions with declining damage.",
+    "Marisa B beam collision/damage remain simplified columns.",
+    "Bomb-cancelled bullets are removed immediately; original cancellation and player-impact fade behavior is partial.",
+    "ScoreGraze rank +6, particles and caps are partial; laser graze counts every frame instead of original modulo-12 cadence.",
+    "Internal replay roundtrip determinism is tested; original Windows replay execution equivalence is unverified.",
+    "MIDI synthesis and 16-bit display mode are unavailable; Noto Sans JP replaces GDI/MS Gothic."
+  ],
+  "web_browser_integration": {
+    "source": "Root task integration observation",
+    "status": "startup_and_selected_flows_pass",
+    "hosted_asset_count": 24,
+    "hosted_payload_approx_MB": 51,
+    "ogg_tracks": 17,
+    "exercised": [
+      "game startup",
+      "Options menu",
+      "sound effects",
+      "original CM/demo00.rpy import"
+    ],
+    "scope_limit": "Not a complete browser playthrough across all characters and difficulties."
+  },
+  "complete_route_regression": {
+    "cases": 96,
+    "passed": 96,
+    "recorded_frames": 1482262,
+    "replayed_frames_compared": 1482262,
+    "total_simulated_frames": 2964524,
+    "seconds": 165.89,
+    "original_assets": true,
+    "invulnerability": true,
+    "scope": "Original MSG termination and internal T6RP replay determinism; not Windows executable equivalence"
+  },
+  "project_checks": {
+    "fmt": true,
+    "clippy_all_targets_deny_warnings": true,
+    "workspace_tests_passed": 56,
+    "asset_dependent_tests_run_separately": [
+      "six_endings",
+      "96_routes_and_replays",
+      "original_demo_replay"
+    ],
+    "workspace_build": true,
+    "wasm_release_build": true
+  }
+}

@@ -1,19 +1,29 @@
 #!/usr/bin/env bash
-# Diff decomp AnmManager::ExecuteScript vs the port's BgQuadVm for every bg quad
-# script of a stage. Usage: ./compare.sh <stage 1-6> <frames>
+# Exact formatted-state comparison; no numerical tolerance is introduced.
 set -euo pipefail
-cd "$(dirname "$0")"
-N="${1:-5}"; FRAMES="${2:-600}"; ROOT=../..
-./build.sh >/dev/null 2>&1
-[ -f "/tmp/stg${N}bg.anm" ] || (cd "$ROOT" && cargo run -q -p th06 --example extract_ecl --release -- ../res/ST.DAT "stg${N}bg.anm" "/tmp/stg${N}bg.anm" >/dev/null)
-# script ids present in this anm
-IDS=$(cd "$ROOT" && cargo run -q -p th06 --example bg_quad_ids --release -- ../res/ST.DAT "$N" 2>/dev/null)
-fail=0
+HERE="$(cd "$(dirname "$0")" && pwd)"
+source "$HERE/../common.sh"
+oracle_check_assets
+N="${1:-5}"; FRAMES="${2:-600}"; OUT="$(oracle_output_dir)"
+oracle_check_stage "$N"
+oracle_check_frames "$FRAMES"
+if [ "${TH06_SKIP_ORACLE_BUILD:-0}" != 1 ]; then "$HERE/build.sh"; fi
+cd "$ORACLE_ROOT"
+cargo build -q -p th06 --release --example extract_ecl --example bg_quad_ids --example bg_quad_dump
+target/release/examples/extract_ecl "$ST_DAT" "stg${N}bg.anm" "$OUT/stg${N}bg.anm" >/dev/null
+IDS=$(target/release/examples/bg_quad_ids "$ST_DAT" "$N")
+fail=0; count=0
 for sid in $IDS; do
-    /tmp/oracle_anm "/tmp/stg${N}bg.anm" "$sid" "$FRAMES" > /tmp/anm_decomp.txt
-    (cd "$ROOT" && cargo run -q -p th06 --example bg_quad_dump --release -- ../res/ST.DAT "$N" "$sid" "$FRAMES" 2>/dev/null) > /tmp/anm_port.txt
-    if ! diff -q /tmp/anm_decomp.txt /tmp/anm_port.txt >/dev/null; then
-        echo "stage $N script $sid DIVERGES:"; diff /tmp/anm_decomp.txt /tmp/anm_port.txt | head -6; fail=1
+    count=$((count+1))
+    /tmp/oracle_anm "$OUT/stg${N}bg.anm" "$sid" "$FRAMES" > "$OUT/anm_stage${N}_script${sid}_decomp.txt"
+    target/release/examples/bg_quad_dump "$ST_DAT" "$N" "$sid" "$FRAMES" > "$OUT/anm_stage${N}_script${sid}_port.txt"
+    if ! diff -q "$OUT/anm_stage${N}_script${sid}_decomp.txt" "$OUT/anm_stage${N}_script${sid}_port.txt" >/dev/null; then
+        echo "stage $N script $sid DIVERGES:"
+        diff "$OUT/anm_stage${N}_script${sid}_decomp.txt" "$OUT/anm_stage${N}_script${sid}_port.txt" | sed -n '1,12p' || true
+        fail=1
     fi
 done
-[ $fail -eq 0 ] && echo "stage $N: all bg quad scripts IDENTICAL across $FRAMES frames"
+if [ "$count" -eq 0 ]; then echo "No scripts compared for stage $N" >&2; exit 1; fi
+if [ "$fail" -eq 0 ]; then echo "PASS stage $N: $count bg quad scripts IDENTICAL across $FRAMES frames"; fi
+echo "Evidence: $OUT"
+exit "$fail"

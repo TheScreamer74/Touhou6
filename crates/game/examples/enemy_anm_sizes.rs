@@ -12,17 +12,22 @@ fn main() {
     let arc = Pbg3::parse(&dat).unwrap();
     let mut sizes: HashMap<u32, (f32, f32)> = HashMap::new();
     for file in [format!("stg{n}enm.anm"), format!("stg{n}enm2.anm")] {
-        let Some(e) = arc.entries.iter().find(|e| e.name == file) else { continue };
+        let Some(e) = arc.entries.iter().find(|e| e.name == file) else {
+            continue;
+        };
         let anm = Anm0::parse(&arc.extract(e).unwrap()).unwrap();
         for ent in &anm.entries {
-            let spr: HashMap<u32, [f32; 2]> =
-                ent.sprites.iter().map(|s| (s.index, [s.width, s.height])).collect();
+            let spr: HashMap<u32, [f32; 2]> = ent
+                .sprites
+                .iter()
+                .map(|s| (s.index, [s.width, s.height]))
+                .collect();
             for (id, instrs) in &ent.scripts {
                 // first op1 (SetActiveSprite) sprite of the script
-                if let Some(idx) = instrs.iter().find(|i| i.opcode == 1).map(|i| i.arg_u32(0)) {
-                    if let Some(d) = spr.get(&idx) {
-                        sizes.insert(0x100 + id, (d[0], d[1]));
-                    }
+                if let Some(idx) = instrs.iter().find(|i| i.opcode == 1).map(|i| i.arg_u32(0))
+                    && let Some(d) = spr.get(&idx)
+                {
+                    sizes.insert(0x100 + id, (d[0], d[1]));
                 }
             }
         }

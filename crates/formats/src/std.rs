@@ -103,7 +103,11 @@ impl Std {
             o += 20;
         }
 
-        Some(Self { objects, instances, script })
+        Some(Self {
+            objects,
+            instances,
+            script,
+        })
     }
 }
 
@@ -131,5 +135,10 @@ fn parse_object(d: &[u8], base: usize) -> Option<Object> {
         }
         o += byte_size;
     }
-    Some(Object { z_level, pos, size, quads })
+    Some(Object {
+        z_level,
+        pos,
+        size,
+        quads,
+    })
 }

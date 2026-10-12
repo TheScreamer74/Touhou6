@@ -1,11 +1,12 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>東方紅魔郷 — EoSD (web beta)</title>
 <style>
   :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
   html, body {
     margin: 0; height: 100%;
     background: #0a0a12; color: #e8e8f0;
@@ -14,16 +15,16 @@
   #shell {
     min-height: 100%;
     display: flex; align-items: center; justify-content: center;
-    flex-direction: column; gap: 1.2rem; text-align: center; padding: 2rem;
+    flex-direction: column; gap: 1.2rem; text-align: center; padding: clamp(1rem, 4vw, 2rem);
   }
   h1 { font-weight: 600; letter-spacing: 0.04em; margin: 0; }
   .sub { color: #8a8aa0; font-size: 0.9rem; max-width: 32rem; line-height: 1.5; }
   .panel {
     background: #15151f; border: 1px solid #2a2a3a; border-radius: 12px;
     padding: 1.5rem 1.8rem; display: flex; flex-direction: column; gap: 1rem;
-    align-items: center; min-width: 18rem;
+    align-items: center; width: min(100%, 36rem);
   }
-  input[type=password], input[type=text] {
+  select, input[type=password], input[type=text] {
     background: #0d0d16; border: 1px solid #33334a; border-radius: 8px;
     color: #fff; padding: 0.6rem 0.8rem; font-size: 1rem; width: 14rem;
   }
@@ -32,6 +33,7 @@
     padding: 0.6rem 1.4rem; font-size: 1rem; cursor: pointer;
   }
   button:hover { background: #d11646; }
+  button:disabled { opacity: 0.5; cursor: wait; }
   .err { color: #ff6b81; font-size: 0.85rem; min-height: 1rem; }
   .hidden { display: none !important; }
   /* While playing, the canvas takes over the whole viewport, centered on black. */
@@ -60,193 +62,342 @@
   #fsBtn:hover { opacity: 1; }
   body:not(.playing) #fsBtn { display: none; }
   #status { color: #9a9ab0; font-size: 0.85rem; }
+  #gameTools { position: fixed; left: 12px; top: 10px; z-index: 10; padding: 0.35rem 0.8rem; font-size: 0.85rem; }
+  body:not(.playing) #gameTools { display: none; }
+  #persistenceError { position: fixed; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 20; max-width: min(90vw, 38rem); padding: 0.7rem 1rem; background: #431b29; color: #fff; border-radius: 8px; font-size: 0.85rem; }
+  #persistenceError:empty { display: none; }
+  dialog { color: #e8e8f0; background: #15151f; border: 1px solid #33334a; border-radius: 12px; max-width: min(32rem, 85vw); }
+  dialog::backdrop { background: #000a; }
+  .tool-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.6rem; margin: 1rem 0; }
   code { background: #0d0d16; padding: 0.1rem 0.35rem; border-radius: 4px; }
 </style>
 </head>
 <body>
 <div id="shell">
   <h1>東方紅魔郷 <span style="color:#b3123a">·</span> Embodiment of Scarlet Devil</h1>
-  <div class="sub">Native reimplementation — web private beta.
-    Your game files stay on your device: they are read in the browser and
-    never uploaded anywhere.</div>
+  <div class="sub">Retrouvez le jeu dans votre navigateur.
+    Vos fichiers personnels restent sur cet appareil et ne sont jamais envoyés au serveur.</div>
+
+  <div id="hosted" class="panel hidden">
+    <div>Les fichiers du jeu sont disponibles sur ce site.</div>
+    <button id="playHosted" disabled>▶ Jouer</button>
+  </div>
 
   <!-- Folder upload -->
   <div id="picker" class="panel">
-    <div>Select your <code>th06</code> game folder</div>
-    <div class="sub">Pick the folder containing <code>TL.DAT</code>,
-      <code>CM.DAT</code>, <code>ST.DAT</code>, <code>IN.DAT</code>,
-      <code>th06e_ST.DAT</code> and the <code>bgm/</code> directory.</div>
+    <div>Choisissez votre dossier <code>th06</code></div>
+    <div class="sub">Il contient <code>TL.DAT</code>, <code>CM.DAT</code>,
+      <code>ST.DAT</code>, <code>IN.DAT</code> et les musiques <code>bgm/</code>.
+      <code>ED.DAT</code> et <code>MD.DAT</code> apportent les fins, le générique et les commentaires musicaux.</div>
     <input id="folder" type="file" webkitdirectory directory multiple />
     <div id="pickErr" class="err"></div>
   </div>
 
   <!-- Resume: saved files found (IndexedDB), skip the folder picker -->
   <div id="resume" class="panel hidden">
-    <div>Saved game files found on this device.</div>
-    <div class="sub">Stored locally in your browser — nothing was uploaded.</div>
-    <button id="playSaved">▶ Play</button>
-    <button id="useDifferent" style="background:#2a2a3a">Use different files</button>
+    <div>Votre dossier est enregistré sur cet appareil.</div>
+    <div class="sub">Il reste stocké dans ce navigateur.</div>
+    <button id="playSaved" disabled>▶ Jouer avec mes fichiers</button>
+    <button id="useDifferent" style="background:#2a2a3a">Changer de dossier</button>
   </div>
 
-  <div id="status"></div>
+  <div id="status" role="status" aria-live="polite"></div>
+  <div id="error" class="err" role="alert"></div>
 </div>
 
-<button id="fsBtn" title="Fullscreen (F)">⛶ Fullscreen</button>
+<button id="fsBtn" title="Plein écran (F)">⛶ Plein écran</button>
+<button id="gameTools">Scores et replays</button>
+<div id="persistenceError" role="alert" aria-live="assertive"></div>
+<dialog id="dataDialog">
+  <h2>Sauvegardes et replays</h2>
+  <p class="sub">Les imports remplacent la sauvegarde ou le replay choisi sur cet appareil.</p>
+  <div class="tool-row"><button id="importScore">Importer score.dat</button><button id="exportScore">Exporter score.dat</button></div>
+  <div class="tool-row"><label for="replaySlot">Emplacement du replay</label><select id="replaySlot"></select></div>
+  <div class="tool-row"><button id="importReplay">Importer un replay</button><button id="exportReplay">Exporter le replay</button></div>
+  <p id="dataStatus" role="status" aria-live="polite"></p>
+  <button id="closeData">Fermer</button>
+</dialog>
+<input id="scoreFile" type="file" accept=".dat" hidden />
+<input id="replayFile" type="file" accept=".rpy" hidden />
 
 <script type="module">
-import init, { start_game } from "./pkg/th06.js";
+const $ = id => document.getElementById(id);
+const REQUIRED = ["TL.DAT", "CM.DAT", "ST.DAT", "IN.DAT"];
+const ARCHIVES = [...REQUIRED, "ED.DAT", "MD.DAT", "th06e_ST.DAT", "th06e_ED.DAT", "th06e_MD.DAT", "th06e_IN.DAT", "th06e_CM.DAT"];
+const MAX_FILE = 64 * 1024 * 1024, MAX_TOTAL = 1024 * 1024 * 1024;
+const CACHE_TAG = "v2-canonical", IDB_NAME = "th06-files", IDB_STORE = "files";
+let busy = false, ready = false, manifest = null, version = "", runtimePromise = null, runtimeApi = null;
+const status = $("status"), error = $("error");
 
-// --- Read the folder, hand bytes to wasm ---------------------------------
-// Access is implicit: only someone who already owns the game files can play,
-// and nothing is uploaded — files are read locally in the browser.
-const picker = document.getElementById("picker");
-const status = document.getElementById("status");
-const pickErr = document.getElementById("pickErr");
-
-// --- Fullscreen -----------------------------------------------------------
-// Toggle fullscreen on the rendering canvas. Triggered by the button, the F
-// key, or double-clicking the canvas. The drawing buffer stays 640x480; the
-// browser scales it (letterboxed via object-fit) to fill the screen.
-function toggleFullscreen() {
-  const canvas = document.getElementById("th06-canvas");
-  if (!canvas) return;
-  if (document.fullscreenElement) {
-    document.exitFullscreen();
-  } else {
-    canvas.requestFullscreen().catch(err => console.warn("fullscreen:", err));
-  }
+function canonicalName(name) {
+  const base = name.split(/[\\/]/).pop().toLowerCase();
+  const archive = ARCHIVES.find(value => value.toLowerCase() === base);
+  if (archive) return archive;
+  if (/^th06_(0[1-9]|1[0-7])\.(wav|ogg|pos)$/.test(base) || /^th6_(0[1-9]|1[0-5])\.rpy$/.test(base) || ["score.dat", "musiccmt.txt"].includes(base)) return base;
+  return null;
 }
-document.getElementById("fsBtn").addEventListener("click", toggleFullscreen);
-window.addEventListener("keydown", (e) => {
-  if (e.key === "f" || e.key === "F") { e.preventDefault(); toggleFullscreen(); }
-}, true);
-
-const REQUIRED = ["TL.DAT", "CM.DAT", "ST.DAT", "IN.DAT", "th06e_ST.DAT"];
-const resume = document.getElementById("resume");
-
-// --- IndexedDB persistence -----------------------------------------------
-// The uploaded set (hundreds of MB of .DAT + bgm/) is stored on-device so a
-// return visit skips the folder picker. IndexedDB is the only store that
-// holds large binary blobs; nothing leaves the machine. A version tag lets a
-// format change invalidate old caches.
-const IDB_NAME = "th06-files", IDB_STORE = "files", IDB_VERSION = 1, CACHE_TAG = "v1";
-
+function complete(map) {
+  const missing = REQUIRED.filter(name => !(map[name] instanceof Uint8Array) || map[name].byteLength === 0);
+  if (missing.length) throw new Error("Fichiers manquants : " + missing.join(", "));
+  return map;
+}
+function controls() {
+  $("folder").disabled = busy || !ready;
+  for (const id of ["playHosted", "playSaved", "useDifferent"]) $(id).disabled = busy || !ready;
+}
 function idbOpen() {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(IDB_NAME, IDB_VERSION);
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    const request = indexedDB.open(IDB_NAME, 1);
+    request.onupgradeneeded = () => { if (!request.result.objectStoreNames.contains(IDB_STORE)) request.result.createObjectStore(IDB_STORE); };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+    request.onblocked = () => reject(new Error("Le stockage est utilisé par un autre onglet."));
   });
 }
-async function idbSave(map) {
+async function withStore(mode, operation) {
   const db = await idbOpen();
-  await new Promise((resolve, reject) => {
-    const tx = db.transaction(IDB_STORE, "readwrite");
-    const store = tx.objectStore(IDB_STORE);
-    store.clear();
-    store.put(CACHE_TAG, "__tag");
-    for (const [name, bytes] of Object.entries(map)) store.put(bytes, name);
-    tx.oncomplete = resolve;
-    tx.onerror = () => reject(tx.error);
-  });
-  db.close();
+  try {
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, mode), store = tx.objectStore(IDB_STORE);
+      const result = operation(store);
+      tx.oncomplete = () => {
+        try { resolve(typeof result === "function" ? result() : result); }
+        catch (err) { reject(err); }
+      };
+      tx.onerror = tx.onabort = () => reject(tx.error || new Error("Stockage local indisponible."));
+    });
+  } finally { db.close(); }
+}
+async function idbHasFiles() {
+  // Inspect names only: do not read hundreds of MB before the player clicks.
+  try {
+    return await withStore("readonly", store => {
+      const tag = store.get("__tag"), keys = store.getAllKeys();
+      return () => ["v1", CACHE_TAG].includes(tag.result) && REQUIRED.every(name => keys.result.some(key => canonicalName(String(key)) === name));
+    });
+  } catch { return false; }
 }
 async function idbLoad() {
-  let db;
-  try { db = await idbOpen(); } catch { return null; }
-  const all = await new Promise((resolve) => {
-    const tx = db.transaction(IDB_STORE, "readonly");
-    const store = tx.objectStore(IDB_STORE);
-    const out = {};
-    const keysReq = store.getAllKeys(), valsReq = store.getAll();
-    tx.oncomplete = () => {
-      keysReq.result.forEach((k, i) => { out[k] = valsReq.result[i]; });
-      resolve(out);
+  return complete(await withStore("readonly", store => {
+    const tag = store.get("__tag"), keys = store.getAllKeys(), map = Object.create(null);
+    let total = 0, invalid = null;
+    keys.onsuccess = () => {
+      for (const key of keys.result) {
+        const name = canonicalName(String(key));
+        if (!name) continue;
+        const value = store.get(key);
+        value.onsuccess = () => {
+          const bytes = value.result;
+          if (!(bytes instanceof Uint8Array || bytes instanceof ArrayBuffer)) { invalid = new Error("Fichiers enregistrés illisibles. Choisissez votre dossier à nouveau."); return; }
+          if (bytes.byteLength > MAX_FILE || (total += bytes.byteLength) > MAX_TOTAL) { invalid = new Error("Les fichiers enregistrés sont trop volumineux."); return; }
+          if (map[name]) { invalid = new Error("Deux fichiers enregistrés portent le même nom."); return; }
+          map[name] = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+        };
+      }
     };
-    tx.onerror = () => resolve(null);
+    return () => {
+      if (!["v1", CACHE_TAG].includes(tag.result)) throw new Error("Veuillez choisir à nouveau votre dossier.");
+      if (invalid) throw invalid;
+      return map;
+    };
+  }));
+}
+async function idbSave(map) {
+  await withStore("readwrite", store => {
+    store.clear(); store.put(CACHE_TAG, "__tag");
+    for (const [name, bytes] of Object.entries(map)) store.put(bytes, name);
   });
-  db.close();
-  if (!all || all.__tag !== CACHE_TAG) return null;
-  delete all.__tag;
-  // Only resume from a complete set; otherwise re-pick.
-  if (REQUIRED.some(n => !(n in all))) return null;
-  return all;
 }
-async function idbClear() {
-  try {
-    const db = await idbOpen();
-    await new Promise((r) => { const tx = db.transaction(IDB_STORE, "readwrite"); tx.objectStore(IDB_STORE).clear(); tx.oncomplete = r; tx.onerror = r; });
-    db.close();
-  } catch { /* ignore */ }
-}
+function idbClear() { return withStore("readwrite", store => store.clear()); }
 
-// --- Boot the engine with a { name: Uint8Array } map ---------------------
-async function startGame(map) {
-  status.textContent = "Starting engine…";
-  picker.classList.add("hidden");
-  resume.classList.add("hidden");
+function versioned(path) {
+  const url = new URL(path, location.href);
+  if (version) url.searchParams.set("v", version);
+  return url.href;
+}
+function loadRuntime() {
+  if (!runtimePromise) runtimePromise = (async () => {
+    const runtime = await import(versioned("./pkg/th06.js"));
+    await runtime.default({ module_or_path: versioned("./pkg/th06_bg.wasm") });
+    runtimeApi = runtime;
+    syncSuspension();
+    return runtime;
+  })().catch(err => { runtimePromise = null; throw err; });
+  return runtimePromise;
+}
+async function readFolder(files) {
+  const selected = new Map();
+  let total = 0;
+  for (const file of files) {
+    const name = canonicalName(file.name);
+    if (!name) continue;
+    if (selected.has(name)) throw new Error("Deux fichiers portent le nom " + name + ". Choisissez un seul dossier de jeu.");
+    if (file.size > MAX_FILE || (total += file.size) > MAX_TOTAL) throw new Error("Ce dossier est trop volumineux pour le chargement dans le navigateur.");
+    selected.set(name, file);
+  }
+  const missing = REQUIRED.filter(name => !selected.has(name));
+  if (missing.length) throw new Error("Fichiers manquants : " + missing.join(", "));
+  const map = Object.create(null);
+  for (const [name, file] of selected) {
+    status.textContent = "Lecture de " + name + "…";
+    map[name] = new Uint8Array(await file.arrayBuffer());
+  }
+  return complete(map);
+}
+function validateManifest(data) {
+  if (!data || !data.files || typeof data.files !== "object" || Array.isArray(data.files)) throw new Error("La liste des fichiers du site est invalide.");
+  const entries = [], names = new Set();
+  for (const [key, path] of Object.entries(data.files)) {
+    const name = canonicalName(key);
+    if (!name || key.includes("/") || key.includes("\\") || names.has(name) || typeof path !== "string") throw new Error("Entrée invalide dans la liste des fichiers : " + key);
+    const url = new URL(path, location.href);
+    if (url.origin !== location.origin || !["http:", "https:"].includes(url.protocol) || url.username || url.password) throw new Error("Les fichiers du jeu doivent provenir de ce site.");
+    names.add(name); entries.push([name, url.href]);
+  }
+  const missing = REQUIRED.filter(name => !names.has(name));
+  if (missing.length) throw new Error("La liste du site est incomplète : " + missing.join(", "));
+  return entries;
+}
+async function readHosted(entries) {
+  const map = Object.create(null), controller = new AbortController();
+  let index = 0, completed = 0, total = 0;
+  async function worker() {
+    while (index < entries.length) {
+      const [name, url] = entries[index++];
+      const response = await fetch(url, { signal: controller.signal });
+      if (!response.ok) throw new Error(name + " : téléchargement impossible (" + response.status + ").");
+      const advertised = Number(response.headers.get("Content-Length"));
+      if (advertised > MAX_FILE) throw new Error(name + " est trop volumineux.");
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("Le navigateur ne permet pas la lecture des fichiers du jeu.");
+      const chunks = []; let size = 0;
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        size += value.byteLength; total += value.byteLength;
+        if (size > MAX_FILE || total > MAX_TOTAL) { await reader.cancel(); throw new Error("Les fichiers dépassent la capacité de chargement du navigateur."); }
+        chunks.push(value);
+      }
+      const bytes = new Uint8Array(size); let offset = 0;
+      for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+      map[name] = bytes;
+      status.textContent = "Chargement du jeu : " + (++completed) + " / " + entries.length;
+    }
+  }
+  try { await Promise.all([worker(), worker()]); return complete(map); }
+  catch (err) { controller.abort(); throw err; }
+}
+async function startGame(produce, save = false) {
+  if (busy || !ready || document.body.classList.contains("playing")) return;
+  busy = true; controls(); error.textContent = ""; $("pickErr").textContent = "";
+  let map;
   try {
-    await init();          // load + instantiate the wasm module
-    await start_game(map); // hands ownership to winit; canvas is appended
-    document.body.classList.add("playing"); // canvas takes over the viewport
-    const canvas = document.getElementById("th06-canvas");
-    if (canvas) canvas.addEventListener("dblclick", toggleFullscreen);
+    map = await produce();
+    if (save) {
+      status.textContent = "Enregistrement sur cet appareil…";
+      try { await idbSave(map); } catch (err) { console.warn("Stockage des fichiers indisponible", err); }
+    }
+    status.textContent = "Démarrage du jeu…";
+    const runtime = await loadRuntime();
+    await runtime.start_game(map);
+    document.body.classList.add("playing");
+    syncSuspension();
+    const canvas = $("th06-canvas");
+    if (canvas) { canvas.addEventListener("dblclick", toggleFullscreen); canvas.focus(); }
     status.textContent = "";
-    return true;
   } catch (err) {
     console.error(err);
+    error.textContent = "Le jeu n’a pas pu démarrer : " + (err?.message || String(err));
     status.textContent = "";
-    pickErr.classList.remove("hidden");
-    pickErr.textContent = "Failed to start: " + err;
-    picker.classList.remove("hidden");
-    return false;
+    document.body.classList.remove("playing");
+    $("th06-canvas")?.remove();
+    $("picker").classList.remove("hidden");
+  } finally {
+    // Rust owns its copies once start_game resolves. Release the JS references.
+    if (map) for (const name of Object.keys(map)) delete map[name];
+    busy = false; controls();
   }
 }
+$("folder").addEventListener("change", event => {
+  const files = [...event.target.files];
+  if (files.length) startGame(() => readFolder(files), true);
+  event.target.value = "";
+});
+$("playHosted").addEventListener("click", () => startGame(() => readHosted(manifest)));
+$("playSaved").addEventListener("click", () => startGame(idbLoad));
+$("useDifferent").addEventListener("click", async () => {
+  if (busy) return;
+  try { await idbClear(); } catch (err) { console.warn(err); }
+  $("resume").classList.add("hidden"); $("picker").classList.remove("hidden");
+});
+function toggleFullscreen() {
+  const canvas = $("th06-canvas"); if (!canvas) return;
+  const action = document.fullscreenElement ? document.exitFullscreen() : canvas.requestFullscreen();
+  action?.catch(() => { $("persistenceError").textContent = "Le navigateur a refusé le plein écran."; });
+}
+$("fsBtn").addEventListener("click", toggleFullscreen);
+window.addEventListener("keydown", event => {
+  if ($("dataDialog").open) return;
+  if ((event.key === "f" || event.key === "F") && document.body.classList.contains("playing")) { event.preventDefault(); toggleFullscreen(); }
+}, true);
 
-document.getElementById("folder").addEventListener("change", async (e) => {
-  const files = [...e.target.files];
-  if (files.length === 0) return;
-  pickErr.textContent = "";
-  status.textContent = "Reading files…";
+// Save data is handled by Rust's validated score/T6RP parsers. Nothing is uploaded.
+const dialog = $("dataDialog"), dataStatus = $("dataStatus");
+function syncSuspension() { runtimeApi?.set_suspended(document.hidden || $("dataDialog").open); }
+document.addEventListener("visibilitychange", syncSuspension);
+for (let slot = 0; slot < 15; slot++) $("replaySlot").add(new Option(String(slot + 1).padStart(2, "0"), String(slot)));
+$("gameTools").addEventListener("click", () => { dataStatus.textContent = ""; dialog.showModal(); syncSuspension(); });
+$("closeData").addEventListener("click", () => { dialog.close(); $("th06-canvas")?.focus(); });
+dialog.addEventListener("close", () => { syncSuspension(); $("th06-canvas")?.focus(); });
+// Do not send dialog keystrokes to winit's global keyboard listeners.
+for (const type of ["keydown", "keyup"]) dialog.addEventListener(type, event => event.stopPropagation());
+function download(name, bytes) {
+  const url = URL.createObjectURL(new Blob([bytes], { type: "application/octet-stream" }));
+  const link = document.createElement("a"); link.href = url; link.download = name; link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+async function dataAction(action) {
+  try { await action(await loadRuntime()); dataStatus.textContent = "Terminé."; }
+  catch (err) { dataStatus.textContent = err?.message || String(err); }
+}
+$("importScore").addEventListener("click", () => $("scoreFile").click());
+$("importReplay").addEventListener("click", () => $("replayFile").click());
+$("scoreFile").addEventListener("change", async event => {
+  const file = event.target.files[0]; event.target.value = "";
+  if (file) dataAction(async runtime => {
+    if (file.size > 16 * 1024 * 1024) throw new Error("Sauvegarde trop volumineuse.");
+    runtime.import_score(new Uint8Array(await file.arrayBuffer()));
+  });
+});
+$("replayFile").addEventListener("change", async event => {
+  const file = event.target.files[0], slot = Number($("replaySlot").value); event.target.value = "";
+  if (file) dataAction(async runtime => {
+    if (file.size > 16 * 1024 * 1024) throw new Error("Replay trop volumineux.");
+    runtime.import_replay(new Uint8Array(await file.arrayBuffer()), slot);
+  });
+});
+$("exportScore").addEventListener("click", () => dataAction(runtime => download("score.dat", runtime.export_score())));
+$("exportReplay").addEventListener("click", () => dataAction(runtime => {
+  const slot = Number($("replaySlot").value);
+  download("th6_" + String(slot + 1).padStart(2, "0") + ".rpy", runtime.export_replay(slot));
+}));
 
-  const map = {};
-  for (const f of files) map[f.name] = new Uint8Array(await f.arrayBuffer());
-
-  const missing = REQUIRED.filter(n => !(n in map));
-  if (missing.length) {
-    status.textContent = "";
-    pickErr.textContent = "Missing: " + missing.join(", ");
-    return;
+(async function boot() {
+  controls(); status.textContent = "Préparation…";
+  const [build, hosted, cached] = await Promise.allSettled([
+    fetch("./build.json", { cache: "no-store" }).then(response => response.ok ? response.json() : null),
+    fetch("./assets.json", { cache: "no-cache" }).then(response => response.ok ? response.json() : null),
+    idbHasFiles(),
+  ]);
+  if (build.status === "fulfilled" && typeof build.value?.version === "string") version = build.value.version.slice(0, 128);
+  if (hosted.status === "fulfilled" && hosted.value) {
+    try { manifest = validateManifest(hosted.value); $("hosted").classList.remove("hidden"); }
+    catch (err) { error.textContent = err.message; }
   }
-
-  // Persist for next time (best-effort — a storage failure must not block play).
-  status.textContent = "Saving for next time…";
-  try { await idbSave(map); } catch (err) { console.warn("idb save failed:", err); }
-  await startGame(map);
-});
-
-// --- Resume path: saved files -> one click, no folder re-pick ------------
-document.getElementById("useDifferent").addEventListener("click", async () => {
-  await idbClear();
-  resume.classList.add("hidden");
-  picker.classList.remove("hidden");
-});
-document.getElementById("playSaved").addEventListener("click", async () => {
-  const map = await idbLoad();
-  if (!map) { resume.classList.add("hidden"); picker.classList.remove("hidden"); return; }
-  await startGame(map);
-});
-
-(async function checkCache() {
-  const map = await idbLoad();
-  if (map) {
-    picker.classList.add("hidden");
-    resume.classList.remove("hidden");
-  }
+  if (cached.status === "fulfilled" && cached.value) $("resume").classList.remove("hidden");
+  ready = true; controls(); status.textContent = "";
+  // Compile ahead of the click; audio is unlocked by the first game input.
+  loadRuntime().catch(err => { console.warn("Préchargement du moteur", err); });
 })();
 </script>
 </body>

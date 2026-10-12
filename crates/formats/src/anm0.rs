@@ -76,7 +76,11 @@ impl Anm0 {
         loop {
             let entry_data = data.get(base..).ok_or(Error::Truncated)?;
             let next_offset = u32_at(entry_data, 0x38)? as usize;
-            let end = if next_offset != 0 { next_offset } else { entry_data.len() };
+            let end = if next_offset != 0 {
+                next_offset
+            } else {
+                entry_data.len()
+            };
             entries.push(Self::parse_entry(&entry_data[..end])?);
             if next_offset == 0 {
                 break;
@@ -136,7 +140,15 @@ impl Anm0 {
             scripts.push((id, Self::parse_script(&data[..end], off)?));
         }
 
-        Ok(Entry { width, height, format, name, alpha_name, sprites, scripts })
+        Ok(Entry {
+            width,
+            height,
+            format,
+            name,
+            alpha_name,
+            sprites,
+            scripts,
+        })
     }
 
     fn parse_script(data: &[u8], mut off: usize) -> Result<Vec<Instr>, Error> {
@@ -153,7 +165,12 @@ impl Anm0 {
             let offset = (off - start) as u32;
             off += 4 + length;
             let is_end = opcode == 0 && time == 0;
-            instrs.push(Instr { time, opcode, args, offset });
+            instrs.push(Instr {
+                time,
+                opcode,
+                args,
+                offset,
+            });
             if is_end {
                 break;
             }

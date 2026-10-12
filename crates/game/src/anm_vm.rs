@@ -17,7 +17,7 @@ enum Ease {
 struct Move {
     from: [f32; 2],
     to: [f32; 2],
-    start: u16,
+    elapsed: u16,
     duration: u16,
     ease: Ease,
 }
@@ -28,9 +28,13 @@ pub struct AnmRunner {
     clock: u16,
     halted: bool,
     dead: bool,
+    static_sprite: bool,
+    pending_interrupt: Option<u32>,
     moving: Option<Move>,
     pub sprite: Option<u32>,
     pub pos: [f32; 2],
+    pub pos_offset: [f32; 2],
+    use_pos_offset: bool,
     pub alpha: f32,
     /// RGB tint (opcode 4 SetColor), 0..1 per channel. Decomp keeps it in the
     /// same D3DCOLOR as alpha; here it is split out. Default white (no tint).
@@ -38,16 +42,15 @@ pub struct AnmRunner {
     pub scale: [f32; 2],
     /// Scale interpolation (AnmManager scaleInterp*): opcode 30 (ScaleTime)
     /// ramps `scale` from `scale_init` toward `scale_final` over `scale_end`
-    /// frames from `scale_start`; opcode 11 (SetScaleSpeed) just presets the
-    /// target with `scale_end = 0` (no ramp), matching the decomp.
+    /// frames; opcode 11 is the per-frame scale speed when no ramp is active.
     scale_final: [f32; 2],
     scale_init: [f32; 2],
     scale_end: u16,
-    scale_start: u16,
+    scale_time: u16,
     /// Z rotation in radians (opcode 9), integrated by `angle_vel` (opcode 10).
     pub rotation: f32,
     angle_vel: f32,
-    /// opcode 12 Fade: (from_alpha, to_alpha, start_time, duration).
+    /// opcode 12 Fade: (from_alpha, to_alpha, elapsed, duration).
     fade: Option<(f32, f32, u16, u16)>,
     /// Anchor at top-left (opcode 23) instead of the sprite center.
     pub corner: bool,
@@ -82,16 +85,20 @@ impl AnmRunner {
             clock: 0,
             halted: false,
             dead: false,
+            static_sprite: false,
+            pending_interrupt: None,
             moving: None,
             sprite: None,
             pos: [0.0, 0.0],
+            pos_offset: [0.0, 0.0],
+            use_pos_offset: false,
             alpha: 1.0,
             color: [1.0, 1.0, 1.0],
             scale: [1.0, 1.0],
             scale_final: [0.0, 0.0],
             scale_init: [1.0, 1.0],
             scale_end: 0,
-            scale_start: 0,
+            scale_time: 0,
             rotation: 0.0,
             angle_vel: 0.0,
             fade: None,
@@ -104,12 +111,20 @@ impl AnmRunner {
             additive: false,
             positioned: false,
         };
-        runner.exec_ready();
+        // SetAndExecuteScript executes frame zero immediately, including the
+        // interpolation work, then advances currentTimeInScript.
+        runner.tick();
         runner
     }
 
     pub fn visible(&self) -> bool {
         !self.dead && self.sprite.is_some() && !self.hidden
+    }
+
+    /// AnmManager::SetActiveSprite, also used by Gui's MSG expression opcode.
+    pub fn set_sprite(&mut self, sprite: u32) {
+        self.sprite = Some(sprite);
+        self.hidden = false;
     }
 
     /// Take a pending SetRandomSprite (opcode 16) request: (base, range). The
@@ -122,39 +137,32 @@ impl AnmRunner {
     /// The script reached its end opcode (0) — the decomp frees the owning
     /// effect when `ExecuteScript` reports this.
     pub fn ended(&self) -> bool {
-        self.dead
+        self.dead || self.static_sprite
     }
 
     /// Jump to the section after interrupt label `n` and resume.
     pub fn interrupt(&mut self, n: u32) {
-        if self.dead {
-            return;
-        }
-        if let Some(idx) = self
-            .instrs
-            .iter()
-            .position(|i| i.opcode == 22 && !i.args.is_empty() && i.arg_u32(0) == n)
-        {
-            self.pc = idx + 1;
-            self.clock = self.instrs[idx].time;
-            self.halted = false;
-            self.moving = None;
-            self.exec_ready();
+        if !self.dead && !self.static_sprite && n != 0 {
+            self.pending_interrupt = Some(n);
         }
     }
 
     pub fn tick(&mut self) {
-        if self.dead {
+        if self.dead || self.static_sprite {
             return;
         }
-        self.clock = self.clock.saturating_add(1);
         self.exec_ready();
-        self.rotation += self.angle_vel;
+        if self.dead || self.static_sprite {
+            return;
+        }
+        self.rotation = crate::ecl_vm::normalize_angle(self.rotation + self.angle_vel);
         if self.scale_end > 0 {
-            let t = self.clock.saturating_sub(self.scale_start);
+            self.scale_time = self.scale_time.saturating_add(1);
+            let t = self.scale_time;
             if t >= self.scale_end {
                 self.scale = self.scale_final;
                 self.scale_end = 0;
+                self.scale_final = [0.0; 2];
             } else {
                 let f = t as f32 / self.scale_end as f32;
                 self.scale = [
@@ -162,37 +170,82 @@ impl AnmRunner {
                     self.scale_init[1] + (self.scale_final[1] - self.scale_init[1]) * f,
                 ];
             }
+        } else {
+            self.scale[0] += self.scale_final[0];
+            self.scale[1] += self.scale_final[1];
         }
-        if let Some((from, to, start, dur)) = self.fade {
-            let t = self.clock.saturating_sub(start);
+        if let Some((from, to, elapsed, dur)) = self.fade {
+            let t = elapsed.saturating_add(1);
             if t >= dur {
                 self.alpha = to;
                 self.fade = None;
             } else {
-                self.alpha = from + (to - from) * (t as f32 / dur as f32);
+                // AnmManager interpolates 8-bit color components with an i32
+                // truncation each frame, rather than keeping fractional alpha.
+                self.alpha = ((from * 255.0 + (to - from) * 255.0 * (t as f32 / dur as f32)) as i32)
+                    as f32
+                    / 255.0;
+                self.fade = Some((from, to, t, dur));
             }
         }
-        if let Some(m) = self.moving {
-            let t = self.clock.saturating_sub(m.start);
+        if let Some(mut m) = self.moving {
+            let t = m.elapsed;
+            let target = if self.use_pos_offset {
+                &mut self.pos_offset
+            } else {
+                &mut self.pos
+            };
             if t >= m.duration {
-                self.pos = m.to;
+                *target = m.to;
                 self.moving = None;
             } else {
                 let f = t as f32 / m.duration as f32;
                 let f = match m.ease {
                     Ease::Linear => f,
                     Ease::Decel => 1.0 - (1.0 - f) * (1.0 - f),
-                    Ease::Accel => f * f,
+                    Ease::Accel => 1.0 - (1.0 - f).powi(4),
                 };
-                self.pos = [
-                    m.from[0] + (m.to[0] - m.from[0]) * f,
-                    m.from[1] + (m.to[1] - m.from[1]) * f,
+                *target = [
+                    f * m.to[0] + (1.0 - f) * m.from[0],
+                    f * m.to[1] + (1.0 - f) * m.from[1],
                 ];
+                m.elapsed = m.elapsed.saturating_add(1);
+                self.moving = Some(m);
             }
+        }
+        if !self.halted {
+            self.clock = self.clock.saturating_add(1);
         }
     }
 
     fn exec_ready(&mut self) {
+        if let Some(interrupt) = self.pending_interrupt.take() {
+            let mut fallback = None;
+            let mut found = None;
+            for (idx, instr) in self.instrs.iter().enumerate() {
+                if matches!(instr.opcode, 0 | 15) {
+                    break;
+                }
+                if instr.opcode == 22 && !instr.args.is_empty() {
+                    let label = instr.arg_u32(0);
+                    if label == interrupt {
+                        found = Some(idx);
+                        break;
+                    }
+                    if label == u32::MAX {
+                        fallback = Some(idx);
+                    }
+                }
+            }
+            if let Some(idx) = found.or(fallback) {
+                self.pc = idx + 1;
+                if let Some(next) = self.instrs.get(self.pc) {
+                    self.clock = next.time;
+                }
+                self.halted = false;
+                self.hidden = false;
+            }
+        }
         let mut budget = 1000; // guards against zero-frame jump loops
         while !self.halted && !self.dead && self.pc < self.instrs.len() {
             budget -= 1;
@@ -209,8 +262,10 @@ impl AnmRunner {
                     self.dead = true;
                 }
                 15 => {
-                    // Freeze in place, still visible.
+                    // ANM_STATIC ends execution while preserving its last sprite.
                     self.halted = true;
+                    self.static_sprite = true;
+                    return;
                 }
                 1 => {
                     // SetActiveSprite also sets isVisible=1 (AnmManager.cpp:1059).
@@ -218,7 +273,7 @@ impl AnmRunner {
                     self.hidden = false;
                 }
                 2 => self.scale = [i.arg_f32(0), i.arg_f32(1)],
-                // SetScaleSpeed: preset the interp target with no ramp (endTime 0).
+                // Per-frame scale speed (AnmManager::ExecuteScript).
                 11 => {
                     self.scale_final = [i.arg_f32(0), i.arg_f32(1)];
                     self.scale_end = 0;
@@ -229,9 +284,9 @@ impl AnmRunner {
                     self.scale_final = [i.arg_f32(0), i.arg_f32(1)];
                     self.scale_end = i.arg_u32(2) as u16;
                     self.scale_init = self.scale;
-                    self.scale_start = self.clock;
+                    self.scale_time = 0;
                 }
-                3 => self.alpha = i.arg_u32(0) as f32 / 255.0,
+                3 => self.alpha = (i.arg_u32(0) & 0xff) as f32 / 255.0,
                 4 => {
                     // SetColor: RGB from the arg's low 24 bits (D3DCOLOR 0xAARRGGBB),
                     // alpha kept separately (op3).
@@ -257,32 +312,49 @@ impl AnmRunner {
                 9 => self.rotation = i.arg_f32(2),
                 10 => self.angle_vel = i.arg_f32(2),
                 12 => {
-                    self.fade = Some((self.alpha, i.arg_u32(0) as f32 / 255.0, i.time, i.arg_u32(1) as u16));
+                    self.fade = Some((
+                        self.alpha,
+                        (i.arg_u32(0) & 0xff) as f32 / 255.0,
+                        0,
+                        i.arg_u32(1) as u16,
+                    ));
                 }
                 17 => {
-                    self.pos = [i.arg_f32(0), i.arg_f32(1)];
-                    self.moving = None;
+                    let pos = [i.arg_f32(0), i.arg_f32(1)];
+                    if self.use_pos_offset {
+                        self.pos_offset = pos;
+                    } else {
+                        self.pos = pos;
+                    }
                     self.positioned = true;
                 }
-                18 | 19 | 20 => {
+                18..=20 => {
                     let ease = match i.opcode {
                         18 => Ease::Linear,
                         19 => Ease::Decel,
                         _ => Ease::Accel,
                     };
-                    self.moving = Some(Move {
-                        from: self.pos,
+                    let duration = i.arg_u32(3) as u16;
+                    self.moving = (duration != 0).then_some(Move {
+                        from: if self.use_pos_offset {
+                            self.pos_offset
+                        } else {
+                            self.pos
+                        },
                         to: [i.arg_f32(0), i.arg_f32(1)],
-                        start: i.time,
-                        duration: i.arg_u32(3).max(1) as u16,
+                        elapsed: 0,
+                        duration,
                         ease,
                     });
                 }
                 21 | 24 => {
-                    self.pc += 1;
+                    if i.opcode == 24 {
+                        self.hidden = true;
+                    }
                     self.halted = true;
                     return;
                 }
+                25 => self.use_pos_offset = i.arg_u32(0) != 0,
                 23 => self.corner = true,
                 13 => self.additive = true,
                 14 => self.additive = false,
@@ -302,5 +374,84 @@ impl AnmRunner {
             }
             self.pc += 1;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn instr(opcode: u8, args: &[u32]) -> Instr {
+        Instr {
+            time: 0,
+            opcode,
+            args: args.iter().flat_map(|arg| arg.to_le_bytes()).collect(),
+            offset: 0,
+        }
+    }
+
+    #[test]
+    fn scale_speed_applies_on_initial_execute_and_every_frame() {
+        let mut vm = AnmRunner::new(vec![
+            instr(2, &[0, 0]),
+            instr(11, &[0.05f32.to_bits(), 0.05f32.to_bits()]),
+            instr(21, &[]),
+        ]);
+        assert_eq!(vm.scale, [0.05, 0.05]);
+        vm.tick();
+        assert_eq!(vm.scale, [0.1, 0.1]);
+    }
+
+    #[test]
+    fn offset_position_and_fourth_power_easing_match_execute_script() {
+        let mut vm = AnmRunner::new(vec![
+            instr(17, &[12f32.to_bits(), 20f32.to_bits(), 0]),
+            instr(25, &[1]),
+            instr(20, &[16f32.to_bits(), 0, 0, 4]),
+            instr(21, &[]),
+        ]);
+        assert_eq!(vm.pos, [12.0, 20.0]);
+        assert_eq!(vm.pos_offset, [0.0, 0.0]);
+        vm.tick();
+        assert_eq!(vm.pos_offset, [10.9375, 0.0]);
+        for _ in 0..3 {
+            vm.tick();
+        }
+        assert_eq!(vm.pos_offset, [16.0, 0.0]);
+        assert_eq!(vm.pos, [12.0, 20.0]);
+    }
+
+    #[test]
+    fn invisible_halt_interrupt_uses_fallback_and_restores_visibility() {
+        let mut vm = AnmRunner::new(vec![
+            instr(1, &[1]),
+            instr(24, &[]),
+            instr(22, &[u32::MAX]),
+            instr(1, &[3]),
+            instr(21, &[]),
+            instr(0, &[]),
+        ]);
+        assert!(!vm.visible());
+        vm.interrupt(7);
+        vm.tick();
+        assert!(vm.visible());
+        assert_eq!(vm.sprite, Some(3));
+    }
+
+    #[test]
+    fn static_sprite_finishes_execution_and_preserves_visible_sprite() {
+        let mut vm = AnmRunner::new(vec![
+            instr(1, &[4]),
+            instr(11, &[1f32.to_bits(), 1f32.to_bits()]),
+            instr(15, &[]),
+            instr(0, &[]),
+        ]);
+        assert!(vm.ended());
+        assert!(vm.visible());
+        let scale = vm.scale;
+        vm.tick();
+        vm.interrupt(1);
+        vm.tick();
+        assert_eq!(vm.scale, scale);
     }
 }

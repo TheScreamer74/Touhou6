@@ -11,7 +11,8 @@ use th06_formats::ecl::{Ecl, Instr};
 pub const FIELD_W: f32 = 384.0;
 pub const FIELD_H: f32 = 448.0;
 
-/// The original 16-bit RNG (Rng.cpp).
+/// The original 16-bit RNG (Global.cpp: Rng).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Rng {
     seed: u16,
 }
@@ -19,6 +20,9 @@ pub struct Rng {
 impl Rng {
     pub fn new(seed: u16) -> Self {
         Self { seed }
+    }
+    pub fn seed(&self) -> u16 {
+        self.seed
     }
     pub fn u16(&mut self) -> u16 {
         let a = (self.seed ^ 0x9630).wrapping_sub(0x6553);
@@ -137,6 +141,9 @@ impl Default for BulletProps {
 }
 
 pub struct Bullet {
+    /// Fixed BulletManager slot: iteration order is significant for ex-insns,
+    /// cancel scores and the shared RNG after the allocation cursor wraps.
+    pub pool_index: usize,
     pub pos: [f32; 2],
     pub angle: f32,
     pub speed: f32,
@@ -197,6 +204,7 @@ pub struct Laser {
 }
 
 pub struct Enemy {
+    pub pool_index: usize,
     ctx: Ctx,
     stack: [Ctx; 8],
     stack_depth: usize,
@@ -285,6 +293,8 @@ pub struct Enemy {
     /// Slots 0-3 render behind the primary sprite, 4-7 in front.
     pub sub_scripts: [i32; 8],
     pub sub_dirty: [bool; 8],
+    /// ECL op129: per-slot pending ANM interruption, applied before ExecuteScript.
+    pub sub_interrupts: [Option<i32>; 8],
     /// ECL op102 SPELLCARDEFFECT: indices into world.effects of this enemy's live
     /// spellcard bubbles (enemy->effectArray), plus their shared target radius
     /// (enemy->effectDistance). Driven each frame by `update_effects`.
@@ -304,6 +314,7 @@ pub struct Enemy {
 impl Default for Enemy {
     fn default() -> Self {
         Self {
+            pool_index: usize::MAX,
             ctx: Ctx::default(),
             stack: [Ctx::default(); 8],
             stack_depth: 0,
@@ -374,6 +385,7 @@ impl Default for Enemy {
             anm_dirty: false,
             rotate_anm: false,
             pending_interrupt: None,
+            sub_interrupts: [None; 8],
             sub_scripts: [-1; 8],
             sub_dirty: [false; 8],
             effect_slots: Vec::new(),
@@ -391,11 +403,14 @@ pub enum WorldEvent {
     Sfx(i32),
     /// Spell card declared: (spell id, raw Shift-JIS name bytes).
     SpellcardStart(i32, i32, Vec<u8>),
-    SpellcardEnd,
+    SpellcardEnd {
+        points: Vec<[f32; 2]>,
+        bonus: i64,
+    },
     /// A non-timeout boss spell ran out its timer: capture is forfeit and the
     /// field is cleared (EnemyManager.cpp:408 — isCapturing=0, RemoveAllBullets).
     SpellTimeout,
-    BulletCancel,
+    BulletCancel(Vec<[f32; 2]>),
     BossSet(bool),
     DropItem([f32; 2], i32),
     /// ECL op125 STDUNPAUSE: release the background camera park (Stage::unpauseFlag).
@@ -415,9 +430,12 @@ pub struct World {
     pub max_rank: i32,
     pub player_pos: [f32; 2],
     pub bullets: Vec<Bullet>,
+    pub next_bullet_index: usize,
     pub lasers: Vec<Laser>,
     pub events: Vec<WorldEvent>,
-    pub pending_spawns: Vec<SpawnReq>,
+    /// Reserved fixed enemy slots, including children initializing inside ECL.
+    pub enemy_slots: [bool; 256],
+    pub pending_spawns: Vec<Enemy>,
     pub kill_trash: bool,
     pub boss_present: bool,
     pub power: i32,
@@ -432,6 +450,8 @@ pub struct World {
     /// bat-transformation ex-instruction (idx 10): while a bomb is active she
     /// becomes non-interactable and swaps to her dissipate animation.
     pub bomb_active: bool,
+    /// EnemyManager::spellcardInfo.isActive: 0 inactive, 1 running, 2 timed out.
+    pub spellcard_active: u8,
     /// Sprite height (px) per bullet type 0..9, from etama3.anm. Used by
     /// ex-instructions that only touch "big" bullets (>= 30px).
     pub bullet_heights: [f32; 10],
@@ -445,6 +465,7 @@ pub struct World {
     /// the decomp's. `eff_scripts` are the etama4 per-script ANM instructions
     /// used to build each effect's runner.
     pub effects: Vec<Option<Effect>>,
+    pub next_effect_index: usize,
     pub eff_scripts: HashMap<u32, Vec<AnmInstr>>,
     /// EnemyManager::randomItemSpawnIndex / randomItemTableIndex (drive the
     /// every-3rd random-item drop + its bigger death splash).
@@ -486,10 +507,10 @@ pub struct Effect {
 /// g_EffectsColorWithTextureBlending (BulletManager.cpp:21) — the default
 /// spellcard-effect palette, indexed by SPELLCARDEFFECT's effectColorId.
 pub const G_EFFECTS_COLOR: [u32; 28] = [
-    0xff000000, 0xff303030, 0xff606060, 0xff500000, 0xff900000, 0xffff2020, 0xff400040,
-    0xff800080, 0xffff30ff, 0xff000050, 0xff000090, 0xff2020ff, 0xff203060, 0xff304090,
-    0xff3080ff, 0xff005000, 0xff009000, 0xff20ff20, 0xff206000, 0xff409010, 0xff80ff20,
-    0xff505000, 0xff909000, 0xffffff20, 0xff603000, 0xff904010, 0xfff08020, 0xffffffff,
+    0xff000000, 0xff303030, 0xff606060, 0xff500000, 0xff900000, 0xffff2020, 0xff400040, 0xff800080,
+    0xffff30ff, 0xff000050, 0xff000090, 0xff2020ff, 0xff203060, 0xff304090, 0xff3080ff, 0xff005000,
+    0xff009000, 0xff20ff20, 0xff206000, 0xff409010, 0xff80ff20, 0xff505000, 0xff909000, 0xffffff20,
+    0xff603000, 0xff904010, 0xfff08020, 0xffffffff,
 ];
 
 /// The g_Effects update-callback column (EffectManager.cpp:18).
@@ -512,11 +533,11 @@ enum EffCb {
 /// neither draws RNG nor renders a particle.
 fn g_effects(effect_idx: i32) -> (u32, EffCb) {
     match effect_idx {
-        0 => (3, EffCb::None),         // bubble explosion small
-        1 => (4, EffCb::None),         // bubble explosion spiral
-        2 => (5, EffCb::None),         // bubble explosion normal
+        0 => (3, EffCb::None),            // bubble explosion small
+        1 => (4, EffCb::None),            // bubble explosion spiral
+        2 => (5, EffCb::None),            // bubble explosion normal
         3 => (6, EffCb::RandomSplashBig), // glow 1
-        4 => (9, EffCb::RandomSplash), // white particle
+        4 => (9, EffCb::RandomSplash),    // white particle
         5 => (10, EffCb::RandomSplash),
         6 => (11, EffCb::RandomSplash),
         7 => (12, EffCb::RandomSplash),
@@ -525,10 +546,10 @@ fn g_effects(effect_idx: i32) -> (u32, EffCb) {
         10 => (15, EffCb::RandomSplash),
         11 => (16, EffCb::RandomSplash),
         12 => (17, EffCb::None),
-        13 | 14 | 15 => (18, EffCb::SpellBubble), // spellcard bubble cb4 (3D, no RNG)
-        16 => (0, EffCb::None),            // spellcard bg (different anm); no particle
-        17 => (7, EffCb::Attract),         // glow 2
-        18 => (8, EffCb::AttractSlow),     // glow 3
+        13..=15 => (18, EffCb::SpellBubble), // spellcard bubble cb4 (3D, no RNG)
+        16 => (0, EffCb::None),              // spellcard bg (different anm); no particle
+        17 => (7, EffCb::Attract),           // glow 2
+        18 => (8, EffCb::AttractSlow),       // glow 3
         19 => (19, EffCb::Still),
         _ => (0, EffCb::None),
     }
@@ -567,7 +588,9 @@ impl World {
     /// tick. `color` tints the etama4 sprite (white = unchanged).
     pub fn spawn_particles(&mut self, effect_idx: i32, pos: [f32; 3], count: i32, color: [f32; 4]) {
         let (script, cb) = g_effects(effect_idx);
-        let Some(instrs) = self.eff_scripts.get(&script).cloned() else { return };
+        let Some(instrs) = self.eff_scripts.get(&script).cloned() else {
+            return;
+        };
         for _ in 0..count.max(0) {
             let eff = Effect {
                 in_use: true,
@@ -585,10 +608,8 @@ impl World {
                 spell_bubble: false,
                 runner: AnmRunner::new(instrs.clone()),
             };
-            if let Some(slot) = self.effects.iter_mut().find(|e| e.is_none()) {
-                *slot = Some(eff);
-            } else {
-                self.effects.push(Some(eff));
+            if self.alloc_effect(eff).is_none() {
+                break;
             }
         }
     }
@@ -596,7 +617,12 @@ impl World {
     /// SPELLCARDEFFECT (ECL op102): spawn one effect-13 bubble at `pos`, store its
     /// swirl axis `pos2` and tint, and return its slot so the owning enemy can
     /// drive it from its effectArray. Returns None if etama4 lacks the script.
-    pub fn spawn_spell_bubble(&mut self, pos: [f32; 3], pos2: [f32; 3], color: [f32; 4]) -> Option<usize> {
+    pub fn spawn_spell_bubble(
+        &mut self,
+        pos: [f32; 3],
+        pos2: [f32; 3],
+        color: [f32; 4],
+    ) -> Option<usize> {
         let (script, cb) = g_effects(13);
         let instrs = self.eff_scripts.get(&script).cloned()?;
         let eff = Effect {
@@ -615,13 +641,7 @@ impl World {
             spell_bubble: true,
             runner: AnmRunner::new(instrs),
         };
-        if let Some(i) = self.effects.iter().position(|e| e.is_none()) {
-            self.effects[i] = Some(eff);
-            Some(i)
-        } else {
-            self.effects.push(Some(eff));
-            Some(self.effects.len() - 1)
-        }
+        self.alloc_effect(eff)
     }
 
     /// Spawn one effect and seed its `unk_11c`/`unk_128` motion, as the bat-wing
@@ -635,7 +655,9 @@ impl World {
         accel: [f32; 3],
     ) {
         let (script, cb) = g_effects(effect_idx);
-        let Some(instrs) = self.eff_scripts.get(&script).cloned() else { return };
+        let Some(instrs) = self.eff_scripts.get(&script).cloned() else {
+            return;
+        };
         let eff = Effect {
             in_use: true,
             pos,
@@ -652,11 +674,26 @@ impl World {
             spell_bubble: false,
             runner: AnmRunner::new(instrs),
         };
-        if let Some(slot) = self.effects.iter_mut().find(|e| e.is_none()) {
-            *slot = Some(eff);
-        } else {
-            self.effects.push(Some(eff));
+        self.alloc_effect(eff);
+    }
+
+    fn alloc_effect(&mut self, effect: Effect) -> Option<usize> {
+        for _ in 0..512 {
+            let candidate = self.next_effect_index;
+            self.next_effect_index = (candidate + 1) % 512;
+            if self
+                .effects
+                .get(candidate)
+                .is_none_or(|slot| slot.is_none())
+            {
+                if self.effects.len() <= candidate {
+                    self.effects.resize_with(candidate + 1, || None);
+                }
+                self.effects[candidate] = Some(effect);
+                return Some(candidate);
+            }
         }
+        None
     }
 
     /// BulletManager::RemoveAllBullets(turnIntoItem=false): every live bullet
@@ -667,6 +704,68 @@ impl World {
         for b in &mut self.bullets {
             if b.despawn_timer == 0 {
                 b.despawn_timer = 12;
+            }
+        }
+        self.cancel_lasers(false, &mut Vec::new());
+    }
+
+    /// RemoveAllBullets(true) excludes bullets already running their despawn
+    /// animation. Each live laser produces one item every 32 pixels.
+    pub fn turn_bullets_into_points(&mut self) -> Vec<[f32; 2]> {
+        let mut points = Vec::new();
+        self.bullets.retain(|bullet| {
+            if bullet.despawn_timer == 0 {
+                points.push(bullet.pos);
+                false
+            } else {
+                true
+            }
+        });
+        self.cancel_lasers(true, &mut points);
+        points
+    }
+
+    /// DespawnBullets also counts already fading bullets, and leaves their
+    /// animation alive. Its escalating score counts bullets only, not lasers.
+    pub fn despawn_bullets_for_bonus(&mut self, award_points: bool) -> (Vec<[f32; 2]>, i64) {
+        let mut points = Vec::new();
+        let mut score = 2000;
+        let mut total = 0;
+        for bullet in &mut self.bullets {
+            if award_points {
+                points.push(bullet.pos);
+            }
+            total += score;
+            score = (score + 10).min(12800);
+            if bullet.despawn_timer == 0 {
+                bullet.despawn_timer = 12;
+            }
+        }
+        if award_points {
+            for laser in &self.lasers {
+                if laser.in_use && laser.state < 2 {
+                    points.push(laser.pos);
+                }
+            }
+        }
+        self.cancel_lasers(award_points, &mut points);
+        (points, total)
+    }
+
+    fn cancel_lasers(&mut self, award_points: bool, points: &mut Vec<[f32; 2]>) {
+        for laser in &mut self.lasers {
+            if !laser.in_use || laser.state >= 2 {
+                continue;
+            }
+            laser.state = 2;
+            laser.timer = 0;
+            if award_points {
+                let (sin, cos) = laser.angle.sin_cos();
+                let mut offset = laser.start_offset;
+                while laser.end_offset > offset {
+                    points.push([laser.pos[0] + cos * offset, laser.pos[1] + sin * offset]);
+                    offset += 32.0;
+                }
             }
         }
     }
@@ -737,9 +836,17 @@ impl World {
                     let u = [n[0] * s, n[1] * s, n[2] * s];
                     let t = cross3([2.0 * u[0], 2.0 * u[1], 2.0 * u[2]], off);
                     let ut = cross3(u, t);
-                    off = [off[0] + c * t[0] + ut[0], off[1] + c * t[1] + ut[1], off[2] + c * t[2] + ut[2]];
+                    off = [
+                        off[0] + c * t[0] + ut[0],
+                        off[1] + c * t[1] + ut[1],
+                        off[2] + c * t[2] + ut[2],
+                    ];
                     off[2] *= 6.0;
-                    e.pos = [off[0] + e.anchor[0], off[1] + e.anchor[1], off[2] + e.anchor[2]];
+                    e.pos = [
+                        off[0] + e.anchor[0],
+                        off[1] + e.anchor[1],
+                        off[2] + e.anchor[2],
+                    ];
                     if e.pop >= 0 {
                         e.pop += 1;
                         if e.pop >= 16 {
@@ -766,9 +873,11 @@ impl World {
         if let Some(i) = self.lasers.iter().position(|l| !l.in_use) {
             self.lasers[i] = laser;
             i
-        } else {
+        } else if self.lasers.len() < 64 {
             self.lasers.push(laser);
             self.lasers.len() - 1
+        } else {
+            64 // original dummy slot; never participates in the update
         }
     }
 }
@@ -790,18 +899,32 @@ fn rank_scale_f32(low: f32, high: f32, rank: f32) -> f32 {
 }
 
 impl Enemy {
+    pub fn vacant() -> Self {
+        Self {
+            occupied: false,
+            ..Default::default()
+        }
+    }
+
     pub fn spawn(ecl: &Ecl, world: &mut World, req: &SpawnReq) -> Option<Enemy> {
-        let mut e = Enemy::default();
+        let pc = *ecl.sub_offsets.get(req.sub as usize)?;
+        let pool_index = world.enemy_slots.iter().position(|occupied| !occupied)?;
+        world.enemy_slots[pool_index] = true;
+        let mut e = Enemy {
+            pool_index,
+            ..Default::default()
+        };
         if req.life >= 0 {
             e.life = req.life as i32;
         }
         e.pos = req.pos;
         e.invert_x = req.mirror;
-        e.item_drop = req.item;
-        e.ctx.pc = *ecl.sub_offsets.get(req.sub as usize)?;
+        e.ctx.pc = pc;
         e.ctx.sub = req.sub as u16;
         e.ctx.time = 0;
         e.run_ecl(ecl, world);
+        e.item_drop = req.item;
+        world.enemy_slots[pool_index] = e.occupied;
         if req.life >= 0 {
             e.life = req.life as i32;
         }
@@ -839,7 +962,7 @@ impl Enemy {
             -10014 => world.rank,
             -10022 => self.boss_timer,
             -10024 => self.life,
-            -10025 => 0, // player shot type (Reimu A)
+            -10025 => world.character as i32 * 2 + world.shot_type as i32,
             other => other,
         }
     }
@@ -905,10 +1028,6 @@ impl Enemy {
         }
     }
 
-    fn is_float_var(id: i32) -> bool {
-        matches!(id, -10008..=-10005 | -10021..=-10015 | -10023)
-    }
-
     fn angle_to_player(&self, world: &World) -> f32 {
         (world.player_pos[1] - self.pos[1]).atan2(world.player_pos[0] - self.pos[0])
     }
@@ -968,7 +1087,8 @@ impl Enemy {
                 1 => {
                     self.angle = normalize_angle(self.angle + self.angular_velocity);
                     self.speed += self.acceleration;
-                    self.axis_speed = [self.angle.cos() * self.speed, self.angle.sin() * self.speed];
+                    self.axis_speed =
+                        [self.angle.cos() * self.speed, self.angle.sin() * self.speed];
                 }
                 2 => {
                     self.move_timer -= 1;
@@ -1028,8 +1148,8 @@ impl Enemy {
 
     fn exec(&mut self, ecl: &Ecl, world: &mut World, instr: &Instr) -> Flow {
         match instr.opcode {
-            0 => {} // NOP
-            1 => return Flow::Kill, // UNIMP: end of script
+            0 => {}                       // NOP
+            1 => return Flow::Kill,       // UNIMP: end of script
             2 => return self.jump(instr), // JUMP
             3 => {
                 // JUMPDEC
@@ -1079,7 +1199,7 @@ impl Enemy {
             10 => self.set_var(instr.arg_i32(0), self.pos[0] as i32, self.pos[0]),
             11 => self.set_var(instr.arg_i32(0), self.pos[1] as i32, self.pos[1]),
             12 => self.set_var(instr.arg_i32(0), self.pos[2] as i32, self.pos[2]),
-            13..=17 => self.alu_int(instr, world),   // int add/sub/mul/div/mod
+            13..=17 => self.alu_int(instr, world), // int add/sub/mul/div/mod
             18 => {
                 // MATHINC
                 let v = self.get_i32(instr.arg_i32(0), world) + 1;
@@ -1110,12 +1230,24 @@ impl Enemy {
             27 => {
                 let l = self.get_i32(instr.arg_i32(0), world);
                 let r = self.get_i32(instr.arg_i32(1), world);
-                self.ctx.cmp = if l == r { 0 } else if l < r { -1 } else { 1 };
+                self.ctx.cmp = if l == r {
+                    0
+                } else if l < r {
+                    -1
+                } else {
+                    1
+                };
             }
             28 => {
                 let l = self.get_f32(instr.arg_f32(0), world);
                 let r = self.get_f32(instr.arg_f32(1), world);
-                self.ctx.cmp = if l == r { 0 } else if l < r { -1 } else { 1 };
+                self.ctx.cmp = if l == r {
+                    0
+                } else if l < r {
+                    -1
+                } else {
+                    1
+                };
             }
             29 => return self.cond_jump(instr, self.ctx.cmp < 0),
             30 => return self.cond_jump(instr, self.ctx.cmp <= 0),
@@ -1278,13 +1410,18 @@ impl Enemy {
                     + rank_scale_i32(self.rank_amount2_low, self.rank_amount2_high, world.rank);
                 let mut s1 = self.get_f32(speed1, world);
                 if s1 != 0.0 {
-                    s1 += rank_scale_f32(self.rank_speed_low, self.rank_speed_high, world.rank as f32);
+                    s1 += rank_scale_f32(
+                        self.rank_speed_low,
+                        self.rank_speed_high,
+                        world.rank as f32,
+                    );
                     if s1 < 0.3 {
                         s1 = 0.3;
                     }
                 }
                 let mut s2 = self.get_f32(speed2, world)
-                    + rank_scale_f32(self.rank_speed_low, self.rank_speed_high, world.rank as f32) / 2.0;
+                    + rank_scale_f32(self.rank_speed_low, self.rank_speed_high, world.rank as f32)
+                        / 2.0;
                 if s2 < 0.3 {
                     s2 = 0.3;
                 }
@@ -1302,7 +1439,10 @@ impl Enemy {
                 p.angle2 = a2;
                 p.flags = flags as u32;
                 p.sprite_offset = sprite_offset;
-                let pos = [self.pos[0] + self.shoot_offset[0], self.pos[1] + self.shoot_offset[1]];
+                let pos = [
+                    self.pos[0] + self.shoot_offset[0],
+                    self.pos[1] + self.shoot_offset[1],
+                ];
                 self.bullet_props.pos = pos;
                 if !self.shooting_disabled {
                     let props = std::mem::take(&mut self.bullet_props);
@@ -1330,8 +1470,10 @@ impl Enemy {
             79 => self.shooting_disabled = false,
             80 => {
                 // SHOOTNOW
-                self.bullet_props.pos =
-                    [self.pos[0] + self.shoot_offset[0], self.pos[1] + self.shoot_offset[1]];
+                self.bullet_props.pos = [
+                    self.pos[0] + self.shoot_offset[0],
+                    self.pos[1] + self.shoot_offset[1],
+                ];
                 let props = std::mem::take(&mut self.bullet_props);
                 spawn_bullet_pattern(world, &props);
                 self.bullet_props = props;
@@ -1358,7 +1500,10 @@ impl Enemy {
                 self.bullet_props.ex_ints = ints;
                 self.bullet_props.ex_floats = floats;
             }
-            83 => world.events.push(WorldEvent::BulletCancel),
+            83 => {
+                let points = world.turn_bullets_into_points();
+                world.events.push(WorldEvent::BulletCancel(points));
+            }
             84 => {
                 // BULLETSOUND
                 let sfx = instr.arg_i32(0);
@@ -1377,7 +1522,10 @@ impl Enemy {
                 }
                 let laser = Laser {
                     in_use: true,
-                    pos: [self.pos[0] + self.shoot_offset[0], self.pos[1] + self.shoot_offset[1]],
+                    pos: [
+                        self.pos[0] + self.shoot_offset[0],
+                        self.pos[1] + self.shoot_offset[1],
+                    ],
                     angle,
                     speed: self.get_f32(instr.arg_f32(2), world),
                     start_offset: self.get_f32(instr.arg_f32(3), world),
@@ -1400,10 +1548,10 @@ impl Enemy {
                 // LASERROTATE
                 let slot = instr.arg_i32(0).clamp(0, 31) as usize;
                 let delta = self.get_f32(instr.arg_f32(1), world);
-                if let Some(idx) = self.lasers[slot] {
-                    if let Some(l) = world.lasers.get_mut(idx) {
-                        l.angle += delta;
-                    }
+                if let Some(idx) = self.lasers[slot]
+                    && let Some(l) = world.lasers.get_mut(idx)
+                {
+                    l.angle += delta;
                 }
             }
             89 => {
@@ -1422,10 +1570,10 @@ impl Enemy {
                 let slot = instr.arg_i32(0).clamp(0, 31) as usize;
                 let dx = instr.arg_f32(1);
                 let dy = instr.arg_f32(2);
-                if let Some(idx) = self.lasers[slot] {
-                    if let Some(l) = world.lasers.get_mut(idx) {
-                        l.pos = [self.pos[0] + dx, self.pos[1] + dy];
-                    }
+                if let Some(idx) = self.lasers[slot]
+                    && let Some(l) = world.lasers.get_mut(idx)
+                {
+                    l.pos = [self.pos[0] + dx, self.pos[1] + dy];
                 }
             }
             91 => {
@@ -1440,13 +1588,13 @@ impl Enemy {
             92 => {
                 // LASERCANCEL
                 let slot = instr.arg_i32(0).clamp(0, 31) as usize;
-                if let Some(idx) = self.lasers[slot] {
-                    if let Some(l) = world.lasers.get_mut(idx) {
-                        if l.in_use && l.state < 2 {
-                            l.state = 2;
-                            l.timer = 0;
-                        }
-                    }
+                if let Some(idx) = self.lasers[slot]
+                    && let Some(l) = world.lasers.get_mut(idx)
+                    && l.in_use
+                    && l.state < 2
+                {
+                    l.state = 2;
+                    l.timer = 0;
                 }
             }
             134 => self.lasers = [None; 32], // LASERCLEARALL
@@ -1458,12 +1606,20 @@ impl Enemy {
                 self.reset_effect_array(world);
                 let sprite = instr.arg_i16(0) as i32;
                 let id = instr.arg_i16(2) as i32;
-                let name = instr.args.get(4..).map(|b| {
-                    let end = b.iter().position(|&c| c == 0).unwrap_or(b.len());
-                    b[..end].to_vec()
-                }).unwrap_or_default();
-                world.events.push(WorldEvent::SpellcardStart(id, sprite, name));
-                world.events.push(WorldEvent::BulletCancel);
+                let name = instr
+                    .args
+                    .get(4..)
+                    .map(|b| {
+                        let end = b.iter().position(|&c| c == 0).unwrap_or(b.len());
+                        b[..end].to_vec()
+                    })
+                    .unwrap_or_default();
+                world
+                    .events
+                    .push(WorldEvent::SpellcardStart(id, sprite, name));
+                world.spellcard_active = 1;
+                let points = world.turn_bullets_into_points();
+                world.events.push(WorldEvent::BulletCancel(points));
                 self.rank_speed_low = -0.5;
                 self.rank_speed_high = 0.5;
                 self.rank_amount1_low = 0;
@@ -1473,11 +1629,21 @@ impl Enemy {
             }
             94 => {
                 self.reset_effect_array(world); // card ended: pop its bubbles
-                world.events.push(WorldEvent::SpellcardEnd);
+                if world.spellcard_active != 0 {
+                    let (points, bonus) = if world.spellcard_active == 1 {
+                        world.despawn_bullets_for_bonus(true)
+                    } else {
+                        (Vec::new(), 0)
+                    };
+                    world
+                        .events
+                        .push(WorldEvent::SpellcardEnd { points, bonus });
+                    world.spellcard_active = 0;
+                }
             }
             95 => {
                 // ENEMYCREATE
-                world.pending_spawns.push(SpawnReq {
+                let request = SpawnReq {
                     sub: instr.arg_i32(0),
                     pos: [
                         self.get_f32(instr.arg_f32(1), world),
@@ -1488,7 +1654,12 @@ impl Enemy {
                     item: instr.arg_i16(18),
                     score: instr.arg_i32(5),
                     mirror: false,
-                });
+                };
+                // SpawnEnemy runs the child ECL immediately; deferring it until
+                // the parent returns changes the shared random stream.
+                if let Some(child) = Enemy::spawn(ecl, world, &request) {
+                    world.pending_spawns.push(child);
+                }
             }
             96 => world.kill_trash = true, // ENEMYKILLALL
             97 => {
@@ -1633,19 +1804,22 @@ impl Enemy {
             }
             124 => {
                 // DROPITEMID
-                world
-                    .events
-                    .push(WorldEvent::DropItem([self.pos[0], self.pos[1]], instr.arg_i32(0)));
+                world.events.push(WorldEvent::DropItem(
+                    [self.pos[0], self.pos[1]],
+                    instr.arg_i32(0),
+                ));
             }
             125 => world.events.push(WorldEvent::Unpause), // STDUNPAUSE
-            126 => self.spell_count = instr.arg_i32(0), // BOSSSETLIFECOUNT (gui)
-            127 => {} // DEBUGWATCH
+            126 => self.spell_count = instr.arg_i32(0),    // BOSSSETLIFECOUNT (gui)
+            127 => {}                                      // DEBUGWATCH
             // ANMINTERRUPTMAIN: queue an interrupt for the primary anm runner.
-            // ANMINTERRUPTSLOT (129) targets the sub-vms (enemy->vms[]) the port
-            // doesn't model, so it stays a no-op.
             128 => self.pending_interrupt = Some(instr.arg_i32(0)),
-            129 => {} // ANMINTERRUPTSLOT — sub-vm anim not modelled
-            op if std::env::var_os("TH06_TRACE_OP").is_some() => { eprintln!("unhandled ECL op {op}"); }
+            129 => {
+                let slot = instr.arg_i32(0);
+                if (0..8).contains(&slot) {
+                    self.sub_interrupts[slot as usize] = Some(instr.arg_i32(1));
+                }
+            }
             130 => self.disable_call_stack = instr.arg_i32(0) != 0,
             131 => {
                 // BULLETRANKINFLUENCE
@@ -1663,7 +1837,14 @@ impl Enemy {
                 self.boss_timer = 0;
             }
             135 => self.timeout_spell = instr.arg_i32(0) != 0,
-            _ => {}
+            op => {
+                #[cfg(test)]
+                panic!("unhandled ECL opcode {op}");
+                #[cfg(not(test))]
+                if std::env::var_os("TH06_TRACE_OP").is_some() {
+                    eprintln!("unhandled ECL op {op}");
+                }
+            }
         }
         Flow::Next
     }
@@ -1735,8 +1916,10 @@ impl Enemy {
                     let pattern_pos = var2 as f32 / var3 as f32;
                     let td0 = pattern_pos * 0.1;
                     let base = [
-                        (self.star_player_pos[0] - self.star_enemy_pos[0]) * td0 + self.star_enemy_pos[0],
-                        (self.star_player_pos[1] - self.star_enemy_pos[1]) * td0 + self.star_enemy_pos[1],
+                        (self.star_player_pos[0] - self.star_enemy_pos[0]) * td0
+                            + self.star_enemy_pos[0],
+                        (self.star_player_pos[1] - self.star_enemy_pos[1]) * td0
+                            + self.star_enemy_pos[1],
                     ];
                     let pp = pattern_pos + 0.5;
                     self.bullet_props.angle1 = (PI / 3.0) * pp;
@@ -1750,8 +1933,8 @@ impl Enemy {
                         let tt = [(t1[0] - t0[0]) * td + t0[0], (t1[1] - t0[1]) * td + t0[1]];
                         self.bullet_props.pos = [base[0] + tt[0], base[1] + tt[1]];
                         let backup = self.bullet_props.speed1;
-                        self.bullet_props.speed1 =
-                            world.rng.f32_in_range(self.bullet_props.speed2) + self.bullet_props.speed1;
+                        self.bullet_props.speed1 +=
+                            world.rng.f32_in_range(self.bullet_props.speed2);
                         let props = std::mem::take(&mut self.bullet_props);
                         spawn_bullet_pattern(world, &props);
                         self.bullet_props = props;
@@ -1784,7 +1967,7 @@ impl Enemy {
                     let player = world.player_pos;
                     let rng = &mut world.rng;
                     for b in world.bullets.iter_mut() {
-                        if b.height >= 30.0 && b.sprite_offset != 5 && rng.u16() % 4 == 0 {
+                        if b.height >= 30.0 && b.sprite_offset != 5 && rng.u16().is_multiple_of(4) {
                             let base = (b.sprite as i32 - b.sprite_offset).max(0) as u32;
                             b.sprite_offset = 5;
                             b.sprite = base + 5;
@@ -1828,9 +2011,16 @@ impl Enemy {
                         sprite_offset: 3,
                         ..Default::default()
                     };
-                    let mut mo = [world.player_pos[0] - self.pos[0], world.player_pos[1] - self.pos[1]];
+                    let mut mo = [
+                        world.player_pos[0] - self.pos[0],
+                        world.player_pos[1] - self.pos[1],
+                    ];
                     let len = (mo[0] * mo[0] + mo[1] * mo[1]).sqrt();
-                    let mut mi = if len > 0.0 { [mo[0] / len, mo[1] / len] } else { [0.0, 0.0] };
+                    let mut mi = if len > 0.0 {
+                        [mo[0] / len, mo[1] / len]
+                    } else {
+                        [0.0, 0.0]
+                    };
                     let mat_in_seed = if pp & 1 != 0 { -256.0 } else { 256.0 };
                     mi = [mi[0] * mat_in_seed, mi[1] * mat_in_seed];
                     let mat_out_seed = 0.5 - pp as f32 * 0.5 / 9.0;
@@ -1844,7 +2034,10 @@ impl Enemy {
                     let mut bullet_angle = -PI / 4.0;
                     for _ in 0..9 {
                         mi = [mi[0] * co + mi[1] * so, -mi[0] * so + mi[1] * co];
-                        props.pos = [mi[0] + self.pos[0] + bp_offset[0], mi[1] + self.pos[1] + bp_offset[1]];
+                        props.pos = [
+                            mi[0] + self.pos[0] + bp_offset[0],
+                            mi[1] + self.pos[1] + bp_offset[1],
+                        ];
                         props.speed1 = 2.0;
                         if (pp & 1) != 0 && normal {
                             props.angle1 = bullet_angle;
@@ -1881,7 +2074,11 @@ impl Enemy {
             16 => {
                 // ExInsFlandreFinalContextUpdate: derive pattern vars from
                 // remaining life (clamped to 0 past the 7200-frame rage timer).
-                let remaining = if self.boss_timer >= 7200 { 0 } else { self.life };
+                let remaining = if self.boss_timer >= 7200 {
+                    0
+                } else {
+                    self.life
+                };
                 if param == 0 {
                     self.ctx.fvars[3] = 2.0 - (remaining as f32) / 6000.0; // float3
                     self.ctx.ivars[5] = remaining * 240 / 6000 + 40; // var5
@@ -2085,13 +2282,17 @@ impl Enemy {
                 // enemy's first 8 live lasers, fire the current bulletProps from a
                 // point 64px out along the laser's angle.
                 for slot in 0..8 {
-                    let Some(idx) = self.lasers[slot] else { continue };
+                    let Some(idx) = self.lasers[slot] else {
+                        continue;
+                    };
                     let Some(angle) = world.lasers.get(idx).filter(|l| l.in_use).map(|l| l.angle)
                     else {
                         continue;
                     };
-                    self.bullet_props.pos =
-                        [self.pos[0] + angle.cos() * 64.0, self.pos[1] + angle.sin() * 64.0];
+                    self.bullet_props.pos = [
+                        self.pos[0] + angle.cos() * 64.0,
+                        self.pos[1] + angle.sin() * 64.0,
+                    ];
                     spawn_bullet_pattern(world, &self.bullet_props);
                 }
             }
@@ -2102,7 +2303,9 @@ impl Enemy {
                 // the lasers that fired.
                 self.ctx.ivars[3] = 0;
                 for slot in 0..8 {
-                    let Some(idx) = self.lasers[slot] else { continue };
+                    let Some(idx) = self.lasers[slot] else {
+                        continue;
+                    };
                     let Some((angle, lpos, start, end)) = world
                         .lasers
                         .get(idx)
@@ -2140,10 +2343,7 @@ impl Enemy {
             self.exins_func6_angle -= 90.0 * deg;
         }
         let t = self.exins_func6_timer;
-        let fire = t > 120
-            || (t > 60 && t % 2 == 0)
-            || (t > 30 && t % 4 == 0)
-            || t % 8 == 0;
+        let fire = t > 120 || (t > 60 && t % 2 == 0) || (t > 30 && t % 4 == 0) || t % 8 == 0;
         if fire {
             let bam = t % 16;
             let bam = world.rng.u16_in_range((bam / 2) as u16) as i32 + bam / 2;
@@ -2234,14 +2434,22 @@ impl Enemy {
             13 => a.wrapping_add(b),
             14 => a.wrapping_sub(b),
             15 => a.wrapping_mul(b),
-            16 => if b != 0 { a / b } else { 0 },
-            _ => if b != 0 { a % b } else { 0 },
+            16 => {
+                if b != 0 {
+                    a / b
+                } else {
+                    0
+                }
+            }
+            _ => {
+                if b != 0 {
+                    a % b
+                } else {
+                    0
+                }
+            }
         };
-        if Self::is_float_var(out) {
-            self.set_var(out, v, v as f32);
-        } else {
-            self.set_var(out, v, v as f32);
-        }
+        self.set_var(out, v, v as f32);
     }
 
     fn alu_float(&mut self, instr: &Instr, world: &World) {
@@ -2252,8 +2460,20 @@ impl Enemy {
             20 => a + b,
             21 => a - b,
             22 => a * b,
-            23 => if b != 0.0 { a / b } else { 0.0 },
-            _ => if b != 0.0 { a % b } else { 0.0 },
+            23 => {
+                if b != 0.0 {
+                    a / b
+                } else {
+                    0.0
+                }
+            }
+            _ => {
+                if b != 0.0 {
+                    a % b
+                } else {
+                    0.0
+                }
+            }
         };
         self.set_var(out, v as i32, v);
     }
@@ -2317,7 +2537,9 @@ impl Enemy {
     /// bubble on the enemy, grow its sweep toward effectDistance, and spin it.
     pub fn update_effects(&self, world: &mut World) {
         for &slot in &self.effect_slots {
-            let Some(Some(e)) = world.effects.get_mut(slot) else { continue };
+            let Some(Some(e)) = world.effects.get_mut(slot) else {
+                continue;
+            };
             if !e.in_use || !e.spell_bubble {
                 continue;
             }
@@ -2333,10 +2555,11 @@ impl Enemy {
     /// on every tracked bubble and forget them. Run on death and at card change.
     pub fn reset_effect_array(&mut self, world: &mut World) {
         for &slot in &self.effect_slots {
-            if let Some(Some(e)) = world.effects.get_mut(slot) {
-                if e.spell_bubble && e.pop < 0 {
-                    e.pop = 0;
-                }
+            if let Some(Some(e)) = world.effects.get_mut(slot)
+                && e.spell_bubble
+                && e.pop < 0
+            {
+                e.pop = 0;
             }
         }
         self.effect_slots.clear();
@@ -2365,7 +2588,7 @@ impl Enemy {
             if world.random_item_spawn_index % 3 == 0 {
                 world.spawn_particles(a2, self.pos, 6, [1.0; 4]);
                 world.random_item_table_index += 1;
-                if world.random_item_table_index >= 16 {
+                if world.random_item_table_index >= 32 {
                     world.random_item_table_index = 0;
                 }
             }
@@ -2382,6 +2605,10 @@ impl Enemy {
     /// heightPx)`: the sprite rect must overlap [0,FIELD_W]x[0,FIELD_H]. `(0,0)`
     /// before the first ANMSETMAIN sets a sprite — then the enemy is still off
     /// screen at spawn, so `has_been_in_bounds` is never set and it can't despawn.
+    pub fn ready_for_damage(&self) -> bool {
+        self.occupied && self.has_been_in_bounds && !self.invisible
+    }
+
     pub fn update_bounds(&mut self, w: f32, h: f32) -> bool {
         let (hw, hh) = (w / 2.0, h / 2.0);
         let inside = self.pos[0] + hw >= 0.0
@@ -2391,7 +2618,7 @@ impl Enemy {
         if !self.has_been_in_bounds && inside {
             self.has_been_in_bounds = true;
         }
-        !(self.has_been_in_bounds && !inside)
+        !self.has_been_in_bounds || inside
     }
 
     pub fn handle_callbacks(&mut self, ecl: &Ecl, world: &mut World) {
@@ -2425,6 +2652,9 @@ impl Enemy {
                 // drift starts on the right frame. The event carries the Stage-
                 // side state (capture flag, lasers); its despawn is then a no-op.
                 world.despawn_all_bullets();
+                if world.spellcard_active != 0 {
+                    world.spellcard_active = world.spellcard_active.wrapping_add(1);
+                }
                 world.events.push(WorldEvent::SpellTimeout);
             }
             self.reset_rank_influence();
@@ -2538,11 +2768,29 @@ pub fn spawn_bullet_pattern(world: &mut World, props: &BulletProps) {
     let aim_angle = (world.player_pos[1] - props.pos[1]).atan2(world.player_pos[0] - props.pos[0]);
     let tau = std::f32::consts::TAU;
     let pi = std::f32::consts::PI;
-    for idx2 in 0..props.count2 as i32 {
+    'pattern: for idx2 in 0..props.count2 as i32 {
         for idx1 in 0..props.count1 as i32 {
+            // SpawnSingleBullet searches the 640 slots before doing any
+            // pattern math or RNG draw, advancing its circular cursor even on
+            // occupied slots. Full pools stop this entire pattern.
+            let mut slot = None;
+            for _ in 0..640 {
+                let candidate = world.next_bullet_index;
+                world.next_bullet_index = (candidate + 1) % 640;
+                if let Err(insert_at) = world
+                    .bullets
+                    .binary_search_by_key(&candidate, |bullet| bullet.pool_index)
+                {
+                    slot = Some((candidate, insert_at));
+                    break;
+                }
+            }
+            let Some((pool_index, insert_at)) = slot else {
+                break 'pattern;
+            };
             let mut angle = 0.0f32;
-            let mut speed = props.speed1
-                - (props.speed1 - props.speed2) * idx2 as f32 / props.count2 as f32;
+            let mut speed =
+                props.speed1 - (props.speed1 - props.speed2) * idx2 as f32 / props.count2 as f32;
             match props.aim_mode {
                 0 | 1 => {
                     // FAN_AIMED / FAN
@@ -2622,9 +2870,20 @@ pub fn spawn_bullet_pattern(world: &mut World, props: &BulletProps) {
             let mut ex_int0 = 0;
             let mut ex_int1 = 0;
             if props.flags & 0x10 != 0 {
-                let dir = if props.ex_floats[1] <= -999.0 { angle } else { props.ex_floats[1] };
-                ex_accel = [dir.cos() * props.ex_floats[0], dir.sin() * props.ex_floats[0]];
-                ex_int0 = if props.ex_ints[0] > 0 { props.ex_ints[0] } else { 99999 };
+                let dir = if props.ex_floats[1] <= -999.0 {
+                    angle
+                } else {
+                    props.ex_floats[1]
+                };
+                ex_accel = [
+                    dir.cos() * props.ex_floats[0],
+                    dir.sin() * props.ex_floats[0],
+                ];
+                ex_int0 = if props.ex_ints[0] > 0 {
+                    props.ex_ints[0]
+                } else {
+                    99999
+                };
             } else if props.flags & 0x20 != 0 {
                 ex_f = [props.ex_floats[0], props.ex_floats[1]];
                 ex_int0 = props.ex_ints[0];
@@ -2634,7 +2893,11 @@ pub fn spawn_bullet_pattern(world: &mut World, props: &BulletProps) {
                 // 0x100 absolute): shared dirChange* setup.
                 ex_f = [
                     props.ex_floats[0],
-                    if props.ex_floats[1] >= 0.0 { props.ex_floats[1] } else { speed },
+                    if props.ex_floats[1] >= 0.0 {
+                        props.ex_floats[1]
+                    } else {
+                        speed
+                    },
                 ];
                 ex_int0 = props.ex_ints[0];
                 ex_int1 = props.ex_ints[1];
@@ -2644,34 +2907,212 @@ pub fn spawn_bullet_pattern(world: &mut World, props: &BulletProps) {
                 // dirChangeSpeed = exFloats[0] (or the spawn speed if < 0),
                 // dirChangeMaxTimes = exInts[0] (BulletManager.cpp:363). Stored in
                 // the same ex_f[1]/ex_int1 slots the per-frame bounce reads.
-                ex_f[1] = if props.ex_floats[0] >= 0.0 { props.ex_floats[0] } else { speed };
+                ex_f[1] = if props.ex_floats[0] >= 0.0 {
+                    props.ex_floats[0]
+                } else {
+                    speed
+                };
                 ex_int1 = props.ex_ints[0];
             }
             let bullet_type = props.sprite.clamp(0, 9) as usize;
-            world.bullets.push(Bullet {
-                pos: props.pos,
-                angle,
-                speed,
-                sprite: base + props.sprite_offset.max(0) as u32,
-                spawn_factor,
-                oob_count: 0,
-                sprite_offset: props.sprite_offset.max(0),
-                height: world.bullet_heights[bullet_type],
-                width: world.bullet_widths[bullet_type],
-                spawn_delay,
-                timer: 0,
-                ex_flags: props.flags,
-                ex_accel,
-                ex_f,
-                ex_int0,
-                ex_int1,
-                ex_count: 0,
-                grazed: false,
-                despawn_timer: 0,
-            });
+            world.bullets.insert(
+                insert_at,
+                Bullet {
+                    pool_index,
+                    pos: props.pos,
+                    angle,
+                    speed,
+                    sprite: base + props.sprite_offset.max(0) as u32,
+                    spawn_factor,
+                    oob_count: 0,
+                    sprite_offset: props.sprite_offset.max(0),
+                    height: world.bullet_heights[bullet_type],
+                    width: world.bullet_widths[bullet_type],
+                    spawn_delay,
+                    timer: 0,
+                    ex_flags: props.flags,
+                    ex_accel,
+                    ex_f,
+                    ex_int0,
+                    ex_int1,
+                    ex_count: 0,
+                    grazed: false,
+                    despawn_timer: 0,
+                },
+            );
         }
     }
     if props.flags & 0x200 != 0 && props.sfx >= 0 {
         world.events.push(WorldEvent::Sfx(props.sfx));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn world() -> World {
+        World {
+            rng: Rng::new(0x1234),
+            difficulty: 4,
+            rank: 16,
+            sub_rank: 0,
+            min_rank: 14,
+            max_rank: 18,
+            player_pos: [192.0, 384.0],
+            bullets: Vec::new(),
+            next_bullet_index: 0,
+            lasers: Vec::new(),
+            events: Vec::new(),
+            enemy_slots: [false; 256],
+            pending_spawns: Vec::new(),
+            kill_trash: false,
+            boss_present: false,
+            power: 128,
+            character: 1,
+            shot_type: 1,
+            time_stopped: false,
+            bomb_active: false,
+            spellcard_active: 0,
+            bullet_heights: [16.0; 10],
+            bullet_widths: [16.0; 10],
+            effects: Vec::new(),
+            next_effect_index: 0,
+            eff_scripts: HashMap::new(),
+            random_item_spawn_index: 0,
+            random_item_table_index: 0,
+        }
+    }
+
+    #[test]
+    fn enemy_create_initializes_child_inline_before_parent_rng_draw() {
+        fn instruction(data: &mut Vec<u8>, time: i32, opcode: i16, args: &[u8]) {
+            data.extend(time.to_le_bytes());
+            data.extend(opcode.to_le_bytes());
+            data.extend(((12 + args.len()) as i16).to_le_bytes());
+            data.extend([0, 31, 0, 0]);
+            data.extend(args);
+        }
+        let mut data = Vec::new();
+        let mut spawn = Vec::new();
+        spawn.extend(1i32.to_le_bytes());
+        spawn.extend([0; 12]);
+        spawn.extend(1i16.to_le_bytes());
+        spawn.extend((-1i16).to_le_bytes());
+        spawn.extend(100i32.to_le_bytes());
+        instruction(&mut data, 0, 95, &spawn);
+        let random_args = [(-10001i32).to_le_bytes(), 65535i32.to_le_bytes()].concat();
+        instruction(&mut data, 0, 6, &random_args);
+        instruction(&mut data, 1, 0, &[]);
+        let child_offset = data.len() as u32;
+        instruction(&mut data, 0, 6, &random_args);
+        instruction(&mut data, 1, 0, &[]);
+        let ecl = Ecl {
+            data,
+            sub_offsets: vec![0, child_offset],
+            timeline_offset: 0,
+        };
+        let mut world = world();
+        let mut expected = world.rng;
+        let first = expected.u32_in_range(65535) as i32;
+        let second = expected.u32_in_range(65535) as i32;
+        let parent = Enemy::spawn(
+            &ecl,
+            &mut world,
+            &SpawnReq {
+                sub: 0,
+                pos: [0.0; 3],
+                life: 1,
+                item: -1,
+                score: 100,
+                mirror: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            (parent.pool_index, world.pending_spawns[0].pool_index),
+            (0, 1)
+        );
+        assert_eq!(world.pending_spawns[0].ctx.ivars[0], first);
+        assert_eq!(parent.ctx.ivars[0], second);
+        assert_eq!(world.rng, expected);
+        world.enemy_slots.fill(true);
+        assert!(
+            Enemy::spawn(
+                &ecl,
+                &mut world,
+                &SpawnReq {
+                    sub: 0,
+                    pos: [0.0; 3],
+                    life: 1,
+                    item: -1,
+                    score: 100,
+                    mirror: false,
+                }
+            )
+            .is_none()
+        );
+        assert_eq!(world.rng, expected);
+    }
+
+    #[test]
+    fn slot_interrupt_129_and_player_shot_variable_use_original_values() {
+        let mut world = world();
+        let ecl = Ecl {
+            data: Vec::new(),
+            sub_offsets: Vec::new(),
+            timeline_offset: 0,
+        };
+        let mut enemy = Enemy::default();
+        let args = [2i32.to_le_bytes(), 7i32.to_le_bytes()].concat();
+        let instr = Instr {
+            time: 0,
+            opcode: 129,
+            offset_to_next: 20,
+            skip_for_difficulty: 31,
+            args: &args,
+        };
+        enemy.exec(&ecl, &mut world, &instr);
+        assert_eq!(
+            enemy.sub_interrupts,
+            [None, None, Some(7), None, None, None, None, None]
+        );
+        assert_eq!(enemy.get_i32(-10025, &world), 3);
+    }
+
+    #[test]
+    fn timed_out_spell_end_does_not_cancel_replacement_pattern() {
+        let mut world = world();
+        world.spellcard_active = 2;
+        spawn_bullet_pattern(
+            &mut world,
+            &BulletProps {
+                count1: 1,
+                count2: 1,
+                ..Default::default()
+            },
+        );
+        let ecl = Ecl {
+            data: Vec::new(),
+            sub_offsets: Vec::new(),
+            timeline_offset: 0,
+        };
+        let mut enemy = Enemy::default();
+        enemy.exec(
+            &ecl,
+            &mut world,
+            &Instr {
+                time: 0,
+                opcode: 94,
+                offset_to_next: 12,
+                skip_for_difficulty: 31,
+                args: &[],
+            },
+        );
+        assert_eq!(world.spellcard_active, 0);
+        assert_eq!(world.bullets[0].despawn_timer, 0);
+        assert!(
+            matches!(&world.events[0], WorldEvent::SpellcardEnd {points, bonus: 0} if points.is_empty())
+        );
     }
 }

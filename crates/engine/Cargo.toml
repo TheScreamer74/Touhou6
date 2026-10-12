@@ -19,6 +19,7 @@ web-time = "1"
 # Native-only: rodio audio + blocking executor.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rodio = "0.19"
+gilrs = "0.11.2"
 pollster = "0.4"
 
 # Web: wgpu canvas backend, web-audio, JS glue.
@@ -30,8 +31,9 @@ wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 console_error_panic_hook = "0.1"
 web-sys = { version = "0.3", features = [
-    "Document", "Window", "Element", "HtmlCanvasElement",
+    "Document", "Window", "Element", "HtmlCanvasElement", "EventTarget",
     "AudioContext", "AudioBuffer", "AudioBufferSourceNode",
     "AudioDestinationNode", "GainNode", "AudioParam", "AudioContextState",
+    "Navigator", "Gamepad", "GamepadButton",
 ] }
 js-sys = "0.3"

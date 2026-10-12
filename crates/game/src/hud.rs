@@ -12,6 +12,8 @@ use th06_formats::anm0::Entry;
 
 use crate::anm_vm::AnmRunner;
 
+pub type ScriptState = ([f32; 4], [f32; 2], [f32; 2], f32);
+
 pub struct Hud {
     /// front.anm sprite index -> pixel rect [x, y, w, h].
     sprites: HashMap<u32, [f32; 4]>,
@@ -35,7 +37,13 @@ impl Hud {
             .map(|(_, instrs)| AnmRunner::new(instrs.clone()))
             .collect();
         let ids = front.scripts.iter().map(|(id, _)| *id).collect();
-        Self { sprites, tex_slot, tex_size: front.width as f32, runners, ids }
+        Self {
+            sprites,
+            tex_slot,
+            tex_size: front.width as f32,
+            runners,
+            ids,
+        }
     }
 
     pub fn tick(&mut self) {
@@ -56,7 +64,7 @@ impl Hud {
     /// [x, y, w, h], self-placed pos, scale and alpha. The boss UI repositions
     /// and re-scales these sprites itself (`Gui::DrawGameScene`) but keeps the
     /// script's own scaleY/alpha (e.g. the health bar's 0.3 height + fade-in).
-    pub fn script_state(&self, id: u32) -> Option<([f32; 4], [f32; 2], [f32; 2], f32)> {
+    pub fn script_state(&self, id: u32) -> Option<ScriptState> {
         let idx = self.ids.iter().position(|&i| i == id)?;
         let r = &self.runners[idx];
         let sprite = r.sprite?;
@@ -88,14 +96,16 @@ impl Hud {
         for (r, &id) in self.runners.iter().zip(&self.ids) {
             // Boss frame / health bar (scripts 19/20/21) are placed by the boss
             // UI in stage.rs each frame, not self-placed here.
-            if matches!(id, 19 | 20 | 21) {
+            if matches!(id, 19..=21) {
                 continue;
             }
             if !r.visible() || !r.positioned {
                 continue;
             }
             let Some(sprite) = r.sprite else { continue };
-            let Some(&[x, y, w, h]) = self.sprites.get(&sprite) else { continue };
+            let Some(&[x, y, w, h]) = self.sprites.get(&sprite) else {
+                continue;
+            };
             let sw = w * r.scale[0];
             let sh = h * r.scale[1];
             // op23 AnchorTopLeft -> pos is the top-left corner, else the centre.

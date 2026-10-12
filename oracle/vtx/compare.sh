@@ -2,18 +2,22 @@
 # Vertex oracle: diff the port's scene() quad-corner projections against the real
 # decomp Draw3 (+ spec-exact SetupCamera). Usage: ./compare.sh <stage 1-6> <frame>
 set -euo pipefail
-cd "$(dirname "$0")"
-N="${1:-1}"; FRAME="${2:-1}"; ROOT=../..
-./build.sh >/dev/null
-[ -f "/tmp/stg${N}bg.anm" ] || \
-  (cd "$ROOT" && cargo run -q -p th06 --example extract_ecl --release -- ../res/ST.DAT "stg${N}bg.anm" "/tmp/stg${N}bg.anm" >/dev/null)
-(cd "$ROOT" && cargo run -q -p th06 --example bg_vtx_dump --release -- ../res/ST.DAT "$N" "$FRAME" /tmp/vtx_quads.txt) > /tmp/vtx_port.txt
-/tmp/oracle_vtx "/tmp/stg${N}bg.anm" /tmp/vtx_quads.txt > /tmp/vtx_decomp.txt
+HERE="$(cd "$(dirname "$0")" && pwd)"; cd "$HERE"
+source "$HERE/../common.sh"
+oracle_check_assets
+N="${1:-1}"; FRAME="${2:-1}"; OUT="$(oracle_output_dir)"
+oracle_check_stage "$N"
+if [ "${TH06_SKIP_ORACLE_BUILD:-0}" != 1 ]; then "$HERE/build.sh"; fi
+cd "$ORACLE_ROOT"
+cargo build -q -p th06 --release --example extract_ecl --example bg_vtx_dump
+target/release/examples/extract_ecl "$ST_DAT" "stg${N}bg.anm" "$OUT/stg${N}bg.anm" >/dev/null
+target/release/examples/bg_vtx_dump "$ST_DAT" "$N" "$FRAME" "$OUT/vtx_stage${N}_quads.txt" > "$OUT/vtx_stage${N}_port.txt"
+/tmp/oracle_vtx "$OUT/stg${N}bg.anm" "$OUT/vtx_stage${N}_quads.txt" > "$OUT/vtx_stage${N}_decomp.txt"
 
 # Each line = 4 screen (x,y) corners. Draw3 bakes the Y-flip into the world
 # matrix, so its corner emission order is the reverse of the port's -- the quad
 # (set of 4 points) is what matters, not the order. Sort each quad's 4 corners
-# (by y then x) on both sides, then compare with a 0.5px tolerance (f32 vs float).
+# (by y then x) on both sides, then compare with a 1.5px tolerance (f32 vs float).
 awk -v N="$N" -v FR="$FRAME" '
   function sortquad(arr,   i,j,tx,ty,p){
     # arr[1..8] = x0 y0 .. x3 y3 ; bubble-sort the 4 points by (y,x)
@@ -49,9 +53,11 @@ awk -v N="$N" -v FR="$FRAME" '
     prevp=$0
   }
   END{
-    if(FNR!=nr){ printf "LINE COUNT MISMATCH port=%d decomp=%d stage %s\n", nr, FNR, N; exit }
+    if(FNR!=nr){ printf "LINE COUNT MISMATCH port=%d decomp=%d stage %s\n", nr, FNR, N; exit 1 }
     onscreen = nr - skipped;
+    if(onscreen<=0){ print "NO ON-SCREEN OBSERVATIONS"; exit 1 }
     if(gmax<=1.5) printf "IDENTICAL (<=1.5px) stage %s frame %s: %d on-screen quads (%d off-screen/near-plane skipped), max %.3fpx\n", N, FR, onscreen, skipped, gmax;
-    else printf "DIVERGENCE stage %s frame %s: %d on-screen quads, max %.2fpx at quad %d\n", N, FR, onscreen, gmax, grow
+    else { printf "DIVERGENCE stage %s frame %s: %d on-screen quads, max %.2fpx at quad %d\n", N, FR, onscreen, gmax, grow; exit 1 }
   }
-' /tmp/vtx_port.txt /tmp/vtx_decomp.txt
+' "$OUT/vtx_stage${N}_port.txt" "$OUT/vtx_stage${N}_decomp.txt"
+echo "Evidence: $OUT"

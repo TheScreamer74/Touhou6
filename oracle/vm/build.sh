@@ -5,8 +5,9 @@
 # (engine_stub/ + stub/), and applying a handful of 64-bit / MSVC patches.
 # Output: /tmp/oracle_vm. Run: ./build.sh && /tmp/oracle_vm <ecldata5.ecl> <frames>
 set -euo pipefail
-cd "$(dirname "$0")"
-DECOMP="../../../refs/th06-decomp/src"
+HERE="$(cd "$(dirname "$0")" && pwd)"; cd "$HERE"
+source "$HERE/../common.sh"
+oracle_check_source
 [ -d "$DECOMP" ] || { echo "decomp not found at $DECOMP"; exit 1; }
 
 rm -rf build && mkdir build

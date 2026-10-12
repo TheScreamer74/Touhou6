@@ -1,51 +1,117 @@
-# Web build (private beta)
+# Web build
 
-Runs the engine in the browser via WebAssembly. **No game assets are bundled
-or served** — each visitor uploads their own `th06` folder, and those bytes
-stay in their browser (read locally, never sent to any server).
+The browser can load a hosted game set through `assets.json`, or read the
+player's own game folder. Personal files are read locally and never uploaded.
+Scores, settings and replays stay in browser storage. The in-game **Sauvegardes
+et replays** button imports and exports `score.dat` and the 15 replay slots.
 
 ## Build
 
-Needs [`wasm-pack`](https://rustwasm.github.io/wasm-pack/):
-
 ```sh
-cargo install wasm-pack          # once
-
-# from the repo root (touhou6/):
 wasm-pack build crates/game --release --target web --out-dir ../../web/pkg
 ```
 
-This produces `web/pkg/th06.js` + `web/pkg/th06_bg.wasm`, which
-`web/index.html` imports.
-
-## Run locally
-
-The module must be served over HTTP (ES-module imports + wasm MIME), not
-opened as a `file://`:
+The output is `web/pkg/th06.js` and `web/pkg/th06_bg.wasm`. Serve the directory
+over HTTP; the module cannot be opened through `file://`.
 
 ```sh
-cd web && python3 -m http.server 8080
-# open http://localhost:8080
+cd web
+python3 -m http.server 8080
 ```
 
-Select your game folder (the one with `TL.DAT`, `CM.DAT`, `ST.DAT`,
-`IN.DAT`, `th06e_ST.DAT` and `bgm/`).
+## Hosted game files
 
-After the first load the uploaded files are cached **on your device** in
-IndexedDB, so a return visit shows a **Play** button and skips the folder
-picker (a **Use different files** button clears the cache and re-picks). The
-cache is local — nothing is uploaded — and a version tag invalidates it if the
-stored format ever changes; an incomplete/corrupt set falls back to the picker.
+If `assets.json` exists, the page offers **Jouer**. Its `files` object maps the
+names consumed by Rust to same-origin URLs, relative to the page. Example:
 
-## Access
+```json
+{
+  "files": {
+    "TL.DAT": "res/TL.DAT",
+    "CM.DAT": "res/CM.DAT",
+    "ST.DAT": "res/ST.DAT",
+    "IN.DAT": "res/IN.DAT",
+    "ED.DAT": "res/ED.DAT",
+    "MD.DAT": "res/MD.DAT",
+    "th06e_ST.DAT": "res/th06e_ST.DAT",
+    "th06_01.wav": "res/bgm/th06_01.ogg",
+    "th06_02.wav": "res/bgm/th06_02.ogg",
+    "th06_03.wav": "res/bgm/th06_03.ogg",
+    "th06_04.wav": "res/bgm/th06_04.ogg",
+    "th06_05.wav": "res/bgm/th06_05.ogg",
+    "th06_06.wav": "res/bgm/th06_06.ogg",
+    "th06_07.wav": "res/bgm/th06_07.ogg",
+    "th06_08.wav": "res/bgm/th06_08.ogg",
+    "th06_09.wav": "res/bgm/th06_09.ogg",
+    "th06_10.wav": "res/bgm/th06_10.ogg",
+    "th06_11.wav": "res/bgm/th06_11.ogg",
+    "th06_12.wav": "res/bgm/th06_12.ogg",
+    "th06_13.wav": "res/bgm/th06_13.ogg",
+    "th06_14.wav": "res/bgm/th06_14.ogg",
+    "th06_15.wav": "res/bgm/th06_15.ogg",
+    "th06_16.wav": "res/bgm/th06_16.ogg",
+    "th06_17.wav": "res/bgm/th06_17.ogg"
+  }
+}
+```
 
-There is no login. Access is implicit: only someone who already owns the
-game files can play (the page is useless without them), and nothing is
-uploaded. If you want to keep the beta private anyway, restrict it at the
-host (HTTP basic auth, signed/expiring URLs) — not in the page.
+The `.wav` keys identify tracks; their bytes may be Ogg for browser decoding.
+Keep the original sample rate when converting music so `.pos` loop points
+remain correct. `MD.DAT` contains `musiccmt.txt` (Shift-JIS) and the 17 `.pos`
+files (two little-endian u32 sample offsets each). Loose `.pos` files and
+`musiccmt.txt` are also supported. `ED.DAT` contains the six endings and the
+staff roll. `th06e_ST.DAT` supplies translated stage text when present.
 
-## Hosting
+Downloads use two concurrent streams, report progress, abort together on an
+error, and enforce a 64 MiB per-file / 1 GiB total input limit. The engine and
+decoded audio need additional memory. Hosted files use the HTTP cache rather
+than duplicating the whole hosted set in IndexedDB.
 
-Upload `web/index.html` and `web/pkg/` to any static host. Serve `.wasm`
-with `Content-Type: application/wasm`. That is the entire deployment — there
-are no game files on the server.
+## Personal game folder
+
+Without a hosted manifest, the folder picker is immediately available. Select
+the directory containing `TL.DAT`, `CM.DAT`, `ST.DAT`, `IN.DAT`, `ED.DAT`,
+`MD.DAT` and `bgm/`. Archives and music are selected by their basename,
+case-insensitively. Executables, documentation and unrelated files are ignored.
+Duplicate recognized names are rejected so different installations cannot be
+mixed silently. A minimal four-archive set can start; the complete set is
+needed for endings and musical comments.
+
+Personal files are saved in IndexedDB when storage is available. A return
+visit reads only cached names before displaying **Jouer avec mes fichiers**;
+the large file contents are loaded after that click. Storage failure does not
+prevent the current game from starting. **Changer de dossier** clears this
+file cache, while preserving scores, settings and replays. Existing v1 file
+caches remain readable.
+
+## Deployment and updates
+
+Upload `index.html`, `pkg/`, and optionally `assets.json` with its referenced
+files. Serve `.wasm` as `application/wasm`. To publish a new engine build, add
+`build.json` beside the page:
+
+```json
+{"version":"git-commit-or-build-id"}
+```
+
+The page fetches this small file without caching and uses its version in both
+the JS and WASM URLs. Change the version only after both generated files have
+been uploaded. An engine update does not invalidate the personal asset cache,
+HTTP asset URLs, scores or replays. Serve `index.html` with revalidation or
+`Cache-Control: no-cache`; `build.json` alone cannot refresh an already cached
+old HTML page. Content-hashed asset URLs may be used independently in the
+manifest when artwork or music changes.
+
+The page has no login. Any access restriction belongs on the host.
+
+## Compatibility limits
+
+Music playback uses the original WAV tracks (or hosted Ogg conversions), not the
+legacy MIDI synthesizer. Rendering uses 32-bit color; the original 16-bit
+R5G6B5 option is disabled. Browser fullscreen depends on user activation and
+browser permission; the F key and on-screen button request it directly.
+Japanese text uses the bundled Noto font instead of Windows GDI/MS Gothic.
+
+Replay files use the original T6RP format. Deterministic recording/playback is
+regression-tested within this engine; accepting an original replay does not
+establish frame-for-frame equivalence with the Windows executable.

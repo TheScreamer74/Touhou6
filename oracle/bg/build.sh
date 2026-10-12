@@ -6,7 +6,8 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 cd "$HERE"
-DECOMP="../../../refs/th06-decomp/src"
+source "$HERE/../common.sh"
+oracle_check_source
 VM="../vm"
 [ -d "$DECOMP" ] || { echo "decomp not found"; exit 1; }
 

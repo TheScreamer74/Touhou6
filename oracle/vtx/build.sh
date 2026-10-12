@@ -4,7 +4,9 @@
 # builds. Output: /tmp/oracle_vtx
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"; cd "$HERE"
-DECOMP="../../../refs/th06-decomp/src"; VM="../vm"
+source "$HERE/../common.sh"
+oracle_check_source
+VM="../vm"
 rm -rf build && mkdir build
 cp "$DECOMP"/*.hpp "$DECOMP"/*.cpp build/
 for h in "$VM"/engine_stub/*.hpp; do

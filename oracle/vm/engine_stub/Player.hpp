@@ -8,7 +8,7 @@ namespace th06 {
 
 struct BombInfo { i32 isInUse=0; };
 struct Player {
-    D3DXVECTOR3 positionCenter{192,400,0};
+    D3DXVECTOR3 positionCenter{192,384,0};
     D3DXVECTOR3 positionOfLastEnemyHit{0,0,0};
     BombInfo bombInfo;
     f32 AngleToPlayer(D3DXVECTOR3* p){ return std::atan2(positionCenter.y-p->y, positionCenter.x-p->x); }

@@ -6,7 +6,18 @@
 pub mod anm_vm;
 pub mod background;
 pub mod ecl_vm;
+pub mod ending;
 pub mod hud;
+pub mod key_config;
+pub mod menu_art;
+pub mod music_room;
+pub mod options;
+pub mod replay;
+pub mod replay_menu;
+pub mod result;
+pub mod retry_menu;
+pub mod save;
+pub mod selection;
 pub mod stage;
 pub mod title;
 
@@ -16,14 +27,15 @@ pub mod web;
 use std::collections::HashMap;
 
 use th06_engine::audio::Audio;
-use th06_engine::{compose_rgba, DrawCmd, Engine, Frame, Input, Key, Texture};
+use th06_engine::{DrawCmd, Engine, Frame, Input, Key, Texture, compose_rgba};
 use th06_formats::anm0::Anm0;
 use th06_formats::ecl::Ecl;
 use th06_formats::msg::Msg;
 use th06_formats::std::Std;
 
 use background::Background;
-pub use stage::Character;
+use selection::{RunMode, Selection, SelectionAction};
+pub use stage::{Character, Difficulty};
 use stage::{Event, Stage};
 use title::{Title, TitleAction};
 
@@ -37,6 +49,8 @@ pub struct GameFiles {
     pub st: HashMap<String, Vec<u8>>,
     pub inn: HashMap<String, Vec<u8>>,
     pub st_en: HashMap<String, Vec<u8>>,
+    pub ed: HashMap<String, Vec<u8>>,
+    pub music_comments: Vec<u8>,
     /// BGM wavs keyed by basename ("th06_01.wav", ...).
     pub bgm: HashMap<String, Vec<u8>>,
     /// Per-track loop points (loop_start, loop_end) in sample-frames, from the
@@ -45,31 +59,151 @@ pub struct GameFiles {
     pub bgm_pos: HashMap<String, (u32, u32)>,
 }
 
+/// Reject incomplete uploads before texture creation can index missing entries.
+pub fn validate_game_files(files: &GameFiles) -> Result<(), String> {
+    let required =
+        |archive: &HashMap<String, Vec<u8>>, label: &str, names: &[&str]| -> Result<(), String> {
+            for name in names {
+                if !archive.contains_key(*name) {
+                    return Err(format!(
+                        "{label}: missing {name}. Use the full Touhou 6 v1.02h game folder."
+                    ));
+                }
+            }
+            Ok(())
+        };
+    required(
+        &files.tl,
+        "TL.DAT",
+        &[
+            "title00.jpg",
+            "title01.anm",
+            "title02.anm",
+            "title03.anm",
+            "title04.anm",
+            "select00.jpg",
+            "select01.anm",
+            "select02.anm",
+            "select03.anm",
+            "select04.anm",
+            "select05.anm",
+            "slpl00a.anm",
+            "slpl00b.anm",
+            "slpl01a.anm",
+            "slpl01b.anm",
+            "replay00.anm",
+        ],
+    )?;
+    required(
+        &files.cm,
+        "CM.DAT",
+        &[
+            "player00.anm",
+            "player01.anm",
+            "front.anm",
+            "etama3.anm",
+            "etama4.anm",
+            "face00a.anm",
+            "face00b.anm",
+            "face00c.anm",
+            "face01a.anm",
+            "face01b.anm",
+            "face01c.anm",
+        ],
+    )?;
+    required(
+        &files.inn,
+        "IN.DAT",
+        &["ascii.anm", "ascii_a.png", "text.anm", "th06logo.jpg"],
+    )?;
+    for stage in 1..=TOTAL_STAGES {
+        for name in [
+            format!("ecldata{stage}.ecl"),
+            format!("stage{stage}.std"),
+            format!("stg{stage}bg.anm"),
+            format!("stg{stage}enm.anm"),
+            format!("msg{stage}.dat"),
+        ] {
+            required(&files.st, "ST.DAT", &[&name])?;
+        }
+    }
+    // Every ANM names its image files; check both color and optional mask now.
+    for (label, archive) in [
+        ("TL.DAT", &files.tl),
+        ("CM.DAT", &files.cm),
+        ("ST.DAT", &files.st),
+        ("IN.DAT", &files.inn),
+    ] {
+        for (name, bytes) in archive.iter().filter(|(name, _)| name.ends_with(".anm")) {
+            let anm = Anm0::parse(bytes).map_err(|_| format!("{label}: invalid {name}"))?;
+            for entry in anm.entries {
+                if entry.name != "@" {
+                    required(archive, label, &[basename(&entry.name)])?;
+                    if let Some(mask) = entry.alpha_name {
+                        required(archive, label, &[basename(&mask)])?;
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Every sound effect (SoundPlayer.cpp g_SFXList order; index == SoundIdx).
 /// Loaded by basename from the archive; absent ones are simply skipped.
 use stage::SFX_BY_IDX as SFX_NAMES;
 
 /// All BGM tracks used in the main game (title + 6 stages × field/boss).
-const BGM_NAMES: [&str; 13] = [
-    "th06_01.wav", "th06_02.wav", "th06_03.wav", "th06_04.wav", "th06_05.wav", "th06_06.wav",
-    "th06_07.wav", "th06_08.wav", "th06_09.wav", "th06_10.wav", "th06_11.wav", "th06_12.wav",
+const BGM_NAMES: [&str; 17] = [
+    "th06_01.wav",
+    "th06_02.wav",
+    "th06_03.wav",
+    "th06_04.wav",
+    "th06_05.wav",
+    "th06_06.wav",
+    "th06_07.wav",
+    "th06_08.wav",
+    "th06_09.wav",
+    "th06_10.wav",
+    "th06_11.wav",
+    "th06_12.wav",
     "th06_13.wav",
+    "th06_14.wav",
+    "th06_15.wav",
+    "th06_16.wav",
+    "th06_17.wav",
 ];
 
 /// Number of normal-mode stages.
 pub const N_STAGES: usize = 6;
+pub const TOTAL_STAGES: usize = 7;
 /// Per-stage field theme.
-const STAGE_BGM: [&str; N_STAGES] =
-    ["th06_02.wav", "th06_04.wav", "th06_06.wav", "th06_08.wav", "th06_10.wav", "th06_12.wav"];
+const STAGE_BGM: [&str; TOTAL_STAGES] = [
+    "th06_02.wav",
+    "th06_04.wav",
+    "th06_06.wav",
+    "th06_08.wav",
+    "th06_10.wav",
+    "th06_12.wav",
+    "th06_14.wav",
+];
 /// Per-stage boss theme.
-const BOSS_BGM: [&str; N_STAGES] =
-    ["th06_03.wav", "th06_05.wav", "th06_07.wav", "th06_09.wav", "th06_11.wav", "th06_13.wav"];
+const BOSS_BGM: [&str; TOTAL_STAGES] = [
+    "th06_03.wav",
+    "th06_05.wav",
+    "th06_07.wav",
+    "th06_09.wav",
+    "th06_11.wav",
+    "th06_13.wav",
+    "th06_15.wav",
+];
 /// Per-stage boss dialogue portrait (Gui.cpp FACE_STAGE_A), all in ST.DAT.
-const BOSS_FACE: [&str; N_STAGES] =
-    ["face03a", "face05a", "face06a", "face08a", "face09a", "face09b"];
+const BOSS_FACE: [&str; TOTAL_STAGES] = [
+    "face03a", "face05a", "face06a", "face08a", "face09a", "face09b", "face12a",
+];
 /// Whether stage N ships a separate boss sprite sheet (stgNenm2); stages 3 & 4
 /// keep their boss in the main enemy sheet.
-const HAS_ENM2: [bool; N_STAGES] = [true, true, false, false, true, true];
+const HAS_ENM2: [bool; TOTAL_STAGES] = [true, true, false, false, true, true, true];
 
 /// ANM texture names look like "data/title/title01.png"; archive entries
 /// are flat basenames.
@@ -90,6 +224,8 @@ struct StageData {
     bg: Anm0,
     bg_tex: usize,
     boss_face_tex: usize,
+    boss_portraits: Vec<stage::PortraitAsset>,
+    extra_portrait: Option<stage::PortraitAsset>,
     /// SPELLCARDSTART id -> (texture slot, width, height) for the pre-baked
     /// original Japanese spellcard-name textures.
     spell_name_tex: HashMap<i32, (usize, f32, f32)>,
@@ -110,12 +246,22 @@ struct Assets {
     etama4_tex: usize,
     front: Anm0,
     text: Anm0,
+    ascii: Anm0,
     face_chara: Anm0,
+    player_portraits: [Vec<stage::PortraitAsset>; 2],
     stages: Vec<StageData>,
 }
 
 impl Assets {
-    fn new_stage(&self, idx: usize, character: Character) -> Stage {
+    fn new_stage(
+        &self,
+        idx: usize,
+        character: Character,
+        difficulty: Difficulty,
+        practice: bool,
+        starting_lives: i32,
+        starting_bombs: i32,
+    ) -> Stage {
         let sd = &self.stages[idx];
         let ecl = Ecl::parse(sd.ecl_data.clone()).expect("parse ecl");
         let mut pairs = vec![(&sd.enm.entries[0], sd.enm_tex)];
@@ -124,12 +270,20 @@ impl Assets {
         }
         let scripts = stage::build_enemy_scripts(&pairs);
         let msg = Msg::parse(sd.msg_data.clone()).expect("parse msg");
-        let background = Std::parse(&sd.std_data)
-            .map(|std| Background::new(std, &sd.bg.entries[0], sd.bg_tex));
+        let background =
+            Std::parse(&sd.std_data).map(|std| Background::new(std, &sd.bg.entries[0], sd.bg_tex));
         let (player_anm, player_tex, face_player_tex) = if character.is_marisa() {
-            (&self.player_marisa.entries[0], self.player_marisa_tex, stage::TEX_FACE_MARISA)
+            (
+                &self.player_marisa.entries[0],
+                self.player_marisa_tex,
+                stage::TEX_FACE_MARISA,
+            )
         } else {
-            (&self.player.entries[0], self.player_tex, stage::TEX_FACE_REIMU)
+            (
+                &self.player.entries[0],
+                self.player_tex,
+                stage::TEX_FACE_REIMU,
+            )
         };
         let cfg = stage::StageConfig {
             face_player_tex,
@@ -137,6 +291,11 @@ impl Assets {
             stage_bgm: STAGE_BGM[idx],
             boss_bgm: BOSS_BGM[idx],
             stage_num: idx as i32 + 1,
+            difficulty,
+            practice,
+            starting_lives,
+            starting_bombs,
+            rng_seed: 0,
         };
         let hud = crate::hud::Hud::new(&self.front.entries[0], stage::TEX_FRONT);
         // text.anm script 7 = TEXT_ENEMY_SPELLCARD_NAME (the announce animation).
@@ -160,13 +319,39 @@ impl Assets {
             .find(|(id, _)| *id == 0)
             .map(|(_, i)| i.clone())
             .unwrap_or_default();
-        Stage::new(
-            ecl, scripts, &self.etama.entries[0], &self.etama4.entries[0], self.etama4_tex,
-            player_anm, player_tex, character, msg,
-            background, hud, cfg, spell_name_script, portrait_script,
-            sd.spell_name_tex.clone(), sd.dialogue_tex.clone(),
-            stage_name_script, sd.stage_name_tex,
-        )
+        let mut result = Stage::new(
+            ecl,
+            scripts,
+            &self.etama.entries[0],
+            &self.etama4.entries[0],
+            self.etama4_tex,
+            player_anm,
+            player_tex,
+            character,
+            msg,
+            background,
+            hud,
+            cfg,
+            spell_name_script,
+            portrait_script,
+            sd.spell_name_tex.clone(),
+            sd.dialogue_tex.clone(),
+            stage_name_script,
+            sd.stage_name_tex,
+        );
+        result.set_portrait_assets(
+            self.player_portraits[usize::from(character.is_marisa())].clone(),
+            sd.boss_portraits.clone(),
+        );
+        result.set_dialogue_scripts(&self.text.entries[0]);
+        result.set_pause_art(stage::PortraitAsset::new(
+            stage::TEX_ASCII,
+            &self.ascii.entries[0],
+        ));
+        if let Some(portrait) = &sd.extra_portrait {
+            result.set_extra_boss_portrait(portrait.clone());
+        }
+        result
     }
 }
 
@@ -180,12 +365,21 @@ pub enum RecordPhase {
 
 pub enum Scene {
     Title,
-    CharSelect { cursor: usize },
+    Selection,
+    MusicRoom,
+    Options,
+    Replay,
+    Ending {
+        player: Box<ending::EndingPlayer>,
+        score: i64,
+    },
+    Continue {
+        stage: Box<Stage>,
+        frozen: Vec<DrawCmd>,
+        score: i64,
+    },
     Stage(Box<Stage>),
-    /// High-score name entry after a game over whose score made the table.
-    NameEntry { score: i64, stage: u8, name: String, sel: usize },
-    /// The high-score table; `highlight` marks a freshly entered row.
-    Leaderboard { highlight: Option<usize> },
+    Result,
 }
 
 /// One high-score table row.
@@ -196,28 +390,50 @@ pub struct ScoreEntry {
     pub stage: u8,
 }
 
-/// Selectable characters for the name-entry ribbon (ResultScreen.cpp char set,
-/// trimmed to the glyphs our ascii font draws).
-const NAME_RIBBON: &str =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,!?+-/ ";
-const RIBBON_COLS: usize = 14;
-const MAX_NAME_LEN: usize = 8;
 const MAX_SCORES: usize = 10;
 
-pub const CHARACTERS: [Character; 4] =
-    [Character::ReimuA, Character::ReimuB, Character::MarisaA, Character::MarisaB];
+pub const CHARACTERS: [Character; 4] = [
+    Character::ReimuA,
+    Character::ReimuB,
+    Character::MarisaA,
+    Character::MarisaB,
+];
 
 pub struct Game {
     scene: Scene,
     title: Title,
+    selection: Selection,
+    music_room: music_room::MusicRoom,
+    options_menu: options::OptionsMenu,
+    retry_menu: retry_menu::RetryMenu,
+    pub options: options::Options,
+    difficulty: Difficulty,
+    mode: RunMode,
+    pub progress: th06_formats::score::ScoreData,
+    progress_path: String,
+    options_path: String,
+    controller_path: String,
+    replay_directory: String,
+    replay_session: Option<replay::Session>,
+    replay_menu: replay_menu::ReplayMenu,
+    replay_slots: Vec<Option<th06_formats::replay::Replay>>,
+    ending_assets: Result<ending::EndingAssets, ending::EndingError>,
+    result: result::ResultScreen,
+    pending_stats: Option<result::RunStats>,
+    result_stats: Option<result::RunStats>,
+    active_frames: u32,
+    title_idle: u16,
+    demo_frames: Option<u32>,
+    demo_replay: Option<th06_formats::replay::Replay>,
+    pub persistence_error: Option<String>,
+    starting_lives: i32,
+    starting_bombs: i32,
     audio: Option<Audio>,
     assets: Assets,
     /// Stage currently being played (0-based), and the chosen character — used
     /// to build the next stage on clear.
     current_stage: usize,
     character: Character,
-    /// Base texture slot for the character-select art (see build_game).
-    select_tex: usize,
     hiscore: i64,
     /// High-score table (descending), capped at MAX_SCORES.
     scores: Vec<ScoreEntry>,
@@ -236,7 +452,11 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
 
     // Upload a composed texture and return its slot; the optional alpha mask
     // is skipped when absent (some sheets ship without a `_a` mask).
-    let load = |map: &HashMap<String, Vec<u8>>, color: &str, mask: Option<&str>, textures: &mut Vec<Texture>| -> usize {
+    let load = |map: &HashMap<String, Vec<u8>>,
+                color: &str,
+                mask: Option<&str>,
+                textures: &mut Vec<Texture>|
+     -> usize {
         let alpha = mask.and_then(|m| map.get(m)).map(|v| v.as_slice());
         let (rgba, w, h) = compose_rgba(&map[color], alpha);
         let slot = textures.len();
@@ -249,7 +469,10 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
     let mut textures = Vec::new();
     let (bg_rgba, bg_w, bg_h) = compose_rgba(&files.tl["title00.jpg"], None);
     textures.push(engine.create_texture(&bg_rgba, bg_w, bg_h)); // 0
-    let alpha = entry.alpha_name.as_deref().map(|n| files.tl[basename(n)].as_slice());
+    let alpha = entry
+        .alpha_name
+        .as_deref()
+        .map(|n| files.tl[basename(n)].as_slice());
     let (rgba, w, h) = compose_rgba(&files.tl[basename(&entry.name)], alpha);
     textures.push(engine.create_texture(&rgba, w, h)); // 1
     for (archive, color, mask) in [
@@ -265,15 +488,33 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
     }
     textures.push(engine.create_texture(&[255u8; 2 * 2 * 4], 2, 2)); // 7 white
     // 8: ascii font (alpha mask doubles as tintable glyph color).
-    let (rgba, w, h) = compose_rgba(&files.inn["ascii_a.png"], Some(files.inn["ascii_a.png"].as_slice()));
+    let (rgba, w, h) = compose_rgba(
+        &files.inn["ascii_a.png"],
+        Some(files.inn["ascii_a.png"].as_slice()),
+    );
     textures.push(engine.create_texture(&rgba, w, h));
     // 9-10: player dialogue portraits (Reimu, Marisa).
-    load(&files.cm, "face00a.png", Some("face00a_a.png"), &mut textures); // 9
-    load(&files.cm, "face01a.png", Some("face01a_a.png"), &mut textures); // 10
+    load(
+        &files.cm,
+        "face00a.png",
+        Some("face00a_a.png"),
+        &mut textures,
+    ); // 9
+    load(
+        &files.cm,
+        "face01a.png",
+        Some("face01a_a.png"),
+        &mut textures,
+    ); // 10
     // 11: stage 1 background texture.
     load(&files.st, "stg1bg.png", Some("stg1bg_a.png"), &mut textures);
     // 12: Marisa player body sprite (player01).
-    let player_marisa_tex = load(&files.cm, "player01.png", Some("player01_a.png"), &mut textures);
+    let player_marisa_tex = load(
+        &files.cm,
+        "player01.png",
+        Some("player01_a.png"),
+        &mut textures,
+    );
     // 13: power-bar gradient, 2x1 (0xe0e0e0 -> 0x80e0e0) sampled linearly so the
     // HUD power bar is the decomp's exact per-vertex gradient (Gui.cpp:1162-1163).
     debug_assert_eq!(textures.len(), stage::TEX_POWER_GRAD);
@@ -282,26 +523,78 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
     // per-stage textures.
     let etama4_tex = load(&files.cm, "etama4.png", Some("etama4_a.png"), &mut textures);
 
+    let portrait = |archive: &HashMap<String, Vec<u8>>, name: &str, textures: &mut Vec<Texture>| {
+        let tex = load(
+            archive,
+            &format!("{name}.png"),
+            Some(&format!("{name}_a.png")),
+            textures,
+        );
+        let anm = Anm0::parse(&archive[&format!("{name}.anm")]).expect("portrait ANM");
+        stage::PortraitAsset::new(tex, &anm.entries[0])
+    };
+    let player_portraits = std::array::from_fn(|c| {
+        ["a", "b", "c"]
+            .iter()
+            .map(|suffix| portrait(&files.cm, &format!("face{c:02}{suffix}"), &mut textures))
+            .collect()
+    });
+    const BOSS_PORTRAITS: [&[&str]; TOTAL_STAGES] = [
+        &["face03a", "face03b"],
+        &["face05a"],
+        &["face06a", "face06b"],
+        &["face08a", "face08b"],
+        &["face09a", "face09b"],
+        &["face09b", "face10a", "face10b"],
+        &["face08a", "face12a", "face12b"],
+    ];
     // Per-stage sprite sheets + boss faces, appended after the fixed slots.
     let mut stages: Vec<StageData> = Vec::new();
-    for n in 1..=N_STAGES {
+    for n in 1..=TOTAL_STAGES {
         let (enm_tex, enm2, enm2_tex, bg_tex) = if n == 1 {
             // Stage 1 reuses the fixed slots loaded above.
-            (4, Some(Anm0::parse(&files.st["stg1enm2.anm"]).expect("stg1enm2")), 5, 11)
+            (
+                4,
+                Some(Anm0::parse(&files.st["stg1enm2.anm"]).expect("stg1enm2")),
+                5,
+                11,
+            )
         } else {
-            let enm_tex = load(&files.st, &format!("stg{n}enm.png"), Some(&format!("stg{n}enm_a.png")), &mut textures);
+            let enm_tex = load(
+                &files.st,
+                &format!("stg{n}enm.png"),
+                Some(&format!("stg{n}enm_a.png")),
+                &mut textures,
+            );
             let (enm2, enm2_tex) = if HAS_ENM2[n - 1] {
-                let t = load(&files.st, &format!("stg{n}enm2.png"), Some(&format!("stg{n}enm2_a.png")), &mut textures);
-                (Some(Anm0::parse(&files.st[&format!("stg{n}enm2.anm")]).expect("enm2")), t)
+                let t = load(
+                    &files.st,
+                    &format!("stg{n}enm2.png"),
+                    Some(&format!("stg{n}enm2_a.png")),
+                    &mut textures,
+                );
+                (
+                    Some(Anm0::parse(&files.st[&format!("stg{n}enm2.anm")]).expect("enm2")),
+                    t,
+                )
             } else {
                 (None, 0)
             };
-            let bg_tex = load(&files.st, &format!("stg{n}bg.png"), Some(&format!("stg{n}bg_a.png")), &mut textures);
+            let bg_tex = load(
+                &files.st,
+                &format!("stg{n}bg.png"),
+                Some(&format!("stg{n}bg_a.png")),
+                &mut textures,
+            );
             (enm_tex, enm2, enm2_tex, bg_tex)
         };
         let face = BOSS_FACE[n - 1];
-        let boss_face_tex =
-            load(&files.st, &format!("{face}.png"), Some(&format!("{face}_a.png")), &mut textures);
+        let boss_face_tex = load(
+            &files.st,
+            &format!("{face}.png"),
+            Some(&format!("{face}_a.png")),
+            &mut textures,
+        );
         // Pre-bake the original Japanese spellcard names (Shift-JIS in the ecl)
         // into textures — the announce banner draws these instead of the English
         // stopgap. ShowSpellcard colour: 0xfff0f0 text, black shadow (Gui.cpp:235).
@@ -313,7 +606,12 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
                     continue;
                 }
                 // ~18px name height at VM scale 1; white text, black shadow.
-                let img = th06_engine::text::render_shiftjis(&raw, 18.0, [255, 240, 240], Some([0, 0, 0]));
+                let img = th06_engine::text::render_shiftjis(
+                    &raw,
+                    18.0,
+                    [255, 240, 240],
+                    Some([0, 0, 0]),
+                );
                 let slot = textures.len();
                 textures.push(engine.create_texture(&img.rgba, img.width, img.height));
                 spell_name_tex.insert(id, (slot, img.width as f32, img.height as f32));
@@ -334,7 +632,12 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
                 }
                 // White text + black shadow; the line colour (player/boss) is a
                 // draw-time tint (Gui line_colors), so keep the bake neutral.
-                let img = th06_engine::text::render_shiftjis(&raw, 16.0, [255, 255, 255], Some([0, 0, 0]));
+                let img = th06_engine::text::render_shiftjis(
+                    &raw,
+                    16.0,
+                    [255, 255, 255],
+                    Some([0, 0, 0]),
+                );
                 let slot = textures.len();
                 textures.push(engine.create_texture(&img.rgba, img.width, img.height));
                 dialogue_tex.insert(off, (slot, img.width as f32, img.height as f32));
@@ -348,7 +651,12 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
             if end == 0 {
                 return None;
             }
-            let img = th06_engine::text::render_shiftjis(&nm[..end], 20.0, [180, 240, 240], Some([0, 0, 0]));
+            let img = th06_engine::text::render_shiftjis(
+                &nm[..end],
+                20.0,
+                [180, 240, 240],
+                Some([0, 0, 0]),
+            );
             let slot = textures.len();
             textures.push(engine.create_texture(&img.rgba, img.width, img.height));
             Some((slot, img.width as f32, img.height as f32))
@@ -364,22 +672,81 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
             bg: Anm0::parse(&files.st[&format!("stg{n}bg.anm")]).expect("bg"),
             bg_tex,
             boss_face_tex,
+            boss_portraits: BOSS_PORTRAITS[n - 1]
+                .iter()
+                .map(|name| portrait(&files.st, name, &mut textures))
+                .collect(),
+            extra_portrait: (n == 7).then(|| portrait(&files.st, "face12c", &mut textures)),
             spell_name_tex,
             dialogue_tex,
             stage_name_tex,
         });
     }
 
-    // Character-select art (TL.DAT): bg + the four slpl character illustrations
-    // (Reimu A/B, Marisa A/B) + select04 shot-name banners + select03 prompts.
-    let select_tex = textures.len();
-    let (rgba, w, h) = compose_rgba(&files.tl["select00.jpg"], None);
-    textures.push(engine.create_texture(&rgba, w, h)); // +0 bg
-    for art in ["slpl00a", "slpl00b", "slpl01a", "slpl01b", "select04", "select03"] {
-        load(&files.tl, &format!("{art}.png"), Some(&format!("{art}_a.png")), &mut textures);
-    } // +1..+6
+    let title_sheets = [
+        ("title01.anm", 0),
+        ("title02.anm", 27),
+        ("title03.anm", 31),
+        ("title04.anm", 34),
+    ];
+    let title = Title::new(menu_art::MenuArt::load(
+        engine,
+        &files.tl,
+        &mut textures,
+        "title00.jpg",
+        &title_sheets,
+    ));
+    let options_menu = options::OptionsMenu::new(menu_art::MenuArt::load(
+        engine,
+        &files.tl,
+        &mut textures,
+        "title00.jpg",
+        &title_sheets,
+    ));
+    // MainMenu::LoadDiffCharSelect, ANM offsets relative to SELECT01 (0x150).
+    let selection_font = menu_art::MenuFont::load(engine, &files.inn, &mut textures);
+    let selection = Selection::new(
+        menu_art::MenuArt::load(
+            engine,
+            &files.tl,
+            &mut textures,
+            "select00.jpg",
+            &[
+                ("select01.anm", 0),
+                ("select02.anm", 3),
+                ("select05.anm", 5),
+                ("slpl00a.anm", 6),
+                ("slpl00b.anm", 7),
+                ("slpl01a.anm", 8),
+                ("slpl01b.anm", 9),
+                ("select03.anm", 10),
+                ("select04.anm", 12),
+            ],
+        ),
+        selection_font,
+    );
 
-    let title = Title::new(entry, 0, 1);
+    let music_room = music_room::MusicRoom::load(engine, files, &mut textures);
+    let replay_menu = replay_menu::ReplayMenu::new(engine, &files.tl, &files.inn, &mut textures);
+    let mut result = result::ResultScreen::new(engine, &files.tl, &files.inn, &mut textures);
+    result.load_spell_names(
+        engine,
+        &mut textures,
+        stages.iter().flat_map(|stage| {
+            Ecl::parse(stage.ecl_data.clone())
+                .map(|ecl| stage::scan_spell_names(&ecl))
+                .unwrap_or_default()
+        }),
+    );
+    let ending_assets =
+        ending::EndingAssets::load(engine, &files.ed, &files.inn["text.anm"], &mut textures);
+    let retry_menu = retry_menu::RetryMenu::new(menu_art::MenuArt::load(
+        engine,
+        &files.inn,
+        &mut textures,
+        "th06logo.jpg",
+        &[("ascii.anm", 0)],
+    ));
 
     let mut audio = if with_audio { Audio::new() } else { None };
     if let Some(a) = &mut audio {
@@ -404,7 +771,9 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
         etama4: Anm0::parse(&files.cm["etama4.anm"]).expect("parse etama4"),
         etama4_tex,
         front: Anm0::parse(&files.cm["front.anm"]).expect("parse front"),
+        ascii: Anm0::parse(&files.inn["ascii.anm"]).expect("parse ascii"),
         text: Anm0::parse(&files.inn["text.anm"]).expect("parse text"),
+        player_portraits,
         face_chara: Anm0::parse(&files.cm["face00a.anm"]).expect("parse face00a"),
         stages,
     };
@@ -412,11 +781,39 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
     let game = Game {
         scene: Scene::Title,
         title,
+        selection,
+        music_room,
+        options_menu,
+        retry_menu,
+        options: options::Options::default(),
+        difficulty: Difficulty::Normal,
+        mode: RunMode::Story,
+        progress: th06_formats::score::ScoreData::default(),
+        progress_path: "score.dat".into(),
+        options_path: "th06-options.bin".into(),
+        controller_path: "th06-controller.bin".into(),
+        replay_directory: "replay".into(),
+        replay_session: None,
+        persistence_error: None,
+        starting_lives: 3,
+        starting_bombs: 3,
+        replay_menu,
+        replay_slots: Vec::new(),
+        ending_assets,
+        result,
+        pending_stats: None,
+        result_stats: None,
+        active_frames: 0,
+        title_idle: 0,
+        demo_frames: None,
+        demo_replay: files
+            .cm
+            .get("demo00.rpy")
+            .and_then(|b| th06_formats::replay::Replay::parse(b).ok()),
         audio,
         assets,
         current_stage: 0,
         character: Character::ReimuA,
-        select_tex,
         hiscore: 0,
         scores: Vec::new(),
         #[cfg(not(target_arch = "wasm32"))]
@@ -428,6 +825,170 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
 }
 
 impl Game {
+    pub fn configure_storage(&mut self, directory: &str) {
+        let join = |file: &str| {
+            if directory.is_empty() {
+                file.to_string()
+            } else {
+                format!("{}/{file}", directory.trim_end_matches('/'))
+            }
+        };
+        self.set_progress_path(join("score.dat"));
+        self.options_path = join("th06-options.bin");
+        self.controller_path = join("th06-controller.bin");
+        self.replay_directory = join("replay");
+        if let Some(options) =
+            save::load_bytes(&self.options_path).and_then(|b| options::Options::parse(&b))
+        {
+            self.options = options;
+        }
+        self.starting_lives = self.options.life_count as i32 + 1;
+        self.starting_bombs = self.options.bomb_count as i32;
+        #[cfg(not(target_arch = "wasm32"))]
+        th06_engine::set_windowed(self.options.windowed);
+        if let Some(bytes) = save::load_bytes(&self.controller_path).filter(|b| b.len() == 18) {
+            th06_engine::set_controller_mapping(std::array::from_fn(|i| {
+                u16::from_le_bytes([bytes[i * 2], bytes[i * 2 + 1]])
+            }));
+        }
+    }
+    pub fn set_difficulty(&mut self, difficulty: Difficulty) {
+        self.difficulty = difficulty;
+    }
+    pub fn import_progress(&mut self, bytes: &[u8]) -> Result<(), String> {
+        let progress = th06_formats::score::ScoreData::parse(bytes)?;
+        self.set_progress(progress);
+        self.save_progress();
+        self.persistence_error.clone().map_or(Ok(()), Err)
+    }
+    pub fn import_replay(&mut self, bytes: &[u8], slot: usize) -> Result<(), String> {
+        let data = th06_formats::replay::Replay::parse(bytes)?;
+        if slot >= replay::SLOTS {
+            return Err("Invalid replay slot".into());
+        }
+        save::store_bytes(&replay::path(&self.replay_directory, slot), &data.encode())?;
+        self.replay_slots = replay::load_slots(&self.replay_directory);
+        Ok(())
+    }
+    pub fn start_replay(
+        &mut self,
+        data: th06_formats::replay::Replay,
+        index: usize,
+    ) -> Result<(), String> {
+        if index >= TOTAL_STAGES || data.stages[index].is_none() {
+            return Err("Replay has no data for this stage".into());
+        }
+        self.character = CHARACTERS[data.character as usize];
+        self.difficulty = *Difficulty::ALL
+            .get(data.difficulty as usize)
+            .ok_or("Invalid replay difficulty")?;
+        self.mode = if data.difficulty == 4 {
+            RunMode::Extra
+        } else {
+            RunMode::Story
+        };
+        self.current_stage = index;
+        let mut stage = self.assets.new_stage(
+            index,
+            self.character,
+            self.difficulty,
+            false,
+            self.starting_lives,
+            self.starting_bombs,
+        );
+        let mut session = replay::Session::playback(data);
+        session.begin_stage(index, &mut stage)?;
+        self.replay_session = Some(session);
+        self.scene = Scene::Stage(Box::new(stage));
+        Ok(())
+    }
+    pub fn extra_unlocked(&self) -> [bool; 4] {
+        std::array::from_fn(|c| {
+            (1..=3).any(|d| self.progress.stages_cleared_without_continues[c][d] == 99)
+        })
+    }
+    fn practice_stages(&self, character: usize, difficulty: usize) -> usize {
+        (self.progress.stages_cleared[character][difficulty] as usize)
+            .min(if difficulty == 0 { 5 } else { 6 })
+            .max(1)
+    }
+    pub fn set_progress(&mut self, progress: th06_formats::score::ScoreData) {
+        self.progress = progress;
+        self.refresh_score_table();
+    }
+    pub fn set_progress_path(&mut self, path: String) {
+        self.progress_path = path;
+        self.set_progress(save::load_progress(&self.progress_path));
+    }
+    pub fn save_progress(&mut self) {
+        self.persistence_error = save::store_progress(&self.progress, &self.progress_path).err();
+    }
+    fn refresh_score_table(&mut self) {
+        let character = CHARACTERS
+            .iter()
+            .position(|&v| v == self.character)
+            .unwrap_or(0) as u8;
+        self.scores = self
+            .progress
+            .high_scores
+            .iter()
+            .filter(|s| s.character == character && s.difficulty == self.difficulty as u8)
+            .map(|s| ScoreEntry {
+                name: s.name.clone(),
+                score: s.score as i64,
+                stage: s.stage,
+            })
+            .collect();
+        self.scores.sort_by_key(|s| std::cmp::Reverse(s.score));
+        self.scores.truncate(MAX_SCORES);
+        self.hiscore = if self.mode == RunMode::Practice {
+            self.progress.practice_scores[character as usize][self.current_stage]
+                [self.difficulty as usize] as i64
+        } else {
+            self.scores
+                .first()
+                .map(|s| s.score)
+                .unwrap_or(0)
+                .max(1_000_000)
+        };
+    }
+    fn prepare_result(&mut self, carry: &stage::Carry, completed: bool) {
+        self.pending_stats = Some(result::RunStats {
+            character: CHARACTERS
+                .iter()
+                .position(|&c| c == self.character)
+                .unwrap_or(0) as u8,
+            difficulty: self.difficulty as u8,
+            score: carry.score.clamp(0, u32::MAX as i64) as u32,
+            stage: self.current_stage as u8 + 1,
+            completed,
+            continues: carry.continues_used,
+            deaths: carry.deaths,
+            bombs_used: carry.bombs_used,
+            spellcards_captured: carry.spellcards_captured,
+            point_items: carry.point_items_total.max(0) as u32,
+            graze: carry.graze.max(0) as u32,
+            frames: self.active_frames,
+            slowdown: 0.0,
+            date: replay::date(),
+        });
+    }
+    fn finish_run(&mut self, score: i64) {
+        let stats = self.pending_stats.take().unwrap_or(result::RunStats {
+            score: score.clamp(0, u32::MAX as i64) as u32,
+            stage: self.current_stage as u8 + 1,
+            difficulty: self.difficulty as u8,
+            ..Default::default()
+        });
+        let available = self
+            .replay_session
+            .as_ref()
+            .is_some_and(|session| !session.is_playback());
+        self.replay_slots = replay::load_slots(&self.replay_directory);
+        self.result_stats = Some(stats.clone());
+        self.result.begin_run(stats, &self.progress, available);
+        self.scene = Scene::Result;
+    }
     pub fn set_hiscore(&mut self, v: i64) {
         self.hiscore = v;
     }
@@ -439,7 +1000,7 @@ impl Game {
 
     /// Seed the high-score table (kept sorted descending, capped).
     pub fn set_scores(&mut self, mut scores: Vec<ScoreEntry>) {
-        scores.sort_by(|a, b| b.score.cmp(&a.score));
+        scores.sort_by_key(|s| std::cmp::Reverse(s.score));
         scores.truncate(MAX_SCORES);
         self.scores = scores;
     }
@@ -449,33 +1010,30 @@ impl Game {
         self.scores_path = path;
     }
 
-    /// A score makes the table if there is a free slot or it beats the lowest.
-    fn score_qualifies(&self, score: i64) -> bool {
-        self.scores.len() < MAX_SCORES || self.scores.iter().any(|e| score > e.score)
-    }
-
     /// Insert a finished run and return its row index in the sorted table.
     fn insert_score(&mut self, name: String, score: i64, stage: u8) -> usize {
-        self.scores.push(ScoreEntry { name, score, stage });
-        self.scores.sort_by(|a, b| b.score.cmp(&a.score));
-        self.scores.truncate(MAX_SCORES);
-        self.scores.iter().position(|e| e.score == score).unwrap_or(0)
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    fn save_scores(&self) {
-        if self.scores_path.as_os_str().is_empty() {
-            return;
-        }
-        let body: String = self
-            .scores
+        let character = CHARACTERS
             .iter()
-            .map(|e| format!("{}\t{}\t{}\n", e.score, e.stage, e.name))
-            .collect();
-        let _ = std::fs::write(&self.scores_path, body);
+            .position(|&v| v == self.character)
+            .unwrap_or(0) as u8;
+        self.progress
+            .high_scores
+            .push(th06_formats::score::HighScore {
+                name: name.clone(),
+                score: score.clamp(0, u32::MAX as i64) as u32,
+                stage,
+                character,
+                difficulty: self.difficulty as u8,
+            });
+        self.save_progress();
+        self.scores.push(ScoreEntry { name, score, stage });
+        self.scores.sort_by_key(|s| std::cmp::Reverse(s.score));
+        self.scores.truncate(MAX_SCORES);
+        self.scores
+            .iter()
+            .position(|e| e.score == score)
+            .unwrap_or(0)
     }
-    #[cfg(target_arch = "wasm32")]
-    fn save_scores(&self) {}
 
     /// Jump straight into a stage (native `--scene stage` debugging). `stage`
     /// is 0-based and clamped to the available stages. Optional lives / power /
@@ -489,8 +1047,25 @@ impl Game {
         score: Option<i64>,
     ) {
         self.character = character;
-        self.current_stage = stage.min(N_STAGES - 1);
-        let mut s = self.assets.new_stage(self.current_stage, character);
+        self.current_stage = stage.min(TOTAL_STAGES - 1);
+        self.difficulty = if self.current_stage == 6 {
+            Difficulty::Extra
+        } else {
+            self.difficulty
+        };
+        self.mode = if self.current_stage == 6 {
+            RunMode::Extra
+        } else {
+            RunMode::Story
+        };
+        let mut s = self.assets.new_stage(
+            self.current_stage,
+            character,
+            self.difficulty,
+            false,
+            self.starting_lives,
+            self.starting_bombs,
+        );
         s.set_hiscore(self.hiscore);
         if let Some(l) = lives {
             s.set_lives(l);
@@ -502,6 +1077,13 @@ impl Game {
             s.set_score(sc);
         }
         self.scene = Scene::Stage(Box::new(s));
+    }
+
+    /// Shared seed protocol for the independent C++/Rust ECL oracle.
+    pub fn debug_set_stage_seed(&mut self, seed: u16) {
+        if let Scene::Stage(stage) = &mut self.scene {
+            stage.set_rng_seed(seed);
+        }
     }
 
     /// Debug: fast-forward the current stage's simulation until the midboss
@@ -527,7 +1109,7 @@ impl Game {
                     held.push(Key::Right);
                 }
             }
-            let pressed: &[Key] = if _i % 12 == 0 { &[Key::Enter] } else { &[] };
+            let pressed: &[Key] = if _i % 12 == 0 { &[Key::Shoot] } else { &[] };
             self.update(&Input::synthetic(&held, pressed));
             if let Scene::Stage(s) = &self.scene {
                 // Detect the on-screen boss entity directly (the global
@@ -549,9 +1131,11 @@ impl Game {
     /// post-run screens. Used to cut a continuous run into per-stage segments.
     pub fn record_phase(&self) -> RecordPhase {
         match &self.scene {
-            Scene::Title | Scene::CharSelect { .. } => RecordPhase::Menu,
-            Scene::Stage(_) => RecordPhase::Stage(self.current_stage),
-            Scene::NameEntry { .. } | Scene::Leaderboard { .. } => RecordPhase::Ended,
+            Scene::Title | Scene::Selection | Scene::MusicRoom | Scene::Options | Scene::Replay => {
+                RecordPhase::Menu
+            }
+            Scene::Stage(_) | Scene::Continue { .. } => RecordPhase::Stage(self.current_stage),
+            Scene::Result | Scene::Ending { .. } => RecordPhase::Ended,
         }
     }
 
@@ -606,267 +1190,464 @@ impl Game {
     }
 
     fn play_bgm(&mut self, file: &str) {
+        if self.options.music_mode == 0 {
+            return;
+        }
         if let Some(audio) = &mut self.audio {
             audio.play_bgm(file);
         }
     }
 
-    /// Render the character-select with the real EoSD art: the select00
-    /// emblem background, the highlighted character's slpl illustration, and
-    /// the four select04 shot-name banners (current one lit).
-    fn charselect_cmds(&self, cursor: usize) -> Vec<DrawCmd> {
-        let sw = th06_engine::SCREEN_W as f32;
-        let sh = th06_engine::SCREEN_H as f32;
-        let bg = self.select_tex; // +0
-        let slpl = self.select_tex + 1 + cursor; // +1..+4, CHARACTERS order
-        let banners = self.select_tex + 5; // select04 (4 sprites of 256x48)
-        let prompt = self.select_tex + 6; // select03 (sprite 0 = choose player)
-
-        let full = |tex: usize, c: f32| DrawCmd {
-            tex,
-            dst: [0.0, 0.0, sw, sh],
-            src: [0.0, 0.0, 1.0, 1.0],
-            tint: [c, c, c, 1.0],
-            rot: 0.0,
-            additive: false,
-        };
-        let mut cmds = vec![full(bg, 1.0)];
-
-        // Character illustration (slpl is one 256x256 sprite), left side.
-        cmds.push(DrawCmd {
-            tex: slpl,
-            dst: [24.0, 96.0, 256.0, 256.0],
-            src: [0.0, 0.0, 1.0, 1.0],
-            tint: [1.0, 1.0, 1.0, 1.0],
-            rot: 0.0,
-            additive: false,
-        });
-
-        // "Select your player" prompt banner (select03 sprite 0), top.
-        cmds.push(DrawCmd {
-            tex: prompt,
-            dst: [180.0, 24.0, 256.0, 64.0],
-            src: [0.0, 0.0, 1.0, 64.0 / 256.0],
-            tint: [1.0, 1.0, 1.0, 1.0],
-            rot: 0.0,
-            additive: false,
-        });
-
-        // The four shot-name banners (select04, 256x48 each), stacked right;
-        // the selected one full brightness, the rest dimmed.
-        for i in 0..4 {
-            let v0 = i as f32 * 48.0 / 256.0;
-            let v1 = (i as f32 * 48.0 + 48.0) / 256.0;
-            let c = if i == cursor { 1.0 } else { 0.4 };
-            cmds.push(DrawCmd {
-                tex: banners,
-                dst: [310.0, 150.0 + i as f32 * 56.0, 256.0, 48.0],
-                src: [0.0, v0, 1.0, v1],
-                tint: [c, c, c, 1.0],
+    pub fn update(&mut self, input: &Input) -> Frame {
+        let play_menu_sounds = self.options.play_sounds;
+        if let Some(frame) = &mut self.demo_frames {
+            *frame += 1;
+            if input.buttons() != 0 || *frame >= 3720 {
+                self.demo_frames = None;
+                self.title_idle = 0;
+                self.replay_session = None;
+                self.scene = Scene::Title;
+                self.title.reset();
+            }
+        }
+        let mut output = self.update_inner(input);
+        let sounds = [
+            self.title.take_sounds(),
+            self.selection.take_sounds(),
+            self.options_menu.take_sounds(),
+            self.music_room.take_sounds(),
+            self.retry_menu.take_sounds(),
+            self.result.take_sounds(),
+            self.replay_menu.take_sounds(),
+        ];
+        if play_menu_sounds && let Some(audio) = &self.audio {
+            for sound in sounds.into_iter().flatten() {
+                audio.play_sfx(sound);
+            }
+        }
+        if let Some(frame) = self.demo_frames.filter(|&frame| frame >= 3600) {
+            output.cmds.push(DrawCmd {
+                tex: stage::TEX_WHITE,
+                dst: [0.0, 0.0, 640.0, 480.0],
+                src: [0.0, 0.0, 1.0, 1.0],
+                tint: [0.0, 0.0, 0.0, (frame - 3600) as f32 / 120.0],
                 rot: 0.0,
                 additive: false,
             });
         }
-
-        stage::draw_text(&mut cmds, [320.0, 410.0], 13.0, [0.85, 0.85, 0.9, 1.0], "Z: start   X: back");
-        cmds
+        output
     }
-
-    /// Full-screen black backdrop used by the name-entry / leaderboard screens.
-    fn dark_bg() -> DrawCmd {
-        DrawCmd {
-            tex: stage::TEX_WHITE,
-            dst: [0.0, 0.0, th06_engine::SCREEN_W as f32, th06_engine::SCREEN_H as f32],
-            src: [0.25, 0.25, 0.75, 0.75],
-            tint: [0.02, 0.0, 0.05, 1.0],
-            rot: 0.0,
-            additive: false,
-        }
-    }
-
-    fn name_entry_cmds(&self, score: i64, stage: u8, name: &str, sel: usize) -> Vec<DrawCmd> {
-        let mut cmds = vec![Self::dark_bg()];
-        stage::draw_text(&mut cmds, [180.0, 40.0], 22.0, [1.0, 0.5, 0.5, 1.0], "GAME OVER");
-        stage::draw_text(&mut cmds, [120.0, 84.0], 14.0, [1.0, 0.9, 0.5, 1.0], &format!("Score {:09}", score));
-        stage::draw_text(&mut cmds, [120.0, 104.0], 14.0, [0.8, 0.85, 1.0, 1.0], &format!("Reached Stage {}", stage));
-        stage::draw_text(&mut cmds, [120.0, 150.0], 14.0, [1.0, 1.0, 1.0, 1.0], "Enter your name:");
-
-        // Current name with a blinking caret.
-        let shown = if name.chars().count() < MAX_NAME_LEN { format!("{name}_") } else { name.to_string() };
-        stage::draw_text(&mut cmds, [120.0, 176.0], 20.0, [0.6, 1.0, 0.6, 1.0], &shown);
-
-        // Character ribbon grid; the selected glyph is highlighted.
-        let ribbon: Vec<char> = NAME_RIBBON.chars().collect();
-        let (ox, oy, cell) = (120.0f32, 220.0f32, 26.0f32);
-        for (i, ch) in ribbon.iter().enumerate() {
-            let col = (i % RIBBON_COLS) as f32;
-            let row = (i / RIBBON_COLS) as f32;
-            let x = ox + col * cell;
-            let y = oy + row * cell;
-            let tint = if i == sel { [1.0, 1.0, 0.3, 1.0] } else { [0.7, 0.7, 0.8, 1.0] };
-            if i == sel {
-                cmds.push(DrawCmd {
-                    tex: stage::TEX_WHITE,
-                    dst: [x - 3.0, y - 2.0, cell - 4.0, cell - 4.0],
-                    src: [0.25, 0.25, 0.75, 0.75],
-                    tint: [0.4, 0.4, 0.1, 0.8],
-                    rot: 0.0,
-                    additive: false,
-                });
-            }
-            stage::draw_text(&mut cmds, [x, y], 18.0, tint, &ch.to_string());
-        }
-        stage::draw_text(&mut cmds, [120.0, 410.0], 12.0, [0.8, 0.8, 0.9, 1.0],
-            "Arrows: pick   Z: add   X: erase   Enter: confirm");
-        cmds
-    }
-
-    fn leaderboard_cmds(&self, highlight: Option<usize>) -> Vec<DrawCmd> {
-        let mut cmds = vec![Self::dark_bg()];
-        stage::draw_text(&mut cmds, [210.0, 36.0], 22.0, [1.0, 0.85, 0.4, 1.0], "HIGH SCORES");
-        let (rx, nx, sx, tx, oy, dy) = (70.0f32, 120.0f32, 280.0f32, 470.0f32, 90.0f32, 30.0f32);
-        stage::draw_text(&mut cmds, [rx, oy], 13.0, [0.6, 0.7, 1.0, 1.0], "#");
-        stage::draw_text(&mut cmds, [nx, oy], 13.0, [0.6, 0.7, 1.0, 1.0], "Name");
-        stage::draw_text(&mut cmds, [sx, oy], 13.0, [0.6, 0.7, 1.0, 1.0], "Score");
-        stage::draw_text(&mut cmds, [tx, oy], 13.0, [0.6, 0.7, 1.0, 1.0], "Stage");
-        for i in 0..MAX_SCORES {
-            let y = oy + 24.0 + i as f32 * dy;
-            let hot = highlight == Some(i);
-            let tint = if hot { [1.0, 1.0, 0.4, 1.0] } else { [0.9, 0.9, 0.95, 1.0] };
-            stage::draw_text(&mut cmds, [rx, y], 16.0, tint, &format!("{}", i + 1));
-            if let Some(e) = self.scores.get(i) {
-                stage::draw_text(&mut cmds, [nx, y], 16.0, tint, &e.name);
-                stage::draw_text(&mut cmds, [sx, y], 16.0, tint, &format!("{:09}", e.score));
-                stage::draw_text(&mut cmds, [tx, y], 16.0, tint, &format!("{}", e.stage));
-            } else {
-                stage::draw_text(&mut cmds, [nx, y], 16.0, [0.4, 0.4, 0.5, 1.0], "--------");
+    fn update_inner(&mut self, input: &Input) -> Frame {
+        if let Some(audio) = &mut self.audio {
+            audio.tick();
+            if input.buttons() != 0 {
+                audio.resume();
             }
         }
-        stage::draw_text(&mut cmds, [200.0, 440.0], 13.0, [0.85, 0.85, 0.9, 1.0], "Z: return to title");
-        cmds
-    }
-
-    pub fn update(&mut self, input: &Input) -> Frame {
-        // Character select is handled before the borrow of self.scene so it can
-        // freely touch audio / start a stage.
-        if let Scene::CharSelect { cursor } = &self.scene {
-            let n = CHARACTERS.len();
-            let mut cur = *cursor;
-            if input.pressed(Key::Up) {
-                cur = (cur + n - 1) % n;
-                if let Some(a) = &self.audio { a.play_sfx("tan00"); }
-            }
-            if input.pressed(Key::Down) {
-                cur = (cur + 1) % n;
-                if let Some(a) = &self.audio { a.play_sfx("tan00"); }
-            }
-            if input.pressed(Key::Bomb) || input.pressed(Key::Pause) {
-                self.scene = Scene::Title;
-                return Frame { cmds: self.charselect_cmds(0), bg: None, quit: false };
-            }
-            if input.pressed(Key::Shoot) || input.pressed(Key::Enter) {
-                self.character = CHARACTERS[cur];
-                self.current_stage = 0;
-                let mut stage = self.assets.new_stage(0, self.character);
-                stage.set_hiscore(self.hiscore);
-                self.scene = Scene::Stage(Box::new(stage));
-                if let Some(a) = &self.audio {
-                    a.play_sfx("plst00");
+        if matches!(self.scene, Scene::Replay) {
+            match self.replay_menu.update(input, &self.replay_slots) {
+                replay_menu::ReplayAction::Back => {
+                    self.scene = Scene::Title;
+                    self.title.reset();
                 }
-                return Frame { cmds: Vec::new(), bg: None, quit: false };
+                replay_menu::ReplayAction::Play { slot, stage } => {
+                    if let Some(data) = self.replay_slots[slot].clone()
+                        && let Err(error) = self.start_replay(data, stage - 1)
+                    {
+                        self.persistence_error = Some(error);
+                    }
+                }
+                replay_menu::ReplayAction::None => {}
             }
-            self.scene = Scene::CharSelect { cursor: cur };
-            return Frame { cmds: self.charselect_cmds(cur), bg: None, quit: false };
+            return Frame {
+                cmds: self.replay_menu.draw(&self.replay_slots),
+                bg: None,
+                quit: false,
+            };
         }
-
-        // Name entry (after a qualifying game over): a char ribbon driven by the
-        // arrows, Z appends, X backspaces, Enter confirms.
-        if let Scene::NameEntry { score, stage, name, sel } = &self.scene {
-            let (score, stage) = (*score, *stage);
-            let mut name = name.clone();
-            let mut sel = *sel;
-            let ribbon: Vec<char> = NAME_RIBBON.chars().collect();
-            let n = ribbon.len();
-            let sfx = |g: &Game| if let Some(a) = &g.audio { a.play_sfx("tan00"); };
-            if input.pressed(Key::Left) { sel = (sel + n - 1) % n; sfx(self); }
-            if input.pressed(Key::Right) { sel = (sel + 1) % n; sfx(self); }
-            if input.pressed(Key::Up) { sel = (sel + n - RIBBON_COLS) % n; sfx(self); }
-            if input.pressed(Key::Down) { sel = (sel + RIBBON_COLS) % n; sfx(self); }
-            if input.pressed(Key::Shoot) && name.chars().count() < MAX_NAME_LEN {
-                name.push(ribbon[sel]);
-                if let Some(a) = &self.audio { a.play_sfx("plst00"); }
+        if let Scene::Ending { player, score } = &mut self.scene {
+            let score = *score;
+            let events = player.update(input);
+            let cmds = player.draw();
+            let done = player.finished();
+            match events {
+                Ok(events) => {
+                    for event in events {
+                        match event {
+                            ending::EndingEvent::Music(name) => self.play_bgm(&format!(
+                                "{}.wav",
+                                basename(&name)
+                                    .trim_end_matches(".mid")
+                                    .trim_end_matches(".wav")
+                            )),
+                            ending::EndingEvent::FadeMusic(seconds) => {
+                                if let Some(audio) = &mut self.audio {
+                                    audio.fade_bgm(seconds);
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(error) => {
+                    self.persistence_error = Some(error.to_string());
+                    self.finish_run(score);
+                }
             }
-            if input.pressed(Key::Bomb) {
-                name.pop();
-                sfx(self);
+            if done {
+                self.finish_run(score);
             }
-            if input.pressed(Key::Enter) || input.pressed(Key::Pause) {
-                let final_name = if name.trim().is_empty() { "PLAYER".to_string() } else { name.trim().to_string() };
-                let rank = self.insert_score(final_name, score, stage);
-                self.save_scores();
-                self.scene = Scene::Leaderboard { highlight: Some(rank) };
-                return Frame { cmds: self.leaderboard_cmds(Some(rank)), bg: None, quit: false };
-            }
-            let cmds = self.name_entry_cmds(score, stage, &name, sel);
-            self.scene = Scene::NameEntry { score, stage, name, sel };
-            return Frame { cmds, bg: None, quit: false };
+            return Frame {
+                cmds,
+                bg: None,
+                quit: false,
+            };
         }
-
-        // Leaderboard: any confirm returns to the title.
-        if let Scene::Leaderboard { highlight } = &self.scene {
-            let hl = *highlight;
-            if input.pressed(Key::Shoot) || input.pressed(Key::Enter) || input.pressed(Key::Bomb) {
-                self.scene = Scene::Title;
-                self.title.reset();
-                self.play_bgm("th06_01.wav");
-                return Frame { cmds: Vec::new(), bg: None, quit: false };
+        if matches!(self.scene, Scene::Continue { .. }) {
+            let action = self.retry_menu.update(input);
+            if !matches!(action, retry_menu::RetryAction::None) {
+                let Scene::Continue {
+                    mut stage, score, ..
+                } = std::mem::replace(&mut self.scene, Scene::Title)
+                else {
+                    unreachable!()
+                };
+                match action {
+                    retry_menu::RetryAction::Continue => {
+                        self.replay_session = None;
+                        stage.continue_run();
+                        self.scene = Scene::Stage(stage);
+                    }
+                    retry_menu::RetryAction::Finish => {
+                        self.finish_run(score);
+                    }
+                    retry_menu::RetryAction::None => unreachable!(),
+                }
+                return Frame {
+                    cmds: Vec::new(),
+                    bg: None,
+                    quit: false,
+                };
             }
-            return Frame { cmds: self.leaderboard_cmds(hl), bg: None, quit: false };
+            let Scene::Continue { frozen, stage, .. } = &self.scene else {
+                unreachable!()
+            };
+            let mut cmds = frozen.clone();
+            cmds.extend(self.retry_menu.draw());
+            return Frame {
+                cmds,
+                bg: stage.background_scene(),
+                quit: false,
+            };
+        }
+        if matches!(self.scene, Scene::Options) {
+            let previous_options = self.options.clone();
+            match self.options_menu.update(input, &mut self.options) {
+                options::OptionsAction::Back => {
+                    self.scene = Scene::Title;
+                    self.title.reset();
+                }
+                options::OptionsAction::Changed => {
+                    if previous_options.windowed != self.options.windowed {
+                        th06_engine::set_windowed(self.options.windowed);
+                    }
+                    self.starting_lives = self.options.life_count as i32 + 1;
+                    self.starting_bombs = self.options.bomb_count as i32;
+                    if let Err(error) =
+                        save::store_bytes(&self.options_path, &self.options.encode())
+                    {
+                        self.persistence_error = Some(error);
+                    }
+                    if previous_options.music_mode != self.options.music_mode {
+                        if self.options.music_mode == 0 {
+                            if let Some(a) = &mut self.audio {
+                                a.stop_bgm();
+                            }
+                        } else {
+                            self.play_bgm("th06_01.wav");
+                        }
+                    }
+                }
+                options::OptionsAction::ControllerChanged => {
+                    let bytes: Vec<u8> = th06_engine::controller_mapping()
+                        .iter()
+                        .flat_map(|v| v.to_le_bytes())
+                        .collect();
+                    if let Err(error) = save::store_bytes(&self.controller_path, &bytes) {
+                        self.persistence_error = Some(error);
+                    }
+                }
+                options::OptionsAction::None => {}
+            }
+            return Frame {
+                cmds: self.options_menu.draw(&self.options),
+                bg: None,
+                quit: false,
+            };
+        }
+        if matches!(self.scene, Scene::MusicRoom) {
+            match self.music_room.update(input) {
+                music_room::MusicAction::None => {}
+                music_room::MusicAction::Back => {
+                    self.scene = Scene::Title;
+                    self.title.reset();
+                    self.play_bgm("th06_01.wav");
+                }
+                music_room::MusicAction::Play(path) => {
+                    let path = basename(&path).replace(".mid", ".wav");
+                    self.play_bgm(&path);
+                }
+            }
+            return Frame {
+                cmds: self.music_room.draw(),
+                bg: None,
+                quit: false,
+            };
+        }
+        if matches!(self.scene, Scene::Selection) {
+            let extra = self.extra_unlocked();
+            let c = self.selection.character * 2 + self.selection.shot;
+            let d = self.selection.difficulty.min(3);
+            let count = self.practice_stages(c, d);
+            let scores: Vec<i64> = self.progress.practice_scores[c]
+                .iter()
+                .map(|s| s[d] as i64)
+                .collect();
+            match self.selection.update(input, extra, count) {
+                SelectionAction::Back => {
+                    self.scene = Scene::Title;
+                    self.title.reset();
+                }
+                SelectionAction::Start {
+                    character,
+                    difficulty,
+                    stage,
+                    mode,
+                } => {
+                    self.active_frames = 0;
+                    self.character = character;
+                    self.difficulty = difficulty;
+                    if difficulty != Difficulty::Extra {
+                        self.options.default_difficulty = difficulty as u8;
+                    }
+                    self.mode = mode;
+                    self.current_stage = stage;
+                    self.refresh_score_table();
+                    let mut s = self.assets.new_stage(
+                        stage,
+                        character,
+                        difficulty,
+                        mode == RunMode::Practice,
+                        self.starting_lives,
+                        self.starting_bombs,
+                    );
+                    s.set_hiscore(self.hiscore);
+                    s.set_spellcard_records(&self.progress.spellcards);
+                    s.set_rng_seed(replay::seed());
+                    self.replay_session = if mode == RunMode::Practice {
+                        None
+                    } else {
+                        Some(replay::Session::recording(
+                            c as u8,
+                            difficulty as u8,
+                            replay::date(),
+                        ))
+                    };
+                    if let Some(session) = &mut self.replay_session {
+                        let _ = session.begin_stage(stage, &mut s);
+                    }
+                    if let Err(error) =
+                        save::store_bytes(&self.options_path, &self.options.encode())
+                    {
+                        self.persistence_error = Some(error);
+                    }
+                    self.scene = Scene::Stage(Box::new(s));
+                    return Frame {
+                        cmds: Vec::new(),
+                        bg: None,
+                        quit: false,
+                    };
+                }
+                SelectionAction::None => {}
+            }
+            return Frame {
+                cmds: self.selection.draw(&scores, count),
+                bg: None,
+                quit: false,
+            };
+        }
+        if matches!(self.scene, Scene::Result) {
+            match self.result.update(input, &self.replay_slots) {
+                result::ResultAction::None => {}
+                result::ResultAction::Back => {
+                    self.replay_session = None;
+                    self.scene = Scene::Title;
+                    self.title.reset();
+                    self.play_bgm("th06_01.wav");
+                }
+                result::ResultAction::SaveScore { name } => {
+                    let stats = self
+                        .result_stats
+                        .as_ref()
+                        .expect("result run stats")
+                        .clone();
+                    self.insert_score(
+                        name,
+                        stats.score as i64,
+                        if stats.completed { 99 } else { stats.stage },
+                    );
+                }
+                result::ResultAction::SaveReplay { slot, name } => {
+                    if let Some(session) = &mut self.replay_session
+                        && let Err(error) = session.save(&self.replay_directory, slot, &name)
+                    {
+                        self.persistence_error = Some(error);
+                    }
+                    self.replay_slots = replay::load_slots(&self.replay_directory);
+                }
+            }
+            return Frame {
+                cmds: self.result.draw(),
+                bg: None,
+                quit: false,
+            };
         }
 
         match &mut self.scene {
-            Scene::CharSelect { .. } => unreachable!("handled above"),
-            Scene::NameEntry { .. } | Scene::Leaderboard { .. } => unreachable!("handled above"),
+            Scene::Selection
+            | Scene::MusicRoom
+            | Scene::Options
+            | Scene::Replay
+            | Scene::Ending { .. }
+            | Scene::Continue { .. } => unreachable!("handled above"),
+            Scene::Result => unreachable!("handled above"),
             Scene::Title => {
+                if input.buttons() == 0 {
+                    self.title_idle = self.title_idle.saturating_add(1);
+                } else {
+                    self.title_idle = 0;
+                }
+                if self.title_idle >= 720 {
+                    self.title_idle = 0;
+                    if let Some(replay) = self.demo_replay.clone()
+                        && self.start_replay(replay, 3).is_ok()
+                    {
+                        self.demo_frames = Some(0);
+                        return Frame {
+                            cmds: Vec::new(),
+                            bg: None,
+                            quit: false,
+                        };
+                    }
+                }
+                self.title
+                    .set_extra_unlocked(self.extra_unlocked().iter().any(|&v| v));
                 let (cmds, action) = self.title.update(input);
                 match action {
                     TitleAction::StartGame => {
-                        self.scene = Scene::CharSelect { cursor: 0 };
-                        if let Some(a) = &self.audio {
-                            a.play_sfx("tan00");
-                        }
+                        self.selection
+                            .begin(RunMode::Story, self.options.default_difficulty as usize);
+                        self.scene = Scene::Selection;
                     }
-                    TitleAction::Quit => return Frame { cmds, bg: None, quit: true },
+                    TitleAction::Extra | TitleAction::Practice => {
+                        let mode = if action == TitleAction::Extra {
+                            RunMode::Extra
+                        } else {
+                            RunMode::Practice
+                        };
+                        self.selection
+                            .begin(mode, self.options.default_difficulty as usize);
+                        self.scene = Scene::Selection;
+                    }
+                    TitleAction::Score => {
+                        self.result.begin_browse(&self.progress);
+                        self.scene = Scene::Result;
+                    }
+                    TitleAction::Music => {
+                        self.music_room.begin();
+                        self.scene = Scene::MusicRoom;
+                    }
+                    TitleAction::Options => {
+                        self.options_menu.begin();
+                        self.scene = Scene::Options;
+                    }
+                    TitleAction::Replay => {
+                        self.replay_slots = replay::load_slots(&self.replay_directory);
+                        self.replay_menu.begin();
+                        self.scene = Scene::Replay;
+                    }
+                    TitleAction::Quit => {
+                        return Frame {
+                            cmds,
+                            bg: None,
+                            quit: true,
+                        };
+                    }
                     TitleAction::None => {}
                 }
-                Frame { cmds, bg: None, quit: false }
+                Frame {
+                    cmds,
+                    bg: None,
+                    quit: false,
+                }
             }
             Scene::Stage(stage) => {
-                let cmds = stage.update(input);
+                if stage.replay_frame_active(input) {
+                    self.active_frames = self.active_frames.saturating_add(1);
+                }
+                let playback = self
+                    .replay_session
+                    .as_ref()
+                    .is_some_and(replay::Session::is_playback);
+                let replay_input = self
+                    .replay_session
+                    .as_mut()
+                    .map(|session| session.input(self.current_stage, stage, input));
+                let cmds = stage.update(replay_input.as_ref().unwrap_or(input));
                 let bg = stage.background_scene();
                 let events: Vec<Event> = stage.events.drain(..).collect();
                 // Snapshot now, before the event loop reborrows self.
                 let carry = stage.carry();
+                let can_continue = stage.can_continue();
+                let spellcards = stage.spellcard_records().to_vec();
                 let mut back = false;
                 let mut next_stage = false;
                 let mut game_over: Option<i64> = None;
                 for ev in events {
                     match ev {
                         Event::Sfx(name) => {
-                            if let Some(a) = &self.audio {
+                            if self.options.play_sounds
+                                && let Some(a) = &self.audio
+                            {
                                 a.play_sfx(name);
                             }
                         }
                         Event::Bgm(file) => {
+                            if self.demo_frames.is_some() {
+                                continue;
+                            }
                             let file = file.to_string();
                             self.play_bgm(&file);
+                        }
+                        Event::BgmFade(seconds) => {
+                            if self.demo_frames.is_some() {
+                                continue;
+                            }
+                            if let Some(a) = &mut self.audio {
+                                a.fade_bgm(seconds);
+                            }
                         }
                         Event::BackToTitle => back = true,
                         Event::NextStage => next_stage = true,
                         Event::GameOver(score) => game_over = Some(score),
-                        Event::Quit => return Frame { cmds, bg, quit: true },
+                        Event::Quit => {
+                            return Frame {
+                                cmds,
+                                bg,
+                                quit: true,
+                            };
+                        }
                         Event::SaveScore(score) => {
-                            if score > self.hiscore {
+                            if !playback && score > self.hiscore {
                                 self.hiscore = score;
                                 #[cfg(not(target_arch = "wasm32"))]
                                 {
@@ -876,50 +1657,248 @@ impl Game {
                         }
                     }
                 }
+                if !playback {
+                    self.progress.spellcards = spellcards;
+                }
                 if let Some(score) = game_over {
-                    // A qualifying score opens name entry; otherwise straight to
-                    // the leaderboard. Either way the run is over.
-                    let stage = self.current_stage as u8 + 1;
-                    self.play_bgm("th06_01.wav");
-                    self.scene = if self.score_qualifies(score) {
-                        Scene::NameEntry { score, stage, name: String::new(), sel: 0 }
-                    } else {
-                        Scene::Leaderboard { highlight: None }
+                    if self.mode == RunMode::Practice {
+                        let character = CHARACTERS
+                            .iter()
+                            .position(|&v| v == self.character)
+                            .unwrap_or(0);
+                        let record = &mut self.progress.practice_scores[character]
+                            [self.current_stage][self.difficulty as usize];
+                        *record = (*record).max(score.clamp(0, u32::MAX as i64) as u32);
+                        self.save_progress();
+                        self.scene = Scene::Title;
+                        self.title.reset();
+                        self.play_bgm("th06_01.wav");
+                        return Frame {
+                            cmds,
+                            bg: None,
+                            quit: false,
+                        };
+                    }
+                    if let Some(session) = &mut self.replay_session {
+                        session.end_stage(self.current_stage, score);
+                    }
+                    if playback {
+                        self.demo_frames = None;
+                        self.title_idle = 0;
+                        self.replay_session = None;
+                        self.scene = Scene::Title;
+                        self.title.reset();
+                        self.play_bgm("th06_01.wav");
+                        return Frame {
+                            cmds,
+                            bg: None,
+                            quit: false,
+                        };
+                    }
+                    self.save_progress();
+                    self.prepare_result(&carry, false);
+                    if can_continue {
+                        let Scene::Stage(stage) = std::mem::replace(&mut self.scene, Scene::Title)
+                        else {
+                            unreachable!()
+                        };
+                        self.retry_menu.begin(stage.continues_used());
+                        self.scene = Scene::Continue {
+                            stage,
+                            frozen: cmds.clone(),
+                            score,
+                        };
+                        return Frame {
+                            cmds,
+                            bg,
+                            quit: false,
+                        };
+                    }
+                    self.prepare_result(&carry, false);
+                    self.finish_run(score);
+                    return Frame {
+                        cmds,
+                        bg: None,
+                        quit: false,
                     };
-                    return Frame { cmds, bg: None, quit: false };
                 }
                 if next_stage {
-                    if self.current_stage + 1 < N_STAGES {
+                    if let Some(session) = &mut self.replay_session {
+                        session.end_stage(self.current_stage, carry.score);
+                    }
+                    if playback {
+                        let next = self.current_stage + 1;
+                        if next < TOTAL_STAGES
+                            && self.replay_session.as_ref().unwrap().data().stages[next].is_some()
+                        {
+                            let mut s = self.assets.new_stage(
+                                next,
+                                self.character,
+                                self.difficulty,
+                                false,
+                                self.starting_lives,
+                                self.starting_bombs,
+                            );
+                            self.replay_session
+                                .as_mut()
+                                .unwrap()
+                                .begin_stage(next, &mut s)
+                                .expect("validated replay stage");
+                            self.current_stage = next;
+                            self.scene = Scene::Stage(Box::new(s));
+                        } else {
+                            self.replay_session = None;
+                            self.demo_frames = None;
+                            self.title_idle = 0;
+                            self.scene = Scene::Title;
+                            self.title.reset();
+                            self.play_bgm("th06_01.wav");
+                        }
+                        return Frame {
+                            cmds,
+                            bg: None,
+                            quit: false,
+                        };
+                    }
+                    let c = CHARACTERS
+                        .iter()
+                        .position(|&v| v == self.character)
+                        .unwrap_or(0);
+                    let d = self.difficulty as usize;
+                    if self.mode == RunMode::Practice {
+                        let record = &mut self.progress.practice_scores[c][self.current_stage][d];
+                        *record = (*record).max(carry.score.clamp(0, u32::MAX as i64) as u32);
+                    } else {
+                        let cleared = (self.current_stage + 2) as u8;
+                        self.progress.stages_cleared[c][d] =
+                            self.progress.stages_cleared[c][d].max(cleared);
+                        if carry.continues_used == 0 {
+                            self.progress.stages_cleared_without_continues[c][d] =
+                                self.progress.stages_cleared_without_continues[c][d].max(cleared);
+                        }
+                    }
+                    if has_next_stage(self.mode, self.difficulty, self.current_stage) {
+                        self.save_progress();
                         // Carry progress into the next stage.
                         self.current_stage += 1;
-                        let mut s = self.assets.new_stage(self.current_stage, self.character);
+                        let mut s = self.assets.new_stage(
+                            self.current_stage,
+                            self.character,
+                            self.difficulty,
+                            self.mode == RunMode::Practice,
+                            self.starting_lives,
+                            self.starting_bombs,
+                        );
                         s.apply_carry(carry);
+                        s.set_spellcard_records(&self.progress.spellcards);
+                        if let Some(session) = &mut self.replay_session {
+                            let _ = session.begin_stage(self.current_stage, &mut s);
+                        }
                         s.set_hiscore(self.hiscore);
                         self.scene = Scene::Stage(Box::new(s));
-                        return Frame { cmds, bg: None, quit: false };
+                        return Frame {
+                            cmds,
+                            bg: None,
+                            quit: false,
+                        };
                     }
-                    // Final stage cleared — the run is won. Route into the result
-                    // flow with the run's score (name entry if it qualifies, else
-                    // the leaderboard) instead of dropping to the title. (The full
-                    // Ending story sequence, Ending.cpp, is still unported — #86.)
+                    let has_seen = self
+                        .progress
+                        .stages_cleared
+                        .iter()
+                        .any(|stages| (1..=3).any(|d| stages[d] == 99));
+                    if self.mode != RunMode::Practice {
+                        self.progress.stages_cleared[c][d] = 99;
+                        if carry.continues_used == 0 {
+                            self.progress.stages_cleared_without_continues[c][d] = 99;
+                        }
+                    }
+                    self.save_progress();
+                    if self.mode == RunMode::Practice {
+                        self.scene = Scene::Title;
+                        self.title.reset();
+                        self.play_bgm("th06_01.wav");
+                        return Frame {
+                            cmds,
+                            bg: None,
+                            quit: false,
+                        };
+                    }
                     let score = carry.score;
-                    let stage = self.current_stage as u8 + 1;
-                    self.play_bgm("th06_01.wav");
-                    self.scene = if self.score_qualifies(score) {
-                        Scene::NameEntry { score, stage, name: String::new(), sel: 0 }
+                    self.prepare_result(&carry, true);
+                    if self.mode == RunMode::Story {
+                        match self
+                            .ending_assets
+                            .as_ref()
+                            .map_err(ToString::to_string)
+                            .and_then(|assets| {
+                                assets
+                                    .start(
+                                        self.character,
+                                        self.difficulty,
+                                        carry.continues_used,
+                                        has_seen,
+                                    )
+                                    .map_err(|e| e.to_string())
+                            }) {
+                            Ok(player) => {
+                                self.scene = Scene::Ending {
+                                    player: Box::new(player),
+                                    score,
+                                }
+                            }
+                            Err(error) => {
+                                self.persistence_error = Some(error);
+                                self.finish_run(score);
+                            }
+                        }
                     } else {
-                        Scene::Leaderboard { highlight: None }
+                        self.finish_run(score);
+                    }
+                    return Frame {
+                        cmds,
+                        bg: None,
+                        quit: false,
                     };
-                    return Frame { cmds, bg: None, quit: false };
                 }
                 if back {
+                    if !playback {
+                        self.save_progress();
+                    }
+                    self.replay_session = None;
                     self.scene = Scene::Title;
                     self.title.reset();
                     self.play_bgm("th06_01.wav");
-                    return Frame { cmds, bg: None, quit: false };
+                    return Frame {
+                        cmds,
+                        bg: None,
+                        quit: false,
+                    };
                 }
-                Frame { cmds, bg, quit: false }
+                Frame {
+                    cmds,
+                    bg,
+                    quit: false,
+                }
             }
         }
+    }
+}
+
+/// Gui::MSG_OPCODE_STAGE_END: Easy ends at stage 5; Extra and practice never advance.
+fn has_next_stage(mode: RunMode, difficulty: Difficulty, current_stage: usize) -> bool {
+    mode == RunMode::Story && current_stage + 1 < if difficulty == Difficulty::Easy { 5 } else { 6 }
+}
+
+#[cfg(test)]
+mod route_tests {
+    use super::*;
+    #[test]
+    fn story_easy_and_practice_have_original_stage_limits() {
+        assert!(has_next_stage(RunMode::Story, Difficulty::Normal, 4));
+        assert!(!has_next_stage(RunMode::Story, Difficulty::Normal, 5));
+        assert!(!has_next_stage(RunMode::Story, Difficulty::Easy, 4));
+        assert!(!has_next_stage(RunMode::Practice, Difficulty::Normal, 0));
+        assert!(!has_next_stage(RunMode::Extra, Difficulty::Extra, 6));
     }
 }

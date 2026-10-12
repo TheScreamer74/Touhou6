@@ -3,18 +3,22 @@
 # and the port's real spawn_bullet_pattern (examples/oracle_dump.rs), run the same
 # battery + RNG seed, and diff. PASS == the port matches the decomp byte-for-byte.
 set -euo pipefail
-cd "$(dirname "$0")/.."
+HERE="$(cd "$(dirname "$0")" && pwd)"
+source "$HERE/common.sh"
+OUT="$(oracle_output_dir)"
+cd "$ORACLE_ROOT"
 
 clang++ -O2 -o /tmp/bullet_oracle oracle/bullet_oracle.cpp
-/tmp/bullet_oracle > /tmp/oracle_cpp.txt
+/tmp/bullet_oracle > "$OUT/bullets_decomp.txt"
 
-source "$HOME/.cargo/env" 2>/dev/null || true
-cargo run -p th06 --example oracle_dump --release 2>/dev/null | grep -E '^-?[0-9]' > /tmp/oracle_rust.txt
+cargo run -p th06 --example oracle_dump --release > "$OUT/bullets_port.txt"
+[ -s "$OUT/bullets_decomp.txt" ] && [ -s "$OUT/bullets_port.txt" ] || { echo "No bullet observations emitted" >&2; exit 1; }
 
-if diff -q /tmp/oracle_cpp.txt /tmp/oracle_rust.txt >/dev/null; then
-    echo "PASS: port bullet math matches the decomp ($(wc -l < /tmp/oracle_cpp.txt | tr -d ' ') bullets)"
+if diff -q "$OUT/bullets_decomp.txt" "$OUT/bullets_port.txt" >/dev/null; then
+    echo "PASS: port bullet math matches the decomp ($(wc -l < "$OUT/bullets_decomp.txt" | tr -d ' ') bullets)"
 else
     echo "FAIL: divergence (decomp left, port right):"
-    diff /tmp/oracle_cpp.txt /tmp/oracle_rust.txt | head -40
+    diff "$OUT/bullets_decomp.txt" "$OUT/bullets_port.txt" | sed -n '1,40p' || true
     exit 1
 fi
+echo "Evidence: $OUT"

@@ -3,10 +3,14 @@
 //! bullet's (angle, speed). Diffing the two outputs proves the port's bullet
 //! aim math matches the decomp. Run: `cargo run -p th06 --example oracle_dump`.
 
-use th06::ecl_vm::{spawn_bullet_pattern, BulletProps, Rng, World};
+use th06::ecl_vm::{BulletProps, Rng, World, spawn_bullet_pattern};
 
 fn make_world() -> World {
     World {
+        spellcard_active: 0,
+        next_bullet_index: 0,
+        next_effect_index: 0,
+        enemy_slots: [false; 256],
         rng: Rng::new(0x1234),
         difficulty: 1,
         rank: 16,

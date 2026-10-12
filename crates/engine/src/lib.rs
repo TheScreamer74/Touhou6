@@ -2,7 +2,9 @@
 //! headless render-to-image for verification plus a winit window mode.
 
 pub mod audio;
+pub mod controls;
 pub mod text;
+pub use controls::{controller_mapping, set_controller_mapping};
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -18,6 +20,31 @@ use winit::window::{Window, WindowId};
 
 pub const SCREEN_W: u32 = 640;
 pub const SCREEN_H: u32 = 480;
+thread_local! {static SUSPENDED:std::cell::Cell<bool>=const {std::cell::Cell::new(false)};}
+/// Freeze simulation while a browser dialog or background tab owns input.
+pub fn set_suspended(value: bool) {
+    SUSPENDED.with(|flag| flag.set(value));
+}
+thread_local! {static WINDOWED_REQUEST:std::cell::Cell<Option<bool>>=const {std::cell::Cell::new(None)};}
+/// Apply the display option on the event-loop thread.
+pub fn set_windowed(value: bool) {
+    WINDOWED_REQUEST.with(|request| request.set(Some(value)));
+}
+pub fn take_windowed_request() -> Option<bool> {
+    WINDOWED_REQUEST.with(|request| request.take())
+}
+
+fn display_viewport(size: (u32, u32)) -> [f32; 4] {
+    let scale = (size.0 as f32 / SCREEN_W as f32).min(size.1 as f32 / SCREEN_H as f32);
+    let width = SCREEN_W as f32 * scale;
+    let height = SCREEN_H as f32 * scale;
+    [
+        (size.0 as f32 - width) / 2.0,
+        (size.1 as f32 - height) / 2.0,
+        width,
+        height,
+    ]
+}
 
 const SHADER: &str = r#"
 struct VOut {
@@ -172,13 +199,21 @@ pub struct Engine {
     bg_uniform_layout: wgpu::BindGroupLayout,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+impl Default for Engine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Engine {
     /// Native: block on adapter/device acquisition.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn new() -> Self {
         let instance = wgpu::Instance::default();
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
-            .expect("no GPU adapter");
+        let adapter =
+            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+                .expect("no GPU adapter");
         let (device, queue) =
             pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
                 .expect("request device");
@@ -192,25 +227,25 @@ impl Engine {
     #[cfg(target_arch = "wasm32")]
     pub async fn new_web(
         canvas: web_sys::HtmlCanvasElement,
-    ) -> (Self, wgpu::Surface<'static>) {
-        // Enable both WebGPU and WebGL: `Instance::default()` on wasm only picks
-        // BROWSER_WEBGPU, so a browser without WebGPU (Safari/Firefox, or any
-        // page served over plain HTTP — WebGPU needs a secure context) would
-        // find no adapter and panic. Requesting GL too falls back to WebGL2.
+    ) -> Result<(Self, wgpu::Surface<'static>), String> {
+        // Use one context type consistently. Trying WebGPU on a canvas that
+        // the host already initialized as WebGL cannot fall back on that same
+        // canvas. WebGL2 is sufficient for the original renderer and is also
+        // available in browsers without WebGPU.
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::BROWSER_WEBGPU | wgpu::Backends::GL,
+            backends: wgpu::Backends::GL,
             ..Default::default()
         });
         let surface = instance
             .create_surface(wgpu::SurfaceTarget::Canvas(canvas))
-            .expect("create surface from canvas");
+            .map_err(|e| format!("Could not initialize WebGL2: {e}"))?;
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 compatible_surface: Some(&surface),
                 ..Default::default()
             })
             .await
-            .expect("no GPU adapter");
+            .map_err(|e| format!("No compatible graphics adapter: {e}"))?;
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 // WebGL2 has tighter limits than native; clamp to its defaults.
@@ -218,8 +253,8 @@ impl Engine {
                 ..Default::default()
             })
             .await
-            .expect("request device");
-        (Self::from_device(instance, adapter, device, queue), surface)
+            .map_err(|e| format!("Could not initialize graphics device: {e}"))?;
+        Ok((Self::from_device(instance, adapter, device, queue), surface))
     }
 
     fn from_device(
@@ -272,7 +307,16 @@ impl Engine {
             }],
         });
 
-        Self { device, queue, instance, adapter, bind_layout, shader, bg_shader, bg_uniform_layout }
+        Self {
+            device,
+            queue,
+            instance,
+            adapter,
+            bind_layout,
+            shader,
+            bg_shader,
+            bg_uniform_layout,
+        }
     }
 
     fn make_bg_pipeline(&self, format: wgpu::TextureFormat) -> wgpu::RenderPipeline {
@@ -281,12 +325,18 @@ impl Engine {
 
     /// `additive` = One/One blend with depth-write disabled, for the bg's
     /// additive glow layer (op13). Otherwise standard alpha blend + depth write.
-    fn make_bg_pipeline_mode(&self, format: wgpu::TextureFormat, additive: bool) -> wgpu::RenderPipeline {
-        let layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("bg"),
-            bind_group_layouts: &[&self.bind_layout, &self.bg_uniform_layout],
-            push_constant_ranges: &[],
-        });
+    fn make_bg_pipeline_mode(
+        &self,
+        format: wgpu::TextureFormat,
+        additive: bool,
+    ) -> wgpu::RenderPipeline {
+        let layout = self
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("bg"),
+                bind_group_layouts: &[&self.bind_layout, &self.bg_uniform_layout],
+                push_constant_ranges: &[],
+            });
         let blend = if additive {
             wgpu::BlendState {
                 color: wgpu::BlendComponent {
@@ -362,6 +412,7 @@ impl Engine {
 
     /// Render the 3D background into `target` (clearing it to the fog
     /// colour), scissored to the 384x448 play field at (32, 16).
+    #[allow(clippy::too_many_arguments)]
     fn encode_bg(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -381,7 +432,8 @@ impl Engine {
                 mapped_at_creation: false,
             });
             if !verts.is_empty() {
-                self.queue.write_buffer(&buf, 0, bytemuck::cast_slice(verts));
+                self.queue
+                    .write_buffer(&buf, 0, bytemuck::cast_slice(verts));
             }
             buf
         };
@@ -400,11 +452,15 @@ impl Engine {
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
-            self.queue.write_buffer(&ubuf, 0, bytemuck::bytes_of(&uniform));
+            self.queue
+                .write_buffer(&ubuf, 0, bytemuck::bytes_of(&uniform));
             self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: None,
                 layout: &self.bg_uniform_layout,
-                entries: &[wgpu::BindGroupEntry { binding: 0, resource: ubuf.as_entire_binding() }],
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: ubuf.as_entire_binding(),
+                }],
             })
         };
         let ubind = make_ubind(0.0);
@@ -439,10 +495,11 @@ impl Engine {
         });
         // Confine the background to the play field, scaled to the target
         // (the surface is larger than 640x480 on HiDPI displays).
-        let sx = target_size.0 as f32 / SCREEN_W as f32;
-        let sy = target_size.1 as f32 / SCREEN_H as f32;
+        let [vx, vy, vw, vh] = display_viewport(target_size);
+        let sx = vw / SCREEN_W as f32;
+        let sy = vh / SCREEN_H as f32;
         let [ax, ay, aw, ah] = scene.arcade;
-        pass.set_viewport(ax * sx, ay * sy, aw * sx, ah * sy, 0.0, 1.0);
+        pass.set_viewport(vx + ax * sx, vy + ay * sy, aw * sx, ah * sy, 0.0, 1.0);
         pass.set_bind_group(0, &textures[scene.tex].bind_group, &[]);
         if !scene.verts.is_empty() {
             pass.set_pipeline(pipeline);
@@ -464,12 +521,18 @@ impl Engine {
 
     /// `additive` = SrcAlpha/One blend (glow particles, laser balls), matching
     /// the original's AnmVmBlendMode_One; otherwise standard alpha.
-    fn make_pipeline_mode(&self, format: wgpu::TextureFormat, additive: bool) -> wgpu::RenderPipeline {
-        let layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: None,
-            bind_group_layouts: &[&self.bind_layout],
-            push_constant_ranges: &[],
-        });
+    fn make_pipeline_mode(
+        &self,
+        format: wgpu::TextureFormat,
+        additive: bool,
+    ) -> wgpu::RenderPipeline {
+        let layout = self
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: None,
+                bind_group_layouts: &[&self.bind_layout],
+                push_constant_ranges: &[],
+            });
         let blend = if additive {
             wgpu::BlendState {
                 color: wgpu::BlendComponent {
@@ -516,7 +579,11 @@ impl Engine {
     pub fn create_texture(&self, rgba: &[u8], width: u32, height: u32) -> Texture {
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: None,
-            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -537,7 +604,11 @@ impl Engine {
                 bytes_per_row: Some(width * 4),
                 rows_per_image: None,
             },
-            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
         );
         let view = texture.create_view(&Default::default());
         // Decomp sets one global sampler state, unconditionally, for every
@@ -556,8 +627,14 @@ impl Engine {
             label: None,
             layout: &self.bind_layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&sampler) },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
             ],
         });
         Texture { bind_group }
@@ -591,7 +668,11 @@ impl Engine {
                 (p01, [u0, v1]),
             ];
             for ((px, py), uv) in quad {
-                verts.push(Vertex { pos: [nx(px), ny(py)], uv, tint: c.tint });
+                verts.push(Vertex {
+                    pos: [nx(px), ny(py)],
+                    uv,
+                    tint: c.tint,
+                });
             }
         }
         verts
@@ -608,6 +689,7 @@ impl Engine {
         cmds: &[DrawCmd],
         textures: &[&Texture],
         load: bool,
+        target_size: (u32, u32),
     ) {
         let load_op = if load {
             wgpu::LoadOp::Load
@@ -619,12 +701,17 @@ impl Engine {
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: target,
                 resolve_target: None,
-                ops: wgpu::Operations { load: load_op, store: wgpu::StoreOp::Store },
+                ops: wgpu::Operations {
+                    load: load_op,
+                    store: wgpu::StoreOp::Store,
+                },
             })],
             depth_stencil_attachment: None,
             timestamp_writes: None,
             occlusion_query_set: None,
         });
+        let [x, y, width, height] = display_viewport(target_size);
+        pass.set_viewport(x, y, width, height, 0.0, 1.0);
         pass.set_vertex_buffer(0, vbuf.slice(..));
         // One draw per run of consecutive commands sharing a texture AND blend
         // mode; the pipeline (alpha vs additive) is switched per run.
@@ -655,7 +742,8 @@ impl Engine {
             mapped_at_creation: false,
         });
         if !verts.is_empty() {
-            self.queue.write_buffer(&buf, 0, bytemuck::cast_slice(&verts));
+            self.queue
+                .write_buffer(&buf, 0, bytemuck::cast_slice(&verts));
         }
         buf
     }
@@ -670,7 +758,11 @@ impl Engine {
         let format = wgpu::TextureFormat::Rgba8Unorm;
         let target = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("offscreen"),
-            size: wgpu::Extent3d { width: SCREEN_W, height: SCREEN_H, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width: SCREEN_W,
+                height: SCREEN_H,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -688,9 +780,28 @@ impl Engine {
             let bg_pipeline = self.make_bg_pipeline(format);
             let bg_pipeline_add = self.make_bg_pipeline_mode(format, true);
             let depth = self.depth_texture(SCREEN_W, SCREEN_H);
-            self.encode_bg(&mut encoder, &view, &depth, &bg_pipeline, &bg_pipeline_add, scene, textures, (SCREEN_W, SCREEN_H));
+            self.encode_bg(
+                &mut encoder,
+                &view,
+                &depth,
+                &bg_pipeline,
+                &bg_pipeline_add,
+                scene,
+                textures,
+                (SCREEN_W, SCREEN_H),
+            );
         }
-        self.encode_pass(&mut encoder, &view, &pipeline, &pipeline_add, &vbuf, cmds, textures, bg.is_some());
+        self.encode_pass(
+            &mut encoder,
+            &view,
+            &pipeline,
+            &pipeline_add,
+            &vbuf,
+            cmds,
+            textures,
+            bg.is_some(),
+            (SCREEN_W, SCREEN_H),
+        );
 
         let bytes_per_row = SCREEN_W * 4; // 2560, already 256-aligned
         let readback = self.device.create_buffer(&wgpu::BufferDescriptor {
@@ -714,15 +825,18 @@ impl Engine {
                     rows_per_image: None,
                 },
             },
-            wgpu::Extent3d { width: SCREEN_W, height: SCREEN_H, depth_or_array_layers: 1 },
+            wgpu::Extent3d {
+                width: SCREEN_W,
+                height: SCREEN_H,
+                depth_or_array_layers: 1,
+            },
         );
         self.queue.submit([encoder.finish()]);
 
         let slice = readback.slice(..);
         slice.map_async(wgpu::MapMode::Read, |r| r.expect("map readback"));
         self.device.poll(wgpu::PollType::Wait).expect("poll");
-        let data = slice.get_mapped_range().to_vec();
-        data
+        slice.get_mapped_range().to_vec()
     }
 
     fn make_app(
@@ -743,13 +857,20 @@ impl Engine {
             textures,
             update: Box::new(update),
             input: Input::default(),
+            physical_keys: HashSet::new(),
+            foreground: true,
+            gamepad: controls::ControllerDevice::default(),
+            previous_gamepad: 0,
             last_tick: Instant::now(),
             accumulator: Duration::ZERO,
             window: None,
             surface: None,
+            surface_config: None,
             pipeline: None,
             pipeline_add: None,
-            autoshot: std::env::var("TH06_AUTOSHOT").ok().filter(|s| !s.is_empty()),
+            autoshot: std::env::var("TH06_AUTOSHOT")
+                .ok()
+                .filter(|s| !s.is_empty()),
             tick_count: 0,
             #[cfg(target_arch = "wasm32")]
             web_surface: None,
@@ -810,6 +931,7 @@ pub enum Key {
     Focus, // Shift
     Pause, // Esc
     Enter,
+    Skip, // Ctrl (dialogue / replay fast-forward)
 }
 
 fn map_key(code: KeyCode) -> Option<Key> {
@@ -823,31 +945,84 @@ fn map_key(code: KeyCode) -> Option<Key> {
         KeyCode::ShiftLeft | KeyCode::ShiftRight => Key::Focus,
         KeyCode::Escape => Key::Pause,
         KeyCode::Enter => Key::Enter,
+        KeyCode::ControlLeft | KeyCode::ControlRight => Key::Skip,
         _ => return None,
     })
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Input {
     held: HashSet<Key>,
     pressed: HashSet<Key>,
+    joy_held: HashSet<Key>,
+    joy_pressed: HashSet<Key>,
+    joy_buttons: u32,
 }
 
 impl Input {
+    /// Original TH_BUTTON_* layout, shared with T6RP recordings.
+    pub fn buttons(&self) -> u16 {
+        let keys = [
+            (Key::Shoot, 0),
+            (Key::Bomb, 1),
+            (Key::Focus, 2),
+            (Key::Pause, 3),
+            (Key::Up, 4),
+            (Key::Down, 5),
+            (Key::Left, 6),
+            (Key::Right, 7),
+            (Key::Skip, 8),
+            (Key::Enter, 12),
+        ];
+        keys.iter().fold(0, |bits, &(key, bit)| {
+            bits | ((self.held(key) as u16) << bit)
+        })
+    }
+
+    pub fn from_buttons(buttons: u16, previous: u16) -> Self {
+        let keys = [
+            (Key::Shoot, 0),
+            (Key::Bomb, 1),
+            (Key::Focus, 2),
+            (Key::Pause, 3),
+            (Key::Up, 4),
+            (Key::Down, 5),
+            (Key::Left, 6),
+            (Key::Right, 7),
+            (Key::Skip, 8),
+            (Key::Enter, 12),
+        ];
+        Self::synthetic(
+            &keys
+                .iter()
+                .filter(|(_, b)| buttons & (1 << b) != 0)
+                .map(|&(k, _)| k)
+                .collect::<Vec<_>>(),
+            &keys
+                .iter()
+                .filter(|(_, b)| buttons & !previous & (1 << b) != 0)
+                .map(|&(k, _)| k)
+                .collect::<Vec<_>>(),
+        )
+    }
     /// Build an input state by hand (used by headless/scripted runs).
     pub fn synthetic(held: &[Key], pressed: &[Key]) -> Self {
         Self {
             held: held.iter().copied().collect(),
             pressed: pressed.iter().copied().collect(),
+            ..Self::default()
         }
     }
 
     pub fn held(&self, key: Key) -> bool {
-        self.held.contains(&key)
+        self.held.contains(&key) || self.joy_held.contains(&key)
     }
     /// True only on the tick after the key went down.
     pub fn pressed(&self, key: Key) -> bool {
-        self.pressed.contains(&key)
+        self.pressed.contains(&key) || self.joy_pressed.contains(&key)
+    }
+    pub fn gamepad_buttons(&self) -> u32 {
+        self.joy_buttons
     }
 }
 
@@ -871,10 +1046,15 @@ struct App {
     textures: Vec<Texture>,
     update: Box<dyn FnMut(&Input) -> Frame>,
     input: Input,
+    physical_keys: HashSet<KeyCode>,
+    foreground: bool,
+    gamepad: controls::ControllerDevice,
+    previous_gamepad: u16,
     last_tick: Instant,
     accumulator: Duration,
     window: Option<Arc<Window>>,
     surface: Option<wgpu::Surface<'static>>,
+    surface_config: Option<wgpu::SurfaceConfiguration>,
     pipeline: Option<wgpu::RenderPipeline>,
     pipeline_add: Option<wgpu::RenderPipeline>,
     /// TH06_AUTOSHOT=<dir>: dump an offscreen PNG every 60 ticks during live
@@ -891,6 +1071,11 @@ struct App {
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        if let Some(window) = &self.window {
+            self.last_tick = Instant::now();
+            window.request_redraw();
+            return;
+        }
         let attrs = Window::default_attributes()
             .with_title(&self.title)
             .with_inner_size(winit::dpi::LogicalSize::new(SCREEN_W, SCREEN_H))
@@ -900,7 +1085,11 @@ impl ApplicationHandler for App {
         #[cfg(not(target_arch = "wasm32"))]
         let (window, surface) = {
             let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
-            let surface = self.engine.instance.create_surface(window.clone()).expect("surface");
+            let surface = self
+                .engine
+                .instance
+                .create_surface(window.clone())
+                .expect("surface");
             (window, surface)
         };
         // Web: bind the winit window to the existing canvas (for input/redraw)
@@ -938,45 +1127,80 @@ impl ApplicationHandler for App {
                 .find(|f| !f.is_srgb())
                 .unwrap_or(caps.formats[0])
         };
-        surface.configure(
-            &self.engine.device,
-            &wgpu::SurfaceConfiguration {
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                format,
-                width: size.width.max(1),
-                height: size.height.max(1),
-                present_mode: wgpu::PresentMode::AutoVsync,
-                alpha_mode: wgpu::CompositeAlphaMode::Auto,
-                view_formats: vec![],
-                desired_maximum_frame_latency: 2,
-            },
-        );
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format,
+            width: size.width.max(1),
+            height: size.height.max(1),
+            present_mode: wgpu::PresentMode::AutoVsync,
+            alpha_mode: wgpu::CompositeAlphaMode::Auto,
+            view_formats: vec![],
+            desired_maximum_frame_latency: 2,
+        };
+        surface.configure(&self.engine.device, &config);
+        self.surface_config = Some(config);
         self.pipeline = Some(self.engine.make_pipeline(format));
         self.pipeline_add = Some(self.engine.make_pipeline_mode(format, true));
         self.bg_pipeline = Some(self.engine.make_bg_pipeline(format));
         self.bg_pipeline_add = Some(self.engine.make_bg_pipeline_mode(format, true));
         self.surface_size = (size.width.max(1), size.height.max(1));
-        self.depth = Some(self.engine.depth_texture(self.surface_size.0, self.surface_size.1));
+        self.depth = Some(
+            self.engine
+                .depth_texture(self.surface_size.0, self.surface_size.1),
+        );
         self.surface = Some(surface);
         self.window = Some(window);
         self.last_tick = Instant::now();
+        self.window.as_ref().unwrap().request_redraw();
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::Focused(focused) => {
+                self.foreground = focused;
+                self.physical_keys.clear();
+                self.input = Input::default();
+                self.accumulator = Duration::ZERO;
+                self.last_tick = Instant::now();
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            WindowEvent::Resized(size) if size.width > 0 && size.height > 0 => {
+                self.surface_size = (size.width, size.height);
+                if let (Some(surface), Some(config)) = (&self.surface, &mut self.surface_config) {
+                    config.width = size.width;
+                    config.height = size.height;
+                    surface.configure(&self.engine.device, config);
+                    self.depth = Some(self.engine.depth_texture(size.width, size.height));
+                }
+            }
             WindowEvent::KeyboardInput {
-                event: KeyEvent { physical_key: PhysicalKey::Code(code), state, repeat: false, .. },
+                event:
+                    KeyEvent {
+                        physical_key: PhysicalKey::Code(code),
+                        state,
+                        repeat: false,
+                        ..
+                    },
                 ..
             } => {
                 if let Some(key) = map_key(code) {
                     match state {
                         ElementState::Pressed => {
-                            self.input.held.insert(key);
-                            self.input.pressed.insert(key);
+                            self.physical_keys.insert(code);
+                            if self.input.held.insert(key) {
+                                self.input.pressed.insert(key);
+                            }
                         }
                         ElementState::Released => {
-                            self.input.held.remove(&key);
+                            self.physical_keys.remove(&code);
+                            if !self
+                                .physical_keys
+                                .iter()
+                                .any(|&physical| map_key(physical) == Some(key))
+                            {
+                                self.input.held.remove(&key);
+                            }
                         }
                     }
                 }
@@ -996,9 +1220,34 @@ impl ApplicationHandler for App {
                 if self.cmds.is_empty() && self.accumulator < TICK {
                     self.accumulator = TICK;
                 }
+                if !self.foreground || SUSPENDED.with(std::cell::Cell::get) {
+                    self.accumulator = Duration::ZERO;
+                    self.input = Input::default();
+                }
                 while self.accumulator >= TICK {
                     self.accumulator -= TICK;
-                    let frame = (self.update)(&self.input);
+                    let state = self.gamepad.sample();
+                    let buttons = controls::map_state(&state);
+                    let joy = Input::from_buttons(buttons, self.previous_gamepad);
+                    self.previous_gamepad = buttons;
+                    self.input.joy_buttons = state.buttons;
+                    self.input.joy_held = joy.held;
+                    self.input.joy_pressed = joy.pressed;
+                    // A key may be pressed and released between two fixed ticks.
+                    // Present that press for one whole simulation tick so gameplay
+                    // and T6RP recording consume the same sampled button state.
+                    let mut sampled_input = self.input.clone();
+                    sampled_input
+                        .held
+                        .extend(self.input.pressed.iter().copied());
+                    let frame = (self.update)(&sampled_input);
+                    if let Some(windowed) = take_windowed_request()
+                        && let Some(window) = &self.window
+                    {
+                        window.set_fullscreen(
+                            (!windowed).then_some(winit::window::Fullscreen::Borderless(None)),
+                        );
+                    }
                     self.input.pressed.clear();
                     if frame.quit {
                         event_loop.exit();
@@ -1007,31 +1256,71 @@ impl ApplicationHandler for App {
                     self.cmds = frame.cmds;
                     self.bg = frame.bg;
                     self.tick_count += 1;
-                    if let Some(dir) = &self.autoshot {
-                        if self.tick_count % 60 == 0 {
-                            let tex_refs: Vec<&Texture> = self.textures.iter().collect();
-                            let pixels = self.engine.render_to_image(&self.cmds, &tex_refs, self.bg.as_ref());
-                            let path = format!("{dir}/shot_{:06}.png", self.tick_count);
-                            let _ = image::save_buffer(&path, &pixels, SCREEN_W, SCREEN_H, image::ColorType::Rgba8);
-                        }
+                    if let Some(dir) = &self.autoshot
+                        && self.tick_count.is_multiple_of(60)
+                    {
+                        let tex_refs: Vec<&Texture> = self.textures.iter().collect();
+                        let pixels =
+                            self.engine
+                                .render_to_image(&self.cmds, &tex_refs, self.bg.as_ref());
+                        let path = format!("{dir}/shot_{:06}.png", self.tick_count);
+                        let _ = image::save_buffer(
+                            &path,
+                            &pixels,
+                            SCREEN_W,
+                            SCREEN_H,
+                            image::ColorType::Rgba8,
+                        );
                     }
                 }
 
-                let (Some(surface), Some(pipeline), Some(pipeline_add), Some(bg_pipeline), Some(bg_pipeline_add), Some(depth)) = (
+                let (
+                    Some(surface),
+                    Some(pipeline),
+                    Some(pipeline_add),
+                    Some(bg_pipeline),
+                    Some(bg_pipeline_add),
+                    Some(depth),
+                ) = (
                     &self.surface,
                     &self.pipeline,
                     &self.pipeline_add,
                     &self.bg_pipeline,
                     &self.bg_pipeline_add,
                     &self.depth,
-                ) else {
+                )
+                else {
                     return;
                 };
-                let frame = surface.get_current_texture().expect("acquire frame");
+                let frame = match surface.get_current_texture() {
+                    Ok(frame) => frame,
+                    Err(wgpu::SurfaceError::OutOfMemory) => {
+                        event_loop.exit();
+                        return;
+                    }
+                    Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+                        if let Some(config) = &self.surface_config {
+                            surface.configure(&self.engine.device, config);
+                        }
+                        if let Some(window) = &self.window {
+                            window.request_redraw();
+                        }
+                        return;
+                    }
+                    Err(_) => {
+                        if let Some(window) = &self.window {
+                            window.request_redraw();
+                        }
+                        return;
+                    }
+                };
                 let view = frame.texture.create_view(&Default::default());
                 let vbuf = self.engine.vertex_buffer(&self.cmds);
                 let tex_refs: Vec<&Texture> = self.textures.iter().collect();
-                let mut encoder = self.engine.device.create_command_encoder(&Default::default());
+                let mut encoder = self
+                    .engine
+                    .device
+                    .create_command_encoder(&Default::default());
                 if let Some(scene) = &self.bg {
                     self.engine.encode_bg(
                         &mut encoder,
@@ -1044,8 +1333,17 @@ impl ApplicationHandler for App {
                         self.surface_size,
                     );
                 }
-                self.engine
-                    .encode_pass(&mut encoder, &view, pipeline, pipeline_add, &vbuf, &self.cmds, &tex_refs, self.bg.is_some());
+                self.engine.encode_pass(
+                    &mut encoder,
+                    &view,
+                    pipeline,
+                    pipeline_add,
+                    &vbuf,
+                    &self.cmds,
+                    &tex_refs,
+                    self.bg.is_some(),
+                    self.surface_size,
+                );
                 self.engine.queue.submit([encoder.finish()]);
                 frame.present();
                 if let Some(w) = &self.window {
@@ -1060,11 +1358,15 @@ impl ApplicationHandler for App {
 /// Decode a color image (JPEG or PNG) and an optional grayscale alpha mask
 /// into a single RGBA8 buffer.
 pub fn compose_rgba(color: &[u8], alpha: Option<&[u8]>) -> (Vec<u8>, u32, u32) {
-    let img = image::load_from_memory(color).expect("decode color image").to_rgba8();
+    let img = image::load_from_memory(color)
+        .expect("decode color image")
+        .to_rgba8();
     let (w, h) = img.dimensions();
     let mut rgba = img.into_raw();
     if let Some(mask_bytes) = alpha {
-        let mask = image::load_from_memory(mask_bytes).expect("decode alpha mask").to_luma8();
+        let mask = image::load_from_memory(mask_bytes)
+            .expect("decode alpha mask")
+            .to_luma8();
         assert_eq!(mask.dimensions(), (w, h), "alpha mask size mismatch");
         for (i, p) in mask.as_raw().iter().enumerate() {
             rgba[i * 4 + 3] = *p;

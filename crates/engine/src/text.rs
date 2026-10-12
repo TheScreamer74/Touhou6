@@ -92,16 +92,25 @@ pub fn render(text: &str, px: f32, color: [u8; 3], shadow: Option<[u8; 3]>) -> T
         }
     };
 
-    if shadow.is_some() {
-        blit(sdx, sdy, shadow.unwrap());
+    if let Some(shadow) = shadow {
+        blit(sdx, sdy, shadow);
     }
     blit(0.0, 0.0, color);
 
-    TextImage { width, height, rgba }
+    TextImage {
+        width,
+        height,
+        rgba,
+    }
 }
 
 /// Convenience: decode Shift-JIS then render.
-pub fn render_shiftjis(bytes: &[u8], px: f32, color: [u8; 3], shadow: Option<[u8; 3]>) -> TextImage {
+pub fn render_shiftjis(
+    bytes: &[u8],
+    px: f32,
+    color: [u8; 3],
+    shadow: Option<[u8; 3]>,
+) -> TextImage {
     render(&decode_shiftjis(bytes), px, color, shadow)
 }
 
@@ -112,8 +121,18 @@ mod tests {
     #[test]
     fn renders_japanese_nonempty() {
         // "月符「ムーンライトレイ」" — kanji + brackets + katakana.
-        let img = render("月符「ムーンライトレイ」", 24.0, [255, 240, 240], Some([0, 0, 0]));
-        assert!(img.width > 40 && img.height > 10, "sane size: {}x{}", img.width, img.height);
+        let img = render(
+            "月符「ムーンライトレイ」",
+            24.0,
+            [255, 240, 240],
+            Some([0, 0, 0]),
+        );
+        assert!(
+            img.width > 40 && img.height > 10,
+            "sane size: {}x{}",
+            img.width,
+            img.height
+        );
         // Some pixels must be opaque (glyphs drew).
         let opaque = img.rgba.chunks_exact(4).filter(|p| p[3] > 128).count();
         assert!(opaque > 100, "glyphs rasterised: {opaque} opaque px");

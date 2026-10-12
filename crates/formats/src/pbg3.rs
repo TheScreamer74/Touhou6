@@ -28,18 +28,33 @@ impl<'a> Pbg3<'a> {
         let mut bits = BitStream::new(&data[4..]);
         let count = bits.read_int().ok_or(Error::Truncated)?;
         let table_offset = bits.read_int().ok_or(Error::Truncated)?;
+        if table_offset < 4
+            || table_offset as usize >= data.len()
+            || count > 4096
+            || count as usize > data.len()
+        {
+            return Err(Error::Truncated);
+        }
 
         // Offsets in the header are absolute file positions; the bitstream
         // starts after the 4-byte magic.
         bits.seek(table_offset as usize - 4);
         let mut entries = Vec::with_capacity(count as usize);
+        let mut extracted_size = 0u64;
         for _ in 0..count {
             let _unknown1 = bits.read_int().ok_or(Error::Truncated)?;
             let _unknown2 = bits.read_int().ok_or(Error::Truncated)?;
             let checksum = bits.read_int().ok_or(Error::Truncated)?;
             let offset = bits.read_int().ok_or(Error::Truncated)?;
             let size = bits.read_int().ok_or(Error::Truncated)?;
+            extracted_size += size as u64;
+            if extracted_size > 128 * 1024 * 1024 {
+                return Err(Error::Truncated);
+            }
             let name = bits.read_string(255).ok_or(Error::Truncated)?;
+            if offset < 4 || offset >= table_offset || size > 64 * 1024 * 1024 {
+                return Err(Error::Truncated);
+            }
             entries.push(Entry {
                 name: String::from_utf8_lossy(&name).into_owned(),
                 offset,
@@ -51,8 +66,29 @@ impl<'a> Pbg3<'a> {
     }
 
     pub fn extract(&self, entry: &Entry) -> Option<Vec<u8>> {
+        if entry.offset < 4
+            || entry.offset as usize >= self.data.len()
+            || entry.size > 64 * 1024 * 1024
+        {
+            return None;
+        }
         let mut bits = BitStream::new(&self.data[4..]);
         bits.seek(entry.offset as usize - 4);
         lzss::decompress(&mut bits, entry.size as usize)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn invalid_header_offsets_cannot_underflow_or_allocate_unbounded_memory() {
+        for input in [
+            b"PBG3".as_slice(),
+            b"PBG3\0\0",
+            b"PBG3\xff\xff\xff\xff\xff\xff\xff\xff",
+        ] {
+            assert!(Pbg3::parse(input).is_err());
+        }
     }
 }
