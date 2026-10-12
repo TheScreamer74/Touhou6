@@ -717,6 +717,19 @@
     }
   ],
   "pass": true,
+  "method": {
+    "render": "OfflineAudioContext half second across original loop end; source seek to end minus0.25seconds",
+    "analysis": "Fit decoded PCM within1sample around requested positions before and after boundary; linear interpolation allowed",
+    "rates_hz": [
+      44100,
+      48000
+    ],
+    "passes": 34,
+    "max_alignment_error_frames": 0.489795922068879,
+    "max_relative_rms_error": 2.658475059776697e-08,
+    "audio_listening": false
+  },
+  "harness_sha256": "803463296d82d73dfb9b7515f365f016f3fb1a644d5d356cdd0160b893128bae",
   "engine_probe": {
     "contextRates": [
       48000

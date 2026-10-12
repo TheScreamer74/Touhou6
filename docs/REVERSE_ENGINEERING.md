@@ -81,6 +81,10 @@ matched the expected decoded PCM alignment within 0.49 output samples. Six
 focused audio tests and all 60 workspace unit checks pass. This checks loop
 timing and rendered output, without claiming subjective listening results or
 lossless Vorbis equivalence. [Browser receipt](audio-loop-2026-10-12.json).
+The actual corrected engine was also observed using a 48 kHz context and buffer
+while keeping the title's original loop at 6.000340136–59.214625850 seconds.
+The asset-free local browser harness is reproducible with
+`scripts/verify_music_loops.py --help` and the separately supplied game files.
 
 REA workflow sources: [installation](https://github.com/morluto/rea/blob/b3dec005bcb89b5afe6e0aa41e5251f8a3a31de7/docs/installation.md),
 [CLI](https://github.com/morluto/rea/blob/b3dec005bcb89b5afe6e0aa41e5251f8a3a31de7/docs/cli.md),

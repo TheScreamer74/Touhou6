@@ -1,29 +1,46 @@
-[
-  {
-    "path": "th06/build.json",
-    "response": "200 application/json",
-    "bytes": 47,
-    "sha256": "19f821ab18fdbe3d41fb193f62d69b2491b05664a5395d5d3015db4861625fba",
-    "build": {
-      "version": "full-game-20261012-eef7cca16643"
+{
+  "version": "music-loop-20261012-5f7145f2299d",
+  "checks": [
+    {
+      "name": "build",
+      "url": "https://games.blackoutburst.com/th06/build.json",
+      "status": "200",
+      "content_type": "application/json",
+      "bytes": 48,
+      "sha256": "34fc31bede8d5a632f56adcb36968cbbafc4cf2fdbcb2a524db5f15efd60a098"
+    },
+    {
+      "name": "wasm",
+      "url": "https://games.blackoutburst.com/th06/pkg/th06_bg.wasm?v=music-loop-20261012-5f7145f2299d",
+      "status": "200",
+      "content_type": "application/wasm",
+      "bytes": 9394203,
+      "sha256": "5f7145f2299de379224413e5a074c3581becc40a59548080303621c40fda9738"
+    },
+    {
+      "name": "javascript",
+      "url": "https://games.blackoutburst.com/th06/pkg/th06.js?v=music-loop-20261012-5f7145f2299d",
+      "status": "200",
+      "content_type": "text/javascript",
+      "bytes": 139175,
+      "sha256": "7bce350ea2e4a74823620f571e3091d7b9e46ee5a3cfba22b940b0c07ebddc55"
+    },
+    {
+      "name": "th04",
+      "url": "https://games.blackoutburst.com/th04/",
+      "status": "200",
+      "content_type": "text/html",
+      "bytes": 7128,
+      "sha256": "8bf9aa3531942e79a5970343dc95c009c842a085fbc55e706ed4e4035921f69a"
+    },
+    {
+      "name": "portal",
+      "url": "https://games.blackoutburst.com/",
+      "status": "200",
+      "content_type": "text/html",
+      "bytes": 4097,
+      "sha256": "341c8f76804c4bd387fb83ef4dc7e173a56e0ced104602ad2d0376c1fdae4327"
     }
-  },
-  {
-    "path": "th06/pkg/th06_bg.wasm?v=full-game-20261012-eef7cca16643",
-    "response": "200 application/wasm",
-    "bytes": 9395830,
-    "sha256": "eef7cca166435eadb1912e42800bdb087b4e030e876c037d38cefb387de4dc7b"
-  },
-  {
-    "path": "th04/",
-    "response": "200 text/html",
-    "bytes": 7128,
-    "sha256": "8bf9aa3531942e79a5970343dc95c009c842a085fbc55e706ed4e4035921f69a"
-  },
-  {
-    "path": "/",
-    "response": "200 text/html",
-    "bytes": 4097,
-    "sha256": "341c8f76804c4bd387fb83ef4dc7e173a56e0ced104602ad2d0376c1fdae4327"
-  }
-]
+  ],
+  "other_game_routes_unchanged": true
+}
