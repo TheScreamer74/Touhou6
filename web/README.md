@@ -112,6 +112,8 @@ remain original. Language changes reuse texture slots, with only one active
 language rasterized. New web profiles start in French; older options retain their
 language choice and migrate without discarding gameplay settings.
 
+The browser title menu has no Exit entry; close the browser tab to leave.
+
 The optional hitbox can be hidden, shown while focusing, or always shown during
 live play. Its 2.5-pixel center marks the original collision box. It changes only
 the overlay. It does not change collisions, scores or replay inputs.

@@ -201,6 +201,58 @@ pub struct MenuArt {
 }
 
 impl MenuArt {
+    #[cfg(test)]
+    pub(crate) fn title_test_fixture() -> Self {
+        let vms = (0..8)
+            .map(|idx| {
+                let script = vec![
+                    th06_formats::anm0::Instr {
+                        time: 0,
+                        opcode: 1,
+                        args: 0u32.to_le_bytes().to_vec(),
+                        offset: 0,
+                    },
+                    th06_formats::anm0::Instr {
+                        time: 0,
+                        opcode: 15,
+                        args: Vec::new(),
+                        offset: 8,
+                    },
+                ];
+                let runner = AnmRunner::new(script.clone());
+                (
+                    idx,
+                    Vm {
+                        runner,
+                        sprites: HashMap::from([(
+                            0,
+                            Sprite {
+                                index: 0,
+                                x: 0.0,
+                                y: 0.0,
+                                width: 1.0,
+                                height: 1.0,
+                            },
+                        )]),
+                        tex: idx + 1,
+                        size: [1.0; 2],
+                        hidden: false,
+                        labels: vec![1, 2, 4],
+                        script,
+                        highlight_tex: None,
+                        highlighted: false,
+                        sheet_name: "title-test-fixture".into(),
+                    },
+                )
+            })
+            .collect();
+        Self {
+            background: 0,
+            vms,
+            sounds: Vec::new(),
+            latin: LatinFont::default(),
+        }
+    }
     pub fn load(
         engine: &Engine,
         files: &HashMap<String, Vec<u8>>,

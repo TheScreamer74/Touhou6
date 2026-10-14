@@ -33,6 +33,19 @@ an alive player outside the death transition. Its center follows the player’s
 shaken RHW position; its 2.5-pixel core marks the original collision rectangle.
 It adds drawing commands without changing player motion or collision tests.
 
+## Browser menu and text readability
+
+The browser title menu omits Quit from both drawing and keyboard navigation.
+Up/Down wrap over the remaining entries; Q, Escape and Bomb cannot select an
+invisible Quit entry at the title. Returning to the title from gameplay remains
+available. The native application retains its original title exit behavior.
+
+Text rasterization now composites foreground coverage over the shadow correctly
+in straight RGBA. Zero coverage preserves existing pixels and opaque strokes
+replace opaque shadow pixels. Glyph metrics, font sizes, shadow offsets and
+sprite alignment are retained. Regression checks cover partial alpha and actual
+Latin glyph strokes.
+
 ## Hosting adapter
 
 The page may load an independently hosted interface from

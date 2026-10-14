@@ -59,6 +59,24 @@ pub fn decode_shiftjis(bytes: &[u8]) -> String {
     s.into_owned()
 }
 
+/// Source-over into straight RGBA. Zero coverage must leave the shadow intact,
+/// and an opaque foreground must replace it, including an opaque shadow.
+fn over_pixel(pixel: &mut [u8], color: [u8; 3], alpha: u8) {
+    if alpha == 0 {
+        return;
+    }
+    let source = u32::from(alpha);
+    let destination = u32::from(pixel[3]) * (255 - source);
+    let total = source * 255 + destination;
+    for channel in 0..3 {
+        pixel[channel] = ((u32::from(color[channel]) * source * 255
+            + u32::from(pixel[channel]) * destination
+            + total / 2)
+            / total) as u8;
+    }
+    pixel[3] = ((total + 127) / 255) as u8;
+}
+
 /// Rasterise `text` (already decoded to Unicode) at `px` pixels, in `color`,
 /// with an optional drop `shadow` at the decomp's (+3,+2)·(px/30) offset.
 /// Returns a tight RGBA bitmap (fully transparent where no glyph covers).
@@ -105,17 +123,7 @@ pub fn render(text: &str, px: f32, color: [u8; 3], shadow: Option<[u8; 3]>) -> T
                         return;
                     }
                     let idx = ((py_ as u32 * width + px_ as u32) * 4) as usize;
-                    // Source-over: a covered pixel replaces toward `col` by coverage.
-                    let a = (cov * 255.0) as u16;
-                    let dst_a = rgba[idx + 3] as u16;
-                    if a <= dst_a && dst_a == 255 {
-                        return;
-                    }
-                    let na = a.max(dst_a);
-                    rgba[idx] = col[0];
-                    rgba[idx + 1] = col[1];
-                    rgba[idx + 2] = col[2];
-                    rgba[idx + 3] = na as u8;
+                    over_pixel(&mut rgba[idx..idx + 4], col, (cov * 255.0).round() as u8);
                 });
             }
         }
@@ -224,6 +232,40 @@ pub fn render_sprite_shiftjis_aligned(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn foreground_coverage_composites_over_the_shadow_without_erasing_it() {
+        let mut pixel = [0, 0, 0, 255];
+        over_pixel(&mut pixel, [255; 3], 0);
+        assert_eq!(pixel, [0, 0, 0, 255]);
+        over_pixel(&mut pixel, [255; 3], 255);
+        assert_eq!(pixel, [255; 4]);
+        let mut pixel = [0, 0, 255, 255];
+        over_pixel(&mut pixel, [255, 0, 0], 128);
+        assert_eq!(pixel, [128, 0, 127, 255]);
+        let mut pixel = [0, 0, 0, 128];
+        over_pixel(&mut pixel, [255; 3], 0);
+        assert_eq!(pixel, [0, 0, 0, 128]);
+        over_pixel(&mut pixel, [255; 3], 128);
+        assert_eq!(pixel, [170, 170, 170, 192]);
+    }
+
+    #[test]
+    fn opaque_latin_strokes_remain_white_when_the_shadow_overlaps() {
+        let plain = render("Options Français", 16.0, [255; 3], None);
+        let shadow = render("Options Français", 16.0, [255; 3], Some([0; 3]));
+        let mut checked = 0;
+        for y in 0..plain.height {
+            for x in 0..plain.width {
+                if plain.rgba[((y * plain.width + x) * 4 + 3) as usize] == 255 {
+                    let offset = ((y * shadow.width + x) * 4) as usize;
+                    assert_eq!(&shadow.rgba[offset..offset + 4], &[255; 4]);
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked > 20);
+    }
 
     #[test]
     fn renders_japanese_nonempty() {
