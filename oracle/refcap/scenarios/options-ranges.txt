@@ -1,0 +1,82 @@
+# Original starts in PRE_INPUT; Q releases it without selecting an item.
+key 180 184 Q
+key 240 244 UP
+key 270 274 UP
+key 330 334 Z
+# Options row 0: all values, left and right wraps.
+key 390 394 LEFT
+key 402 406 LEFT
+key 414 418 LEFT
+key 426 430 LEFT
+key 438 442 LEFT
+key 450 454 LEFT
+key 462 466 RIGHT
+key 474 478 RIGHT
+key 486 490 RIGHT
+key 498 502 RIGHT
+key 510 514 RIGHT
+key 522 526 RIGHT
+key 534 538 LEFT
+key 534 538 RIGHT
+key 546 550 DOWN
+# Options row 1: all values, left and right wraps.
+key 558 562 LEFT
+key 570 574 LEFT
+key 582 586 LEFT
+key 594 598 LEFT
+key 606 610 LEFT
+key 618 622 RIGHT
+key 630 634 RIGHT
+key 642 646 RIGHT
+key 654 658 RIGHT
+key 666 670 RIGHT
+key 678 682 LEFT
+key 678 682 RIGHT
+key 690 694 DOWN
+# Options row 2: all values, left and right wraps.
+key 702 706 LEFT
+key 714 718 LEFT
+key 726 730 LEFT
+key 738 742 RIGHT
+key 750 754 RIGHT
+key 762 766 RIGHT
+key 774 778 LEFT
+key 774 778 RIGHT
+key 786 790 DOWN
+# Options row 3: all values, left and right wraps.
+key 798 802 LEFT
+key 810 814 LEFT
+key 822 826 LEFT
+key 834 838 LEFT
+key 846 850 RIGHT
+key 858 862 RIGHT
+key 870 874 RIGHT
+key 882 886 RIGHT
+key 894 898 LEFT
+key 894 898 RIGHT
+key 906 910 DOWN
+# Options row 4: all values, left and right wraps.
+key 918 922 LEFT
+key 930 934 LEFT
+key 942 946 LEFT
+key 954 958 RIGHT
+key 966 970 RIGHT
+key 978 982 RIGHT
+key 990 994 LEFT
+key 990 994 RIGHT
+key 1002 1006 DOWN
+# Options row 5: all values, left and right wraps.
+key 1014 1018 LEFT
+key 1026 1030 LEFT
+key 1038 1042 LEFT
+key 1050 1054 RIGHT
+key 1062 1066 RIGHT
+key 1074 1078 RIGHT
+key 1086 1090 LEFT
+key 1086 1090 RIGHT
+# MoveCursor gives UP priority when both are pressed.
+key 1098 1102 UP
+key 1098 1102 DOWN
+key 1122 1126 DOWN
+key 1134 1138 DOWN
+key 1158 1162 Z

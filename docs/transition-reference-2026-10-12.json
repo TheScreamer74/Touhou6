@@ -1,0 +1,1952 @@
+{
+  "date": "2026-10-12",
+  "kind": "real executable natural menu/gameplay transitions",
+  "original_executable_sha256": "7f38496b31b8625196900a69cd1bfed243cab1f9612073e7881dc354b876fd39",
+  "matching_decompilation_commit": "bd90685fa40eaf2e16789dcf788843b304e6e02d",
+  "protocol": "Original Present p and native completed update p+1 consume the same key intervals. No clock fitting, frame tolerance or event reordering. Natural live/Practice native entryseed60777 reverses the two source EnemyManager initialization draws from original passive frame1 RNG41813 (60777\u219222552\u219241813). PracticeClear and replay pause declare god mode. ScoreSave alone declares the score-only fixture at Present1200. No Result state/timer or player state transplantation.",
+  "passed": false,
+  "compared_presentations": 29284,
+  "transition_fields_per_presentation": 9,
+  "covered_actions": [
+    "Replay menu request \u2192 stage registration/first calculation and music",
+    "Pause opening delay",
+    "Escape resumes on closing callback",
+    "Quit confirmation opens with No selected",
+    "No cancels quit",
+    "Shoot resumes on closing callback",
+    "Q requests Title then registers it next calculation",
+    "Live GameOver opens retry on following calculation",
+    "Retry Yes selected/countdown",
+    "Continue resumes existing stage on same callback",
+    "Second GameOver after Continue",
+    "Retry No \u2192 ResultFromGame registration",
+    "Practice GameOver \u2192 ResultFromGame \u2192 Title, including separate music callbacks",
+    "Practice clear requests ResultFromGame directly, then Title on following calculations",
+    "Highscore name entry, erase with Bomb and Escape, Stats, save prompt, empty replay slot, replay name entry, disk save and delayed Title registration"
+  ],
+  "excluded": "Physical output PCM is independently covered by the audio receipt. Natural transition pixel equality is not certified: ScoreSave has39pairs/0missing/19under unchanged image criteria. Controller bindings, replay import and replay overwrite are not certified by these six paths. Original pause has Resume and Quit; no distinct Restart item exists in StageMenu.",
+  "comparators_sha256": {
+    "verify_transition_reference.py": "06cfa742d8404109bccec5bf628e8dec0e40bbbb51eb06aeb0fe593b6f3af244",
+    "verify_audio_reference.py": "6f319dcf05dd5d44a3238ecd5aed621aa649e8c6ec6c68330a3e01da881c36fb",
+    "verify_saved_reference.py": "dff034406a718a8d71f30b3737e84e7f6d365fd2678311460d6635cf0ba9acfb"
+  },
+  "cases": [
+    {
+      "case": "pause-replay",
+      "transitions": {
+        "reference_sha256": "d04f8370809d10140f39bc69bc6a8d194a61f7031f39500a69df4e5fda67a31f",
+        "port_sha256": "b54689d49442cf6ab2cd3530ea7efe1d33fd22d23d539a758687893640986e35",
+        "required_present_interval": [
+          531,
+          1649
+        ],
+        "fields": [
+          "scene",
+          "frame",
+          "stage",
+          "pause_state",
+          "pause_timer",
+          "retry_state",
+          "retry_timer",
+          "game_menu",
+          "retry"
+        ],
+        "required_observations": 1119,
+        "compared_observations": 1119,
+        "different_or_missing_fields": 0,
+        "first_missing_frames": [],
+        "first_differences": [],
+        "passed": true,
+        "scope": "Supervisor, stage/input clock, pause/retry states and clocks; pixels, gameplay pools and physical PCM are independent comparisons."
+      },
+      "audio": {
+        "reference_sha256": "c51abb4d7fd037a656ebfee7c8475bcc28d54b841e7a1b0d90145a03e7c5862d",
+        "port_sha256": "e4599c7c4a2744148c12c636538fc7183244d9c7599ca6683931f944ecc1d6d5",
+        "frame_range": [
+          531,
+          1649
+        ],
+        "event_types": [
+          "SFX_REQUEST",
+          "BGM_REQUEST",
+          "BGM_STOP_REQUEST",
+          "BGM_FADE"
+        ],
+        "stages": null,
+        "clock": "present",
+        "reference_events": 208,
+        "port_events": 208,
+        "different_frame_event_groups": 0,
+        "first_differences": [],
+        "passed": true
+      },
+      "port_execution": {
+        "case": "pause-replay",
+        "returncode": 0,
+        "elapsed_seconds": 4.179020333103836,
+        "command": [
+          "/tmp/th06-scenarios/bin/877f18acf9ffa72c31582351628497c5f2fca08512f0a38394a739ffa156b9fb/th06",
+          "--game-dir",
+          "/tmp/th06-scenarios/pause-replay/port-transition-game",
+          "--frames",
+          "1650",
+          "--input-script",
+          "/tmp/th06-scenarios/pause-replay/port-transition-input.txt",
+          "--capture-dir",
+          "/tmp/th06-scenarios/pause-replay/port-transition",
+          "--capture-clock",
+          "update",
+          "--capture-frames",
+          "1650"
+        ],
+        "binary_sha256": "877f18acf9ffa72c31582351628497c5f2fca08512f0a38394a739ffa156b9fb",
+        "input_sha256": "2107dfdced5312a1f2350757b2e3a7a2cba26a27a66f9bb599222474a92181ce",
+        "declared_initial_options": [
+          2,
+          2,
+          3,
+          1,
+          1,
+          1,
+          1,
+          1,
+          0
+        ],
+        "declared_initial_seed": null,
+        "original_audio_sha256": "c51abb4d7fd037a656ebfee7c8475bcc28d54b841e7a1b0d90145a03e7c5862d"
+      },
+      "runtime_source_sha256": "7c137b26ead0cdc6e8b84b5b2c7e7ba276886047bd82b89da911d2ec43a9d530",
+      "port_outputs_sha256": {
+        "audio.csv": "e4599c7c4a2744148c12c636538fc7183244d9c7599ca6683931f944ecc1d6d5",
+        "transitions.csv": "b54689d49442cf6ab2cd3530ea7efe1d33fd22d23d539a758687893640986e35",
+        "stages.csv": "dbb77f71ae71e925745f32fbce6d9a3f6e192b1c3c14f4c72372f640e53e4863",
+        "results.csv": "3045903d9685ebac94b215228e94de5bf8617842b2b64afb2b88ce7fe5c6c092"
+      },
+      "original_provenance": {
+        "game": "/home/ubuntu/touhou6-web/reference/transition-probes/pause-replay/game",
+        "sha256": {
+          "102h.exe": "7f38496b31b8625196900a69cd1bfed243cab1f9612073e7881dc354b876fd39",
+          "d3d8.dll": "3e466886c49b823c05f9efd9da785c6bbe38828d0063e7e362e5afbf9fab498f",
+          "cfg.cfg": "d63a754a1817cfb19ae5ec3baac7ca7b0ebf9f0696e6addf02e2d7690fe88228",
+          "th06cap.txt": "e88e6d0a1261a3f7ccad114445a4209e49f71a411ee745c0fd475c5211c70950",
+          "transitions.csv": "d04f8370809d10140f39bc69bc6a8d194a61f7031f39500a69df4e5fda67a31f",
+          "audio.csv": "c51abb4d7fd037a656ebfee7c8475bcc28d54b841e7a1b0d90145a03e7c5862d",
+          "state.csv": "0d15130d9860c2d615dd8ab27ab97de0517fea53a1dd87ab84730434e5e5d7f4"
+        }
+      },
+      "reviewable_original_input_config": {
+        "path": "oracle/refcap/scenarios/pause-replay.txt",
+        "sha256": "e88e6d0a1261a3f7ccad114445a4209e49f71a411ee745c0fd475c5211c70950",
+        "declared_external_setup": "Original replay slot1 contains the separately fingerprinted reference replay. Other config directives only enable passive traces, god mode and stopping."
+      },
+      "declared_god_mode": {
+        "original": true,
+        "native": false,
+        "scope": "Current historical native pause capture omitted --god; no collision occurs in its first600 stageframes and no player-state equivalence is claimed by that nine-field menu comparison. Final-pin runner now declares --god on both sides."
+      }
+    },
+    {
+      "case": "live-continue",
+      "transitions": {
+        "reference_sha256": "9a9341e554b104c0d234e09f1c867fedad1efd564a3f5adf1150ca7c8ebb7acd",
+        "port_sha256": "736641b3dfdff28225a4a01575620c5f1ed799e675d0fe5397c526e06d4f6c13",
+        "required_present_interval": [
+          471,
+          3299
+        ],
+        "fields": [
+          "scene",
+          "frame",
+          "stage",
+          "pause_state",
+          "pause_timer",
+          "retry_state",
+          "retry_timer",
+          "game_menu",
+          "retry"
+        ],
+        "required_observations": 2829,
+        "compared_observations": 2829,
+        "different_or_missing_fields": 0,
+        "first_missing_frames": [],
+        "first_differences": [],
+        "passed": true,
+        "scope": "Supervisor, stage/input clock, pause/retry states and clocks; pixels, gameplay pools and physical PCM are independent comparisons."
+      },
+      "audio": {
+        "reference_sha256": "7d1ec8a15b49c76faf64a375a91149d91a93c5f9faf58ddc9b15c1c3fa49400e",
+        "port_sha256": "d8c101e9d1d03f795548fbfb01fe6055a47a0188fe087391a95d7221ef3c355e",
+        "frame_range": [
+          471,
+          3299
+        ],
+        "event_types": [
+          "SFX_REQUEST",
+          "BGM_REQUEST",
+          "BGM_STOP_REQUEST",
+          "BGM_FADE"
+        ],
+        "stages": null,
+        "clock": "present",
+        "reference_events": 29,
+        "port_events": 29,
+        "different_frame_event_groups": 0,
+        "first_differences": [],
+        "passed": true
+      },
+      "port_execution": {
+        "case": "live-continue",
+        "returncode": 0,
+        "elapsed_seconds": 9.948524083010852,
+        "command": [
+          "/tmp/th06-scenarios/bin/d075dd8d8ee4b1915842a6d137dfc8dbd0d59e9bba72c6a798b9ae3735c29583/th06",
+          "--game-dir",
+          "/tmp/th06-scenarios/live-continue/port-transition-game",
+          "--frames",
+          "3300",
+          "--input-script",
+          "/tmp/th06-scenarios/live-continue/port-transition-input.txt",
+          "--capture-dir",
+          "/tmp/th06-scenarios/live-continue/port-transition",
+          "--capture-clock",
+          "update",
+          "--capture-frames",
+          "3300",
+          "--seed",
+          "60777"
+        ],
+        "binary_sha256": "d075dd8d8ee4b1915842a6d137dfc8dbd0d59e9bba72c6a798b9ae3735c29583",
+        "input_sha256": "cd73bf1d5168d27da5660d6dd10dd5aa3d739a18ad2f7061c68ee1043227055d",
+        "declared_initial_options": [
+          2,
+          0,
+          3,
+          0,
+          1,
+          1,
+          1,
+          1,
+          0
+        ],
+        "declared_initial_seed": 60777,
+        "seed_protocol": "Original passive frame1 RNG41813; invert the two source EnemyManager item-table draws to entry seed60777. Native receives that entry seed, no state transplantation.",
+        "original_audio_sha256": "7d1ec8a15b49c76faf64a375a91149d91a93c5f9faf58ddc9b15c1c3fa49400e"
+      },
+      "runtime_source_sha256": "07c6e07fadbd34f2b85c3dbc8df39666c2513d2df4abffb6ab9d8c9cb176244e",
+      "port_outputs_sha256": {
+        "audio.csv": "d8c101e9d1d03f795548fbfb01fe6055a47a0188fe087391a95d7221ef3c355e",
+        "transitions.csv": "736641b3dfdff28225a4a01575620c5f1ed799e675d0fe5397c526e06d4f6c13",
+        "stages.csv": "8621ed829f088c2aea4a2386eca6c87e000d96c3ddacdd8b3a4fcda71b1534cf",
+        "results.csv": "3045903d9685ebac94b215228e94de5bf8617842b2b64afb2b88ce7fe5c6c092"
+      },
+      "original_provenance": {
+        "game": "/home/ubuntu/touhou6-web/reference/transition-completion/live-continue/game",
+        "sha256": {
+          "102h.exe": "7f38496b31b8625196900a69cd1bfed243cab1f9612073e7881dc354b876fd39",
+          "d3d8.dll": "c3b3aa0e9d110417a622f143ec8d4f6c7c0add39c92290b0e71fb1d1297c7121",
+          "cfg.cfg": "ae82e56e5197f13fdc7085853796c391c9d5aba1e8b34e4300828a9335526cfa",
+          "th06cap.txt": "5a71630219ac8ad34443541d9226f45bcbbe4033c2bd83408d8565310901ffa7",
+          "transitions.csv": "9a9341e554b104c0d234e09f1c867fedad1efd564a3f5adf1150ca7c8ebb7acd",
+          "audio.csv": "7d1ec8a15b49c76faf64a375a91149d91a93c5f9faf58ddc9b15c1c3fa49400e",
+          "state.csv": "9d90bd8858486bb67e30c88176763307c23e5c2a45c9556114d9633d9151dcc2"
+        }
+      },
+      "gameplay_observations": {
+        "reference_sha256": "9d90bd8858486bb67e30c88176763307c23e5c2a45c9556114d9633d9151dcc2",
+        "port_sha256": "8621ed829f088c2aea4a2386eca6c87e000d96c3ddacdd8b3a4fcda71b1534cf",
+        "required_present_interval": [
+          471,
+          3299
+        ],
+        "compared_original_observations": 1435,
+        "fields": [
+          "frame",
+          "stage",
+          "x",
+          "y",
+          "lives",
+          "bombs",
+          "power",
+          "score",
+          "graze_stage",
+          "graze_total",
+          "rank",
+          "subrank",
+          "rng",
+          "bullets",
+          "lasers",
+          "items",
+          "particle_timer"
+        ],
+        "different_fields": 0,
+        "first_differences": [],
+        "coordinate_comparison": "Exact six-decimal diagnostic strings, without epsilon.",
+        "passed": true
+      },
+      "reviewable_original_input_config": {
+        "path": "oracle/refcap/scenarios/live-continue.txt",
+        "sha256": "5a71630219ac8ad34443541d9226f45bcbbe4033c2bd83408d8565310901ffa7"
+      },
+      "declared_god_mode": {
+        "original": false,
+        "native": false
+      }
+    },
+    {
+      "case": "live-decline",
+      "transitions": {
+        "reference_sha256": "312bcde0afec701e3751d548deb15ac3e19d68bc71eb6128584b572e425a3a9d",
+        "port_sha256": "c664f1b2aa88efddbe91c2093efe79e86e03d98dd0ad793d2bfc17f575cc684f",
+        "required_present_interval": [
+          471,
+          3299
+        ],
+        "fields": [
+          "scene",
+          "frame",
+          "stage",
+          "pause_state",
+          "pause_timer",
+          "retry_state",
+          "retry_timer",
+          "game_menu",
+          "retry"
+        ],
+        "required_observations": 2829,
+        "compared_observations": 2829,
+        "different_or_missing_fields": 0,
+        "first_missing_frames": [],
+        "first_differences": [],
+        "passed": true,
+        "scope": "Supervisor, stage/input clock, pause/retry states and clocks; pixels, gameplay pools and physical PCM are independent comparisons."
+      },
+      "audio": {
+        "reference_sha256": "0b7cdd61578a5181740e3ba1c6599eda5035e8fb3867fe5256528d3b2c38462f",
+        "port_sha256": "b52cec7f9d7b0d6a680ef762bab1723601a725da7abae1ca3621541544a775eb",
+        "frame_range": [
+          471,
+          3299
+        ],
+        "event_types": [
+          "SFX_REQUEST",
+          "BGM_REQUEST",
+          "BGM_STOP_REQUEST",
+          "BGM_FADE"
+        ],
+        "stages": null,
+        "clock": "present",
+        "reference_events": 16,
+        "port_events": 16,
+        "different_frame_event_groups": 0,
+        "first_differences": [],
+        "passed": true
+      },
+      "port_execution": {
+        "case": "live-decline",
+        "returncode": 0,
+        "elapsed_seconds": 8.717627374920994,
+        "command": [
+          "/tmp/th06-scenarios/bin/d075dd8d8ee4b1915842a6d137dfc8dbd0d59e9bba72c6a798b9ae3735c29583/th06",
+          "--game-dir",
+          "/tmp/th06-scenarios/live-decline/port-transition-game",
+          "--frames",
+          "3300",
+          "--input-script",
+          "/tmp/th06-scenarios/live-decline/port-transition-input.txt",
+          "--capture-dir",
+          "/tmp/th06-scenarios/live-decline/port-transition",
+          "--capture-clock",
+          "update",
+          "--capture-frames",
+          "3300",
+          "--seed",
+          "60777"
+        ],
+        "binary_sha256": "d075dd8d8ee4b1915842a6d137dfc8dbd0d59e9bba72c6a798b9ae3735c29583",
+        "input_sha256": "e5a35303c4315ed2ba1ee57beab73a5337a669d08eeec8768692df72a19f21ce",
+        "declared_initial_options": [
+          2,
+          0,
+          3,
+          0,
+          1,
+          1,
+          1,
+          1,
+          0
+        ],
+        "declared_initial_seed": 60777,
+        "seed_protocol": "Original passive frame1 RNG41813; invert the two source EnemyManager item-table draws to entry seed60777. Native receives that entry seed, no state transplantation.",
+        "original_audio_sha256": "0b7cdd61578a5181740e3ba1c6599eda5035e8fb3867fe5256528d3b2c38462f"
+      },
+      "runtime_source_sha256": "07c6e07fadbd34f2b85c3dbc8df39666c2513d2df4abffb6ab9d8c9cb176244e",
+      "port_outputs_sha256": {
+        "audio.csv": "b52cec7f9d7b0d6a680ef762bab1723601a725da7abae1ca3621541544a775eb",
+        "transitions.csv": "c664f1b2aa88efddbe91c2093efe79e86e03d98dd0ad793d2bfc17f575cc684f",
+        "stages.csv": "c9665043695df12d699663fe918bf0a706b0caf9fc6e565fb3e15538a4e5da1a",
+        "results.csv": "51cca27423fb0cff6eaf3a81b89dbbf87ff9b7e75267f33b16c5a0a8b2c6c306"
+      },
+      "original_provenance": {
+        "game": "/home/ubuntu/touhou6-web/reference/transition-completion/live-decline/game",
+        "sha256": {
+          "102h.exe": "7f38496b31b8625196900a69cd1bfed243cab1f9612073e7881dc354b876fd39",
+          "d3d8.dll": "c3b3aa0e9d110417a622f143ec8d4f6c7c0add39c92290b0e71fb1d1297c7121",
+          "cfg.cfg": "ae82e56e5197f13fdc7085853796c391c9d5aba1e8b34e4300828a9335526cfa",
+          "th06cap.txt": "c6e57833564589001f040c6dee77a79fc0eadebd35708e71793aa3b77a28d7cb",
+          "transitions.csv": "312bcde0afec701e3751d548deb15ac3e19d68bc71eb6128584b572e425a3a9d",
+          "audio.csv": "0b7cdd61578a5181740e3ba1c6599eda5035e8fb3867fe5256528d3b2c38462f",
+          "state.csv": "6a276a1a6b826a7cf1a4c4ef293bf0c3d287e8a66e425fb2c9cc31dad7f8bab6"
+        }
+      },
+      "gameplay_observations": {
+        "reference_sha256": "6a276a1a6b826a7cf1a4c4ef293bf0c3d287e8a66e425fb2c9cc31dad7f8bab6",
+        "port_sha256": "c9665043695df12d699663fe918bf0a706b0caf9fc6e565fb3e15538a4e5da1a",
+        "required_present_interval": [
+          471,
+          3299
+        ],
+        "compared_original_observations": 956,
+        "fields": [
+          "frame",
+          "stage",
+          "x",
+          "y",
+          "lives",
+          "bombs",
+          "power",
+          "score",
+          "graze_stage",
+          "graze_total",
+          "rank",
+          "subrank",
+          "rng",
+          "bullets",
+          "lasers",
+          "items",
+          "particle_timer"
+        ],
+        "different_fields": 0,
+        "first_differences": [],
+        "coordinate_comparison": "Exact six-decimal diagnostic strings, without epsilon.",
+        "passed": true
+      },
+      "reviewable_original_input_config": {
+        "path": "oracle/refcap/scenarios/live-decline.txt",
+        "sha256": "c6e57833564589001f040c6dee77a79fc0eadebd35708e71793aa3b77a28d7cb"
+      },
+      "declared_god_mode": {
+        "original": false,
+        "native": false
+      }
+    },
+    {
+      "case": "practice-death",
+      "transitions": {
+        "reference_sha256": "4d573b26b159eb1042b8338a91c5c7d9a0eb6b7b148027d364d9464444030bcb",
+        "port_sha256": "5b88afa6a5437f154261f7d83ff48fa29fd873e7257a5192fc484b8bb9ad47b2",
+        "required_present_interval": [
+          561,
+          2999
+        ],
+        "fields": [
+          "scene",
+          "frame",
+          "stage",
+          "pause_state",
+          "pause_timer",
+          "retry_state",
+          "retry_timer",
+          "game_menu",
+          "retry"
+        ],
+        "required_observations": 2439,
+        "compared_observations": 2439,
+        "different_or_missing_fields": 0,
+        "first_missing_frames": [],
+        "first_differences": [],
+        "passed": true,
+        "scope": "Supervisor, stage/input clock, pause/retry states and clocks; pixels, gameplay pools and physical PCM are independent comparisons."
+      },
+      "audio": {
+        "reference_sha256": "e845dfc71cc754b238a1775605c7f7921b04a442b4e3df46b6511a70158e325f",
+        "port_sha256": "4e207625ed422dadbd59aed34fe01f36a047428739edc012f5f726f859a5f2dc",
+        "frame_range": [
+          561,
+          2999
+        ],
+        "event_types": [
+          "SFX_REQUEST",
+          "BGM_REQUEST",
+          "BGM_STOP_REQUEST",
+          "BGM_FADE"
+        ],
+        "stages": null,
+        "clock": "present",
+        "reference_events": 25,
+        "port_events": 25,
+        "different_frame_event_groups": 0,
+        "first_differences": [],
+        "passed": true
+      },
+      "port_execution": {
+        "case": "practice-death",
+        "returncode": 0,
+        "elapsed_seconds": 8.15838116640225,
+        "command": [
+          "/tmp/th06-scenarios/bin/d075dd8d8ee4b1915842a6d137dfc8dbd0d59e9bba72c6a798b9ae3735c29583/th06",
+          "--game-dir",
+          "/tmp/th06-scenarios/practice-death/port-transition-game",
+          "--frames",
+          "3000",
+          "--input-script",
+          "/tmp/th06-scenarios/practice-death/port-transition-input.txt",
+          "--capture-dir",
+          "/tmp/th06-scenarios/practice-death/port-transition",
+          "--capture-clock",
+          "update",
+          "--capture-frames",
+          "3000",
+          "--seed",
+          "60777"
+        ],
+        "binary_sha256": "d075dd8d8ee4b1915842a6d137dfc8dbd0d59e9bba72c6a798b9ae3735c29583",
+        "input_sha256": "e12cd9bf7a149c4af7d69e59279af545bee076e2be256b2f99016521f8320726",
+        "declared_initial_options": [
+          2,
+          0,
+          3,
+          0,
+          1,
+          1,
+          1,
+          1,
+          0
+        ],
+        "declared_initial_seed": 60777,
+        "seed_protocol": "Original passive frame1 RNG41813; invert the two source EnemyManager item-table draws to entry seed60777. Native receives that entry seed, no state transplantation.",
+        "original_audio_sha256": "e845dfc71cc754b238a1775605c7f7921b04a442b4e3df46b6511a70158e325f"
+      },
+      "runtime_source_sha256": "07c6e07fadbd34f2b85c3dbc8df39666c2513d2df4abffb6ab9d8c9cb176244e",
+      "port_outputs_sha256": {
+        "audio.csv": "4e207625ed422dadbd59aed34fe01f36a047428739edc012f5f726f859a5f2dc",
+        "transitions.csv": "5b88afa6a5437f154261f7d83ff48fa29fd873e7257a5192fc484b8bb9ad47b2",
+        "stages.csv": "d738542cf511a7db27dd082536402c7f21c2b2b5b60d4f273c1ae2627d50e9af",
+        "results.csv": "3045903d9685ebac94b215228e94de5bf8617842b2b64afb2b88ce7fe5c6c092"
+      },
+      "original_provenance": {
+        "game": "/home/ubuntu/touhou6-web/reference/transition-completion/practice-death/game",
+        "sha256": {
+          "102h.exe": "7f38496b31b8625196900a69cd1bfed243cab1f9612073e7881dc354b876fd39",
+          "d3d8.dll": "c3b3aa0e9d110417a622f143ec8d4f6c7c0add39c92290b0e71fb1d1297c7121",
+          "cfg.cfg": "ae82e56e5197f13fdc7085853796c391c9d5aba1e8b34e4300828a9335526cfa",
+          "th06cap.txt": "d7553a2dda5277ca4043c2fe4d070549a699df1692991eefcb7af21219cd7dab",
+          "transitions.csv": "4d573b26b159eb1042b8338a91c5c7d9a0eb6b7b148027d364d9464444030bcb",
+          "audio.csv": "e845dfc71cc754b238a1775605c7f7921b04a442b4e3df46b6511a70158e325f",
+          "state.csv": "5c5088601b8ec2f7dd548edb119de2e30d7594674ebbbd6d9db25954cb12ba7e"
+        }
+      },
+      "gameplay_observations": {
+        "reference_sha256": "5c5088601b8ec2f7dd548edb119de2e30d7594674ebbbd6d9db25954cb12ba7e",
+        "port_sha256": "d738542cf511a7db27dd082536402c7f21c2b2b5b60d4f273c1ae2627d50e9af",
+        "required_present_interval": [
+          561,
+          2999
+        ],
+        "compared_original_observations": 2358,
+        "fields": [
+          "frame",
+          "stage",
+          "x",
+          "y",
+          "lives",
+          "bombs",
+          "power",
+          "score",
+          "graze_stage",
+          "graze_total",
+          "rank",
+          "subrank",
+          "rng",
+          "bullets",
+          "lasers",
+          "items",
+          "particle_timer"
+        ],
+        "different_fields": 0,
+        "first_differences": [],
+        "coordinate_comparison": "Exact six-decimal diagnostic strings, without epsilon.",
+        "passed": true
+      },
+      "reviewable_original_input_config": {
+        "path": "oracle/refcap/scenarios/practice-death.txt",
+        "sha256": "d7553a2dda5277ca4043c2fe4d070549a699df1692991eefcb7af21219cd7dab",
+        "comparison_endpoint": "The reference runs longer than the declared compared interval; later idle demo/progression is outside this natural transition proof."
+      },
+      "declared_god_mode": {
+        "original": false,
+        "native": false
+      }
+    },
+    {
+      "case": "practice-clear",
+      "transitions": {
+        "reference_sha256": "b1a39895920138d593cebf19f1cc6693f8d306b162f0e30884fbe6e1d746d432",
+        "port_sha256": "7558f368af3bb32306b684082faa9249a162993779123b846f98af72ec96febc",
+        "required_present_interval": [
+          561,
+          18099
+        ],
+        "fields": [
+          "scene",
+          "frame",
+          "stage",
+          "pause_state",
+          "pause_timer",
+          "retry_state",
+          "retry_timer",
+          "game_menu",
+          "retry"
+        ],
+        "required_observations": 17539,
+        "compared_observations": 17539,
+        "different_or_missing_fields": 0,
+        "first_missing_frames": [],
+        "first_differences": [],
+        "passed": true,
+        "scope": "Supervisor, stage/input clock, pause/retry states and clocks; pixels, gameplay pools and physical PCM are independent comparisons."
+      },
+      "audio": {
+        "reference_sha256": "61203f0032f2cebcab191283ad651be243b4a56a7dca7d8d85b9c799a5f39cf6",
+        "port_sha256": "ecd732d715ea4ebf0f910cd615ce636a7dab4f27c89b9e8132d849219a243060",
+        "frame_range": [
+          561,
+          18099
+        ],
+        "event_types": [
+          "SFX_REQUEST",
+          "BGM_REQUEST",
+          "BGM_STOP_REQUEST",
+          "BGM_FADE"
+        ],
+        "stages": null,
+        "clock": "present",
+        "reference_events": 3929,
+        "port_events": 3929,
+        "different_frame_event_groups": 0,
+        "first_differences": [],
+        "passed": true
+      },
+      "port_execution": {
+        "case": "practice-clear",
+        "returncode": 0,
+        "elapsed_seconds": 45.855675833299756,
+        "command": [
+          "/tmp/th06-scenarios/bin/d0fc9132211dab77d950ca20cc665106064ffe62bfc481cd6f74ea500c49dda1/th06",
+          "--game-dir",
+          "/tmp/th06-scenarios/practice-clear/port-transition-game",
+          "--frames",
+          "18100",
+          "--input-script",
+          "/tmp/th06-scenarios/practice-clear/port-transition-input.txt",
+          "--capture-dir",
+          "/tmp/th06-scenarios/practice-clear/port-transition",
+          "--capture-clock",
+          "update",
+          "--capture-frames",
+          "18100",
+          "--seed",
+          "60777",
+          "--god"
+        ],
+        "binary_sha256": "d0fc9132211dab77d950ca20cc665106064ffe62bfc481cd6f74ea500c49dda1",
+        "input_sha256": "2a732c77226fa39bef09f1b86a3de9ebb8dafcf5fe40c38849a0f3a69ded9860",
+        "declared_initial_options": [
+          2,
+          0,
+          3,
+          0,
+          1,
+          1,
+          1,
+          1,
+          0
+        ],
+        "declared_initial_seed": 60777,
+        "seed_protocol": "Original passive frame1 RNG41813; invert the two source EnemyManager item-table draws to entry seed60777. Native receives that entry seed, no state transplantation.",
+        "original_audio_sha256": "61203f0032f2cebcab191283ad651be243b4a56a7dca7d8d85b9c799a5f39cf6"
+      },
+      "runtime_source_sha256": "26506dc80cbe591d3984a34797c30fd37b40d43ca138c0d80c1f421c80863981",
+      "port_outputs_sha256": {
+        "audio.csv": "ecd732d715ea4ebf0f910cd615ce636a7dab4f27c89b9e8132d849219a243060",
+        "transitions.csv": "7558f368af3bb32306b684082faa9249a162993779123b846f98af72ec96febc",
+        "stages.csv": "b7409758e928a44f3ffd16164eaae0e8fda51c2225ffba1363765830669861d4",
+        "results.csv": "3045903d9685ebac94b215228e94de5bf8617842b2b64afb2b88ce7fe5c6c092"
+      },
+      "original_provenance": {
+        "game": "/home/ubuntu/touhou6-web/reference/transition-completion/practice-clear/game",
+        "sha256": {
+          "transitions.csv": "b1a39895920138d593cebf19f1cc6693f8d306b162f0e30884fbe6e1d746d432",
+          "th06cap.log": "0be5ad1198dce47a9175bac3a336107329c651afd9ebcb04a977c9202e44e9c8",
+          "menus.csv": "5d83fe4a86ba28490c2349499bcaea140ef2c727de9bb36a14d89c47a873eecf",
+          "lifecycle.csv": "214a95e21b30517cb540365e015be5efc1b4163d1a0f0aa8cfc85851de2cc041",
+          "state.csv": "eb79e4b81ed2d03a32819cf44956b610a7398321093bb3663c084bd309168cf1",
+          "audio.csv": "61203f0032f2cebcab191283ad651be243b4a56a7dca7d8d85b9c799a5f39cf6",
+          "scenes.csv": "5630825adea7c2043c0e17a5317eda34c38b801fcb2bad16f1c88ee007e4ff8a",
+          "th06cap.txt": "8294657ab755028e9439d074deca2487f6e1d8b1e20cc71fd4eb7d1d760f74d6",
+          "102h.exe": "7f38496b31b8625196900a69cd1bfed243cab1f9612073e7881dc354b876fd39",
+          "d3d8.dll": "c3b3aa0e9d110417a622f143ec8d4f6c7c0add39c92290b0e71fb1d1297c7121",
+          "cfg.cfg": "ae82e56e5197f13fdc7085853796c391c9d5aba1e8b34e4300828a9335526cfa"
+        },
+        "process_receipt": null
+      },
+      "gameplay_observations": {
+        "reference_sha256": "eb79e4b81ed2d03a32819cf44956b610a7398321093bb3663c084bd309168cf1",
+        "port_sha256": "b7409758e928a44f3ffd16164eaae0e8fda51c2225ffba1363765830669861d4",
+        "required_present_interval": [
+          561,
+          18099
+        ],
+        "compared_original_observations": 17454,
+        "fields": [
+          "frame",
+          "stage",
+          "x",
+          "y",
+          "lives",
+          "bombs",
+          "power",
+          "score",
+          "graze_stage",
+          "graze_total",
+          "rank",
+          "subrank",
+          "rng",
+          "bullets",
+          "lasers",
+          "items",
+          "particle_timer"
+        ],
+        "different_fields": 0,
+        "first_differences": [],
+        "coordinate_comparison": "Exact six-decimal diagnostic strings, without epsilon.",
+        "passed": true
+      },
+      "declared_fixture": {
+        "god_mode": true,
+        "hold_shoot_present_interval": [
+          600,
+          24000
+        ],
+        "entry_seed": 60777,
+        "original_state_and_timers": "unmodified"
+      },
+      "reviewable_original_input_config": {
+        "path": "oracle/refcap/scenarios/practice-clear.txt",
+        "sha256": "8294657ab755028e9439d074deca2487f6e1d8b1e20cc71fd4eb7d1d760f74d6",
+        "comparison_endpoint": "The reference runs longer than the declared compared interval; later idle demo/progression is outside this natural transition proof."
+      },
+      "declared_god_mode": {
+        "original": true,
+        "native": true
+      }
+    },
+    {
+      "case": "score-save",
+      "transitions": {
+        "reference_sha256": "ffe3bba2c1a812a647bd282fbfbb5ac7fc90073d4b9cf1da8d96881428b85625",
+        "port_sha256": "bd9ccd61c348aa24544277409f68edf79319d2cc9862ae7a67b5801a2cf10a94",
+        "required_present_interval": [
+          471,
+          2999
+        ],
+        "fields": [
+          "scene",
+          "frame",
+          "stage",
+          "pause_state",
+          "pause_timer",
+          "retry_state",
+          "retry_timer",
+          "game_menu",
+          "retry"
+        ],
+        "required_observations": 2529,
+        "compared_observations": 2529,
+        "different_or_missing_fields": 0,
+        "first_missing_frames": [],
+        "first_differences": [],
+        "passed": true,
+        "scope": "Supervisor, stage/input clock, pause/retry states and clocks; pixels, gameplay pools and physical PCM are independent comparisons."
+      },
+      "audio": {
+        "reference_sha256": "1c2f40b990b3c3cfa5baaa98d30a233fc4848748ae256d4fd00f3f41612204d5",
+        "port_sha256": "c53108ae6f2952b27713258b5013d6ec7f53eb0bef58410025e875c144e733eb",
+        "frame_range": [
+          471,
+          2999
+        ],
+        "event_types": [
+          "SFX_REQUEST",
+          "BGM_REQUEST",
+          "BGM_STOP_REQUEST",
+          "BGM_FADE"
+        ],
+        "stages": null,
+        "clock": "present",
+        "reference_events": 35,
+        "port_events": 35,
+        "different_frame_event_groups": 0,
+        "first_differences": [],
+        "passed": true
+      },
+      "port_execution": {
+        "case": "score-save",
+        "returncode": 0,
+        "elapsed_seconds": 7.8975065420381725,
+        "command": [
+          "/tmp/th06-scenarios/bin/d0fc9132211dab77d950ca20cc665106064ffe62bfc481cd6f74ea500c49dda1/th06",
+          "--game-dir",
+          "/tmp/th06-scenarios/score-save/port-transition-game",
+          "--frames",
+          "3000",
+          "--input-script",
+          "/tmp/th06-scenarios/score-save/port-transition-input.txt",
+          "--capture-dir",
+          "/tmp/th06-scenarios/score-save/port-transition",
+          "--capture-clock",
+          "update",
+          "--capture-frames",
+          "2061,2081,2101,2121,2141,2161,2181,2201,2221,2241,2261,2281,2301,2321,2341,2361,2381,2401,2421,2441,2461,2481,2501,2521,2541,2561,2581,2601,2621,2641,2661,2681,2701,2721,2741,2761,2781,2801,2821,3000",
+          "--seed",
+          "60777",
+          "--score-fixture",
+          "1200:5000000"
+        ],
+        "binary_sha256": "d0fc9132211dab77d950ca20cc665106064ffe62bfc481cd6f74ea500c49dda1",
+        "input_sha256": "0183140363a8f14252f93eb1129908002627c4fd829cee27baec1c21d5507b45",
+        "declared_initial_options": [
+          2,
+          0,
+          3,
+          0,
+          1,
+          1,
+          1,
+          1,
+          0
+        ],
+        "declared_initial_seed": 60777,
+        "seed_protocol": "Original passive frame1 RNG41813; invert the two source EnemyManager item-table draws to entry seed60777. Native receives that entry seed, no state transplantation.",
+        "original_audio_sha256": "1c2f40b990b3c3cfa5baaa98d30a233fc4848748ae256d4fd00f3f41612204d5"
+      },
+      "runtime_source_sha256": "26506dc80cbe591d3984a34797c30fd37b40d43ca138c0d80c1f421c80863981",
+      "port_outputs_sha256": {
+        "audio.csv": "c53108ae6f2952b27713258b5013d6ec7f53eb0bef58410025e875c144e733eb",
+        "transitions.csv": "bd9ccd61c348aa24544277409f68edf79319d2cc9862ae7a67b5801a2cf10a94",
+        "stages.csv": "c0a0f5a46ee0877ca91ca66801064a56eafc2c468201cc0cc6269606cc02f920",
+        "results.csv": "fb1f73e3b5ade379c08bc0810cb500610b7ec90c97866e5ba3a31c1b2e5c7080"
+      },
+      "original_provenance": {
+        "game": "/home/ubuntu/touhou6-web/reference/transition-completion/score-save/game",
+        "sha256": {
+          "transitions.csv": "ffe3bba2c1a812a647bd282fbfbb5ac7fc90073d4b9cf1da8d96881428b85625",
+          "th06cap.log": "7370b51e93881ab1586655ffbdb3de6686f70bcbfc702c11115f27c173db382b",
+          "menus.csv": "5a975a7d6b009babd911e852375b4fafc4286e787e7403072a73bab317a265c3",
+          "lifecycle.csv": "3c48669065653b5452771fadb6e26b4b4cf70ebb7953031195d833c82042a848",
+          "state.csv": "67dbf319b8582bca6ec9fa1073104264a1649986aa2b384de5a71abbf12ffb9b",
+          "audio.csv": "1c2f40b990b3c3cfa5baaa98d30a233fc4848748ae256d4fd00f3f41612204d5",
+          "scenes.csv": "47cefdb8b1b4834df57cbf68f89e5a18469f86fdc2a87e87fe365cf2650aa375",
+          "score.dat": "1d6168e21cbb950f7f3991583ee53331233df08bcadfca3302ab7352f631a346",
+          "th06cap.txt": "2abb6d843dff83169ae0ee49166774bcb3af41f84d156755aa9123c0e7ae313e",
+          "results.csv": "5be1f4d96dfdeed7eeee631176491c488e90b1eeac991c06c5c266d50813b9cc"
+        },
+        "process_receipt": {
+          "case": "score-save",
+          "returncode": 0,
+          "elapsed_seconds": 10.380896393209696,
+          "fixture": {
+            "present": 1200,
+            "score": 5000000,
+            "writes": "GameManager.score only; rolling GUI score, lives, RNG, clocks and Result states unchanged"
+          },
+          "outputs_sha256": {
+            "th06cap.log": "7370b51e93881ab1586655ffbdb3de6686f70bcbfc702c11115f27c173db382b",
+            "results.csv": "5be1f4d96dfdeed7eeee631176491c488e90b1eeac991c06c5c266d50813b9cc",
+            "102h.exe": "7f38496b31b8625196900a69cd1bfed243cab1f9612073e7881dc354b876fd39",
+            "cfg.cfg": "ae82e56e5197f13fdc7085853796c391c9d5aba1e8b34e4300828a9335526cfa",
+            "score.dat": "1d6168e21cbb950f7f3991583ee53331233df08bcadfca3302ab7352f631a346",
+            "state.csv": "67dbf319b8582bca6ec9fa1073104264a1649986aa2b384de5a71abbf12ffb9b",
+            "th06cap.txt": "2abb6d843dff83169ae0ee49166774bcb3af41f84d156755aa9123c0e7ae313e",
+            "lifecycle.csv": "3c48669065653b5452771fadb6e26b4b4cf70ebb7953031195d833c82042a848",
+            "audio.csv": "1c2f40b990b3c3cfa5baaa98d30a233fc4848748ae256d4fd00f3f41612204d5",
+            "d3d8.dll": "d61c952a5919897c990c1ecb5381149539e335885c2c1134ad69f42bd77fc28c",
+            "transitions.csv": "ffe3bba2c1a812a647bd282fbfbb5ac7fc90073d4b9cf1da8d96881428b85625",
+            "menus.csv": "5a975a7d6b009babd911e852375b4fafc4286e787e7403072a73bab317a265c3",
+            "scenes.csv": "47cefdb8b1b4834df57cbf68f89e5a18469f86fdc2a87e87fe365cf2650aa375"
+          },
+          "replays": {
+            "th6_01.rpy": "61da6ec17eb3d2fb2a64748a71f0d1b91ef4985ee822ce30a3a7105884623a3d"
+          }
+        }
+      },
+      "gameplay_observations": {
+        "reference_sha256": "67dbf319b8582bca6ec9fa1073104264a1649986aa2b384de5a71abbf12ffb9b",
+        "port_sha256": "c0a0f5a46ee0877ca91ca66801064a56eafc2c468201cc0cc6269606cc02f920",
+        "required_present_interval": [
+          471,
+          2999
+        ],
+        "compared_original_observations": 956,
+        "fields": [
+          "frame",
+          "stage",
+          "x",
+          "y",
+          "lives",
+          "bombs",
+          "power",
+          "score",
+          "graze_stage",
+          "graze_total",
+          "rank",
+          "subrank",
+          "rng",
+          "bullets",
+          "lasers",
+          "items",
+          "particle_timer"
+        ],
+        "different_fields": 0,
+        "first_differences": [],
+        "coordinate_comparison": "Exact six-decimal diagnostic strings, without epsilon.",
+        "passed": true
+      },
+      "declared_fixture": {
+        "present": 1200,
+        "score": 5000000,
+        "writes": "GameManager.score only before the input calculation, on both executables. Lives0; entryseed60777. Result states/timers, rolling GUI score, RNG and recording are unmodified.",
+        "native_initial_slot1": "empty, matching original fresh storage"
+      },
+      "results": {
+        "observations": 759,
+        "difference_count": 0,
+        "first_differences": [],
+        "passed": false,
+        "port_observations": 760,
+        "extra_native_presentations": [
+          2820
+        ],
+        "missing_native_presentations": [],
+        "diagnostic_presence_fix_pending_recheck": "pending_result_back now returnsNone, matching immediate callback removal; no timing/draw/audio change."
+      },
+      "saved_files": {
+        "original_sha256": {
+          "replay/th6_01.rpy": "61da6ec17eb3d2fb2a64748a71f0d1b91ef4985ee822ce30a3a7105884623a3d",
+          "score.dat": "1d6168e21cbb950f7f3991583ee53331233df08bcadfca3302ab7352f631a346"
+        },
+        "port_sha256": {
+          "replay/th6_01.rpy": "b0dc610c61dc5242fb95eb7562ecbd9f23d600aec3ebff2e867db418add25060",
+          "score.dat": "23e1b2f81f9c9916c3d209a98f3a9f1d44c7105d4f5969e0c6887ea4bfb99eea"
+        },
+        "replay_playback_semantics_identical": true,
+        "original_replay": {
+          "version": 258,
+          "character": 0,
+          "difficulty": 1,
+          "date": "10/12/26",
+          "name": "AAAAAAAA",
+          "score": 5000500,
+          "slowdown_bits": "00000000",
+          "stages": {
+            "1": {
+              "score": 5000500,
+              "seed": 60777,
+              "point_items": 0,
+              "power": 0,
+              "lives": 0,
+              "bombs": 3,
+              "rank": 16,
+              "power_item_count": 0,
+              "inputs": [
+                [
+                  0,
+                  0
+                ],
+                [
+                  1,
+                  1
+                ],
+                [
+                  3,
+                  0
+                ],
+                [
+                  59,
+                  1
+                ],
+                [
+                  63,
+                  0
+                ],
+                [
+                  956,
+                  0
+                ],
+                [
+                  9999999,
+                  0
+                ]
+              ]
+            }
+          }
+        },
+        "port_replay": {
+          "version": 258,
+          "character": 0,
+          "difficulty": 1,
+          "date": "10/12/26",
+          "name": "AAAAAAAA",
+          "score": 5000500,
+          "slowdown_bits": "00000000",
+          "stages": {
+            "1": {
+              "score": 5000500,
+              "seed": 60777,
+              "point_items": 0,
+              "power": 0,
+              "lives": 0,
+              "bombs": 3,
+              "rank": 16,
+              "power_item_count": 0,
+              "inputs": [
+                [
+                  0,
+                  0
+                ],
+                [
+                  1,
+                  1
+                ],
+                [
+                  3,
+                  0
+                ],
+                [
+                  59,
+                  1
+                ],
+                [
+                  63,
+                  0
+                ],
+                [
+                  956,
+                  0
+                ],
+                [
+                  9999999,
+                  0
+                ]
+              ]
+            }
+          }
+        },
+        "ignored_inputs_after_first_sentinel": {
+          "original": {
+            "1": 2
+          },
+          "port": {
+            "1": 0
+          }
+        },
+        "minimum_compared_highscore": 5000000,
+        "highscore_records_identical": true,
+        "original_highscores": [
+          {
+            "score": 5000500,
+            "character": 0,
+            "difficulty": 1,
+            "stage": 1,
+            "name": "AB      "
+          }
+        ],
+        "port_highscores": [
+          {
+            "score": 5000500,
+            "character": 0,
+            "difficulty": 1,
+            "stage": 1,
+            "name": "AB      "
+          }
+        ],
+        "protocol": "Validate both file checksums and offsets. Compare replay metadata, stage headers and every input through the first sentinel. Report ignored input tails separately. Compare all highscore records at or above the declared fixture threshold, preserving their order.",
+        "passed": true
+      },
+      "pixels": {
+        "binary_sha256": "d0fc9132211dab77d950ca20cc665106064ffe62bfc481cd6f74ea500c49dda1",
+        "space": "Unscaled640\u00d7480 RGB8, canonical originalPresentp/nativeupdatep+1; no alignment, masks, crops or gamma transform.",
+        "criteria": {
+          "channel_tolerance": 2,
+          "maximum_fraction_above_tolerance": 0.01,
+          "maximum_mae": 1
+        },
+        "pairs": 39,
+        "missing_pairs": 0,
+        "passed_pairs": 19,
+        "observations": [
+          {
+            "present": 2060,
+            "reference_sha256": "0a928d87361af38aff0da935bca7b1aeee23902d0208b6e49c2352f63fd99be9",
+            "port_sha256": "1ffcac50c654755eeab2ca9aab2a6e2436f9c81937890f120684d68c2658349e",
+            "full_frame_mae": 12.066395399305556,
+            "fraction_pixels_error_above2": 0.5619075520833333,
+            "maximum_channel_error": 253,
+            "within_unchanged_criteria": false
+          },
+          {
+            "present": 2080,
+            "reference_sha256": "47d4592ea2d36d97b945ec292023a2de134a03bb5ef650810db4d55c5a683c04",
+            "port_sha256": "79ab360dcb1eb67b4cb91381269cb68c5b5f6db3f11c0aff5b6a82e02582b7c6",
+            "full_frame_mae": 0.3580186631944444,
+            "fraction_pixels_error_above2": 0.012470703125,
+            "maximum_channel_error": 36,
+            "within_unchanged_criteria": false
+          },
+          {
+            "present": 2100,
+            "reference_sha256": "a54bd1f7dfcce9ceca7b3493428bba6fc6994d18d70922313051c0c58a45958e",
+            "port_sha256": "ef85ffb7a3f62c1bc65d6729dc610627703433b2ffe917d9370c4c15b6c4183f",
+            "full_frame_mae": 1.758605685763889,
+            "fraction_pixels_error_above2": 0.119814453125,
+            "maximum_channel_error": 243,
+            "within_unchanged_criteria": false
+          },
+          {
+            "present": 2120,
+            "reference_sha256": "3a40cf64e34fb4740922f499b0ffe2c4a51d6db403aff5a9d1670b03da41fd75",
+            "port_sha256": "e72a803529e7243dc378fe6a1d0007b552d831493fbd0d6dfc6a655da1386784",
+            "full_frame_mae": 0.9564474826388889,
+            "fraction_pixels_error_above2": 0.040390625,
+            "maximum_channel_error": 244,
+            "within_unchanged_criteria": false
+          },
+          {
+            "present": 2140,
+            "reference_sha256": "7704564576ea1c5be39ebc8cee8ddf5f38392bd8eece653f29b21267ea598d4d",
+            "port_sha256": "ed17731c13f7fc0c6c46abc6871c63ad928e5461bd3d6c9fc9bac25c7d2f57f2",
+            "full_frame_mae": 0.9580251736111111,
+            "fraction_pixels_error_above2": 0.04060546875,
+            "maximum_channel_error": 244,
+            "within_unchanged_criteria": false
+          },
+          {
+            "present": 2160,
+            "reference_sha256": "4a111982dca24e2824b3f73e74b6ce8afdba4626d295e1d68d913c26a886902f",
+            "port_sha256": "8e29e7e7461ce8b664dbc241bc6b146647deb17353053530d88cdff60b12e014",
+            "full_frame_mae": 0.959326171875,
+            "fraction_pixels_error_above2": 0.040960286458333335,
+            "maximum_channel_error": 244,
+            "within_unchanged_criteria": false
+          },
+          {
+            "present": 2180,
+            "reference_sha256": "a2c1164a094b8330b100d775a79f99e973fe6cad932365832484d0aa83bb8d38",
+            "port_sha256": "d54d9e600791f37589ae2370e79e5abb20d985f7ae2fc2887271f7e1bda89ea6",
+            "full_frame_mae": 0.9617990451388889,
+            "fraction_pixels_error_above2": 0.040703125,
+            "maximum_channel_error": 244,
+            "within_unchanged_criteria": false
+          },
+          {
+            "present": 2200,
+            "reference_sha256": "e1eff2b1793ecebf992b20629e026c8e2b3449f03f525c2b75497a77ea2f0747",
+            "port_sha256": "10e34e61f0753eb948add4983e340bee59f9e0584e888b7ea1a435acfb228b93",
+            "full_frame_mae": 0.9572808159722223,
+            "fraction_pixels_error_above2": 0.040797526041666664,
+            "maximum_channel_error": 244,
+            "within_unchanged_criteria": false
+          },
+          {
+            "present": 2220,
+            "reference_sha256": "82f8af8ad6be0f4bd56b321c142caf2522f7aa102d0dd3d1b0f894694751f267",
+            "port_sha256": "c23687ae24a88fe1c9306d1b97b05a055c60f35093654de76e576e231729d286",
+            "full_frame_mae": 0.9592892795138889,
+            "fraction_pixels_error_above2": 0.04133138020833333,
+            "maximum_channel_error": 244,
+            "within_unchanged_criteria": false
+          },
+          {
+            "present": 2240,
+            "reference_sha256": "e1eff2b1793ecebf992b20629e026c8e2b3449f03f525c2b75497a77ea2f0747",
+            "port_sha256": "e72a116e3fb84a365ef945fd43a91ccb6360b8862150e15fb9bc831aabfff884",
+            "full_frame_mae": 0.9576085069444444,
+            "fraction_pixels_error_above2": 0.04080729166666667,
+            "maximum_channel_error": 244,
+            "within_unchanged_criteria": false
+          },
+          {
+            "present": 2260,
+            "reference_sha256": "694f73f5aed2721613fbd7a8ce38e93e3297174cb234e647af5416b8c9119edd",
+            "port_sha256": "531dba2fd8cb46e4e42a1c4555ade748ed6f5045bcef14d897ae9bd42dbf402d",
+            "full_frame_mae": 0.3139887152777778,
+            "fraction_pixels_error_above2": 0.00416015625,
+            "maximum_channel_error": 17,
+            "within_unchanged_criteria": true
+          },
+          {
+            "present": 2280,
+            "reference_sha256": "85ebd7e405c093e9ed4567dcff451efdf724b7837c67f997aa0d376ddcf31ac3",
+            "port_sha256": "2b6f1bc95d1c1dee1f438152d3a3de1b929dc8fe7e2e38e4155f462da30e1981",
+            "full_frame_mae": 0.3308474392361111,
+            "fraction_pixels_error_above2": 0.019651692708333335,
+            "maximum_channel_error": 17,
+            "within_unchanged_criteria": false
+          },
+          {
+            "present": 2300,
+            "reference_sha256": "d34089ae71c8cc7b7a5bb2e5d40297c568020a510fd3071b22dfa0c265a9495f",
+            "port_sha256": "34d6868f4a3ce58280827559efb15347d8b0cecce63d658f7689a2c6200ade17",
+            "full_frame_mae": 0.4180219184027778,
+            "fraction_pixels_error_above2": 0.019710286458333334,
+            "maximum_channel_error": 22,
+            "within_unchanged_criteria": false
+          },
+          {
+            "present": 2320,
+            "reference_sha256": "d34089ae71c8cc7b7a5bb2e5d40297c568020a510fd3071b22dfa0c265a9495f",
+            "port_sha256": "34d6868f4a3ce58280827559efb15347d8b0cecce63d658f7689a2c6200ade17",
+            "full_frame_mae": 0.4180219184027778,
+            "fraction_pixels_error_above2": 0.019710286458333334,
+            "maximum_channel_error": 22,
+            "within_unchanged_criteria": false
+          },
+          {
+            "present": 2340,
+            "reference_sha256": "d34089ae71c8cc7b7a5bb2e5d40297c568020a510fd3071b22dfa0c265a9495f",
+            "port_sha256": "34d6868f4a3ce58280827559efb15347d8b0cecce63d658f7689a2c6200ade17",
+            "full_frame_mae": 0.4180219184027778,
+            "fraction_pixels_error_above2": 0.019710286458333334,
+            "maximum_channel_error": 22,
+            "within_unchanged_criteria": false
+          },
+          {
+            "present": 2360,
+            "reference_sha256": "e80c9a09ea62ebb0c7bc0f858d99df562f6dc8ac24318f569d82b90e0fafdb5d",
+            "port_sha256": "ff167ef3c03e0d5ce88d4bdf3df02ed3276e8c1b4dabb057f3ae47f08a306320",
+            "full_frame_mae": 0.3274685329861111,
+            "fraction_pixels_error_above2": 0.0188671875,
+            "maximum_channel_error": 17,
+            "within_unchanged_criteria": false
+          },
+          {
+            "present": 2380,
+            "reference_sha256": "8be001ae699e1c76823817556469bdcc25ceeb4961452d5af741b6afbfc2a175",
+            "port_sha256": "5e76c4b0bf0ab6ba20f2b5abf7ea95dbe4136a68640dc851ab942c1e0f608f3d",
+            "full_frame_mae": 0.3058550347222222,
+            "fraction_pixels_error_above2": 0.007122395833333333,
+            "maximum_channel_error": 17,
+            "within_unchanged_criteria": true
+          },
+          {
+            "present": 2400,
+            "reference_sha256": "8bb0f8c8ea3ea554e9948c4490241a85f4f009a4638d1d3f96a7623ff2388732",
+            "port_sha256": "a284b6b114e37fd06d1c5c75d6dc849a4c71fddd6cb6814e09a7a26d787970b7",
+            "full_frame_mae": 0.336826171875,
+            "fraction_pixels_error_above2": 0.008658854166666667,
+            "maximum_channel_error": 22,
+            "within_unchanged_criteria": true
+          },
+          {
+            "present": 2420,
+            "reference_sha256": "c08742fe167853a905ff273a3cf2173b5c85e9a78af7d5d8aa597365979d8e9e",
+            "port_sha256": "808f55c481aa2587800754d85677d8b247a1d3e54bfae7154c34f592b4afc32e",
+            "full_frame_mae": 0.3373784722222222,
+            "fraction_pixels_error_above2": 0.008668619791666667,
+            "maximum_channel_error": 24,
+            "within_unchanged_criteria": true
+          },
+          {
+            "present": 2440,
+            "reference_sha256": "8ca2ec4de69d23b576c3b21925e37e44f345787cec6af242859596f821eb8a14",
+            "port_sha256": "1f7acdf1b8be5c797e3fe3cc12e55cd7f4e7e2a22a340cb9f278e3ac565d69f8",
+            "full_frame_mae": 1.6092274305555556,
+            "fraction_pixels_error_above2": 0.106279296875,
+            "maximum_channel_error": 101,
+            "within_unchanged_criteria": false
+          },
+          {
+            "present": 2460,
+            "reference_sha256": "1a21d189c2bf3588cc78b35e66a1f489afaa3c15a41ce19fa5430dd1ad72da05",
+            "port_sha256": "cdd1ae56b68d0f80551df18cde3d8d4ca94ad01d92d93b6d80ca5b1ef2e9eea8",
+            "full_frame_mae": 0.34220703125,
+            "fraction_pixels_error_above2": 0.011510416666666667,
+            "maximum_channel_error": 17,
+            "within_unchanged_criteria": false
+          },
+          {
+            "present": 2480,
+            "reference_sha256": "1a21d189c2bf3588cc78b35e66a1f489afaa3c15a41ce19fa5430dd1ad72da05",
+            "port_sha256": "cdd1ae56b68d0f80551df18cde3d8d4ca94ad01d92d93b6d80ca5b1ef2e9eea8",
+            "full_frame_mae": 0.34220703125,
+            "fraction_pixels_error_above2": 0.011510416666666667,
+            "maximum_channel_error": 17,
+            "within_unchanged_criteria": false
+          },
+          {
+            "present": 2500,
+            "reference_sha256": "1a21d189c2bf3588cc78b35e66a1f489afaa3c15a41ce19fa5430dd1ad72da05",
+            "port_sha256": "cdd1ae56b68d0f80551df18cde3d8d4ca94ad01d92d93b6d80ca5b1ef2e9eea8",
+            "full_frame_mae": 0.34220703125,
+            "fraction_pixels_error_above2": 0.011510416666666667,
+            "maximum_channel_error": 17,
+            "within_unchanged_criteria": false
+          },
+          {
+            "present": 2520,
+            "reference_sha256": "dba7da13d18322d2523628f351125a00d5c1b9e58a7608189f95ce8597f780b7",
+            "port_sha256": "10f71074166e9c62e191c0662e8f5c37ed2c80def68dbf237c6f0f6141671bf2",
+            "full_frame_mae": 0.80140625,
+            "fraction_pixels_error_above2": 0.041412760416666666,
+            "maximum_channel_error": 143,
+            "within_unchanged_criteria": false
+          },
+          {
+            "present": 2540,
+            "reference_sha256": "3557649399ab5aff71cbcd7a2c35e5e798e9c9a57beb9daef081957f5ce50490",
+            "port_sha256": "997d2b483c548edcc6f1a9c7205f2c3b6396603a22da61ad3ff29027b30adc18",
+            "full_frame_mae": 0.3254709201388889,
+            "fraction_pixels_error_above2": 0.008639322916666666,
+            "maximum_channel_error": 39,
+            "within_unchanged_criteria": true
+          },
+          {
+            "present": 2560,
+            "reference_sha256": "f51f6add60aa7d810441e3595f582852ae4643b1ccc0547c15db5632482946e7",
+            "port_sha256": "20d13781b445862ea8d9e3e761860a227af181902709398816794e04bcdbd6e1",
+            "full_frame_mae": 0.32231770833333334,
+            "fraction_pixels_error_above2": 0.008089192708333333,
+            "maximum_channel_error": 48,
+            "within_unchanged_criteria": true
+          },
+          {
+            "present": 2580,
+            "reference_sha256": "758204847395af5d6ed6a2d65c8a805ba1008557c69b853eaebeeb71a14e2543",
+            "port_sha256": "d2623653f8991e6e762cc6b07e66dc3120952784f36991495129c074d257fd14",
+            "full_frame_mae": 0.3215375434027778,
+            "fraction_pixels_error_above2": 0.008251953125,
+            "maximum_channel_error": 21,
+            "within_unchanged_criteria": true
+          },
+          {
+            "present": 2600,
+            "reference_sha256": "3d38463493d3076e62b8373a13335ab28625b37e4e0bf135e284486ed9010834",
+            "port_sha256": "ebab5df1862107aa0a61a9f2e32bb8e2dc51755776fea7e0b697d8e8e02906d7",
+            "full_frame_mae": 0.3220334201388889,
+            "fraction_pixels_error_above2": 0.008463541666666666,
+            "maximum_channel_error": 20,
+            "within_unchanged_criteria": true
+          },
+          {
+            "present": 2620,
+            "reference_sha256": "39c06c414acd68442e5473dd00c9bf40827fe496407ed9624dbc7aedc0bef471",
+            "port_sha256": "788417117720ecee8ccf7ba0facc5a56e304e363ed315e938c9a01564af1b1be",
+            "full_frame_mae": 0.3201095920138889,
+            "fraction_pixels_error_above2": 0.008125,
+            "maximum_channel_error": 23,
+            "within_unchanged_criteria": true
+          },
+          {
+            "present": 2640,
+            "reference_sha256": "b21f440ccb108cf150ad10b40c10ee66009f62421482b9f4bfd4f71110af9028",
+            "port_sha256": "abe21d8272ab659291f852ddb844f54805cd70e3546f29d6ade785708aabc3f3",
+            "full_frame_mae": 0.31851128472222223,
+            "fraction_pixels_error_above2": 0.007841796875,
+            "maximum_channel_error": 17,
+            "within_unchanged_criteria": true
+          },
+          {
+            "present": 2660,
+            "reference_sha256": "dc9186b7617d20e69a625af62f81f102e17dafa73be66bdb5d0db0d75e3a8c08",
+            "port_sha256": "bea06a22f75056bc73e7db0a53c6cfd31d2784248b612859caabf46ee316a0f0",
+            "full_frame_mae": 0.3206228298611111,
+            "fraction_pixels_error_above2": 0.008232421875,
+            "maximum_channel_error": 17,
+            "within_unchanged_criteria": true
+          },
+          {
+            "present": 2680,
+            "reference_sha256": "793537b024e9bfb6ad86a8e5000b5d53312fc7d0aed6f9b795cb77249022ac11",
+            "port_sha256": "8c096ef8adf72741a5ca8bf72ce3e5f6c1b6d69566f401edfee8fe76749bc857",
+            "full_frame_mae": 0.31969509548611114,
+            "fraction_pixels_error_above2": 0.008001302083333333,
+            "maximum_channel_error": 17,
+            "within_unchanged_criteria": true
+          },
+          {
+            "present": 2700,
+            "reference_sha256": "a0a898995601077ec92c5b7117610fce0dfe3683af90743e35814c96dd482f0f",
+            "port_sha256": "9e5ab1b43593b6eff16130326812df0eda3e6589f1087ce608642935b501f1c8",
+            "full_frame_mae": 0.32255859375,
+            "fraction_pixels_error_above2": 0.008444010416666667,
+            "maximum_channel_error": 23,
+            "within_unchanged_criteria": true
+          },
+          {
+            "present": 2720,
+            "reference_sha256": "a9e86eb330ff1d9163242e381a9485d1e40ae45c5521f6a4fa0ced1f43b0ab40",
+            "port_sha256": "6672cbb5821133162b68ea0782367418bb48af2b5e1daf0823d87d0b865c3225",
+            "full_frame_mae": 0.325009765625,
+            "fraction_pixels_error_above2": 0.008860677083333334,
+            "maximum_channel_error": 20,
+            "within_unchanged_criteria": true
+          },
+          {
+            "present": 2740,
+            "reference_sha256": "e8b09fc8d5025e2ee550d469f1a5f9664910907f7d9b56d4de3523193241ba28",
+            "port_sha256": "de1bec8a991487e6adc792dc2b5494dc1dd5f4a2032722fe396b7af4c1090377",
+            "full_frame_mae": 0.32762586805555555,
+            "fraction_pixels_error_above2": 0.009182942708333334,
+            "maximum_channel_error": 31,
+            "within_unchanged_criteria": true
+          },
+          {
+            "present": 2760,
+            "reference_sha256": "d313deb7c473f368f96730164f51159c714285178c3852bcb38ec60a64c90c26",
+            "port_sha256": "ee94c142b34be061a9ed3b9fae16114c8117ca58ff9225efd388d0d33c50f79a",
+            "full_frame_mae": 0.3314073350694444,
+            "fraction_pixels_error_above2": 0.008857421875,
+            "maximum_channel_error": 65,
+            "within_unchanged_criteria": true
+          },
+          {
+            "present": 2780,
+            "reference_sha256": "55c0918461cd9ffa83909dcce1a2b8fa24a3f4b58633d092930e862387b65e58",
+            "port_sha256": "20d0418925addb072166e9613e6366ece536f8745c1bd2fd4b022e801951ec43",
+            "full_frame_mae": 0.28106228298611113,
+            "fraction_pixels_error_above2": 0.0007942708333333334,
+            "maximum_channel_error": 17,
+            "within_unchanged_criteria": true
+          },
+          {
+            "present": 2800,
+            "reference_sha256": "55c0918461cd9ffa83909dcce1a2b8fa24a3f4b58633d092930e862387b65e58",
+            "port_sha256": "20d0418925addb072166e9613e6366ece536f8745c1bd2fd4b022e801951ec43",
+            "full_frame_mae": 0.28106228298611113,
+            "fraction_pixels_error_above2": 0.0007942708333333334,
+            "maximum_channel_error": 17,
+            "within_unchanged_criteria": true
+          },
+          {
+            "present": 2820,
+            "reference_sha256": "55c0918461cd9ffa83909dcce1a2b8fa24a3f4b58633d092930e862387b65e58",
+            "port_sha256": "20d0418925addb072166e9613e6366ece536f8745c1bd2fd4b022e801951ec43",
+            "full_frame_mae": 0.28106228298611113,
+            "fraction_pixels_error_above2": 0.0007942708333333334,
+            "maximum_channel_error": 17,
+            "within_unchanged_criteria": true
+          }
+        ],
+        "passed": false
+      },
+      "reviewable_original_input_config": {
+        "path": "oracle/refcap/scenarios/score-save.txt",
+        "sha256": "2abb6d843dff83169ae0ee49166774bcb3af41f84d156755aa9123c0e7ae313e"
+      },
+      "declared_god_mode": {
+        "original": false,
+        "native": false
+      }
+    }
+  ],
+  "stage5_boundary_regression": {
+    "passed": true,
+    "required_matrix": false,
+    "case_count": 5,
+    "compared_observations": 111177,
+    "compared_pool_checkpoints": 2044,
+    "binary_sha256": "877f18acf9ffa72c31582351628497c5f2fca08512f0a38394a739ffa156b9fb",
+    "build_provenance": {
+      "runtime_source_sha256": "7c137b26ead0cdc6e8b84b5b2c7e7ba276886047bd82b89da911d2ec43a9d530",
+      "runtime_files_sha256": {
+        "Cargo.lock": "08a5fcc206515529a3c774094da9784017710d5aecca84828bc3664ee3c0ae12",
+        "Cargo.toml": "28efdad4e6305f36d06de1a65dc4434df2f4f9254e9435758bb892cbc0c6fcf6",
+        "crates/engine/Cargo.toml": "a80dad6401f75c147810c4b5f597b0021fd3c9857fde079133b2aa1fcdf5597c",
+        "crates/engine/assets/NotoSansJP-Bold.otf": "1b0edfb500b73a4fa8a4fcaae1bbbd403994e08e73e3e0da37e70d3853f42c5f",
+        "crates/engine/assets/NotoSansJP-OFL.txt": "6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2",
+        "crates/engine/examples/jp_text.rs": "39f9987838879b3ddcd410443e409eebefca3a8f4aec81a7516c39a85dd52866",
+        "crates/engine/examples/midi_trace.rs": "e873f34d22519b67ca74fc3b58d5fcf7bcbe014923d8047952c2eac6cb8a883b",
+        "crates/engine/src/audio.rs": "01c3f016af8bbe896b2ec7326d1584bfb4ad8ca6bdbf493367d14a14ff920850",
+        "crates/engine/src/audio_trace.rs": "bbd993b8065e2cf1aae87041c2cda9e8f67b4a000aa6e4b93bcd07384f7e7e4f",
+        "crates/engine/src/color565.rs": "be78a7671f4488fb968b1eb8e374707c87a92c0458a495b4312cfbf3e3616eba",
+        "crates/engine/src/controls.rs": "e8635322ef9b8a54dd3c02d9e3cd0322312b337870513ac328bdafaaac0d7d02",
+        "crates/engine/src/framebuffer.rs": "51936ed64204433aa888b8ecb7dd53083919744960a90abdabbafaf40fb3728d",
+        "crates/engine/src/lib.rs": "c6b6e98ea3b8529d57a5d0944657e3b429900e18f5de1677d0164e09af978d27",
+        "crates/engine/src/midi.rs": "5f1d9217e03377163d02a98dbb5cafbb01f5f44d0a067e9ca0ab0479ec928b4b",
+        "crates/engine/src/text.rs": "f7e3528f3d14ad2bb5e0b12d87af8d324303dc2a4076a2366d9d4c7e9d30dc53",
+        "crates/formats/Cargo.toml": "151da6a4c04c960ca1b311d231ddf2bfd84ec898e6229ce34c1bb5524d96f267",
+        "crates/formats/examples/anmdump.rs": "3b43e8ee3e713287ab2aa348de659ed9a10c10fd132dc4ddcae7698160e0c658",
+        "crates/formats/examples/ecldump.rs": "ae7bd7f1ab1d659ae3e34c7a1492cda9bea45cb7be07cf4e4842c3bfb3b6d75e",
+        "crates/formats/examples/extract.rs": "ec800c6799ec50f6b3edbe3a7de3dc8003a14126f700ba239539c141ead8cca0",
+        "crates/formats/examples/stddump.rs": "c357e093d101461b474d3ec22c2f4ca3938bcaad1ae74afcbf3d1ca843e551bf",
+        "crates/formats/src/anm0.rs": "e17e9c429b83ba26a147ab092f8b928be19b99ca38cf1811f8ab6f7040172881",
+        "crates/formats/src/bitstream.rs": "2dfd19fda55edd799ef0736a120abf88d1e0ba4a99925badbcaa6dc4da09b39f",
+        "crates/formats/src/ecl.rs": "bc56dcac4039b796619c1d1a20d4624f9c9238a9af847811782954fe511ac04f",
+        "crates/formats/src/lib.rs": "b761bb9daa21e4a51d9bb2d05e1049c909aec2046a2c75e6e114fc30d00fe822",
+        "crates/formats/src/lzss.rs": "5e2ebb2f85e2feeb64ee97ff0a0a45234c45f3700581af7b1c390693ece5bc72",
+        "crates/formats/src/msg.rs": "2cb9ef94c41e1a9a5a6663fc77f8da312decd14b86f454ec1315bead8e680b4d",
+        "crates/formats/src/pbg3.rs": "01deb92828c9683141ea76466d27a12a4edd3086a0ec2613877159f221d2fd14",
+        "crates/formats/src/replay.rs": "627a5fcd70a6a9fd055ae97c2be460550c58b778822f1f1cf858c4047354f6a2",
+        "crates/formats/src/score.rs": "92a78d20be7058f0cdc6e6cd08557336a6fede04aea4b55bab95162921f0f16b",
+        "crates/formats/src/std.rs": "1761c3d9f5790eb51d3d7eeec23dfa124c9b3e375796e4e17675cc37c77e4ebb",
+        "crates/game/Cargo.toml": "b9a8251b1a45a4e4ec4e31ec3bdc797e81cf3fc666b9f60c6329546e51a0a233",
+        "crates/game/examples/anm_dur.rs": "ba7d3405cd789a65bc25932e6fd6253077bc1531d96a9ad76f55eeddbd4b3681",
+        "crates/game/examples/anm_sz.rs": "d013bbf7893bb6aea0f57b719a446149a6b81fdbb095c8f099e3e8d247d159b1",
+        "crates/game/examples/bg_dump.rs": "156b031f74c936910be7a0530835ca3e7a9c730b9ed72143792c1d41d939d45d",
+        "crates/game/examples/bg_quad_dump.rs": "13a09bac86249a7e64e556c6fe64129a6e9905e5df8aee3ff84475794483f2f5",
+        "crates/game/examples/bg_quad_ids.rs": "cf1ccb7d44b411ef2e82603836599228d3defd57d6ee755be2769ad8d389f012",
+        "crates/game/examples/bg_vtx_dump.rs": "fcf02ffbb673f07d5f6e7095aa2d93cf5ee000a1fc2e0de4c61ee0578c835efd",
+        "crates/game/examples/ending_trace.rs": "48e835d687ac12493097cf69b2608b2b0051c4ce14fdb75cc921c3ded300f685",
+        "crates/game/examples/enemy_anm_sizes.rs": "53348b6560b2b886dda88365d2f999dd605a4ac660fc281ba81256d3e591823f",
+        "crates/game/examples/extract_ecl.rs": "6b00e21069d66e97af199a0487ac3c74c3d70065b465c4b47f7b79d3ae4f8054",
+        "crates/game/examples/oracle_dump.rs": "b27043e868c0cc0846c35b3a8645f5562307bf3e0a48eb0e0967c87fec4f3545",
+        "crates/game/src/anm_vm.rs": "c57a8c05af7433850d572f3fcc33a3e7d9036a04dc432b56ae632ff9366fdc18",
+        "crates/game/src/background.rs": "9a04b4471bcf019438971e73c27a9dee22ed2f7c95057554d6459933223b8475",
+        "crates/game/src/capture.rs": "17044ca6e78d11ef4c2431647afefeec17f86ba2ddb0fd2b163e44703732c509",
+        "crates/game/src/ecl_vm.rs": "0632a35bf1846ba2525d9683fa45c97e6ab08b39a392dfa24d01313d091afdfa",
+        "crates/game/src/ending.rs": "ec5a8537b262b45e340fae6f7f0399fda7f0e349ef9b6243a2cdad5911b52bed",
+        "crates/game/src/hud.rs": "a3f0ec07f819b7cc71b582d0fdc7daf1f85ac937cdc6eb5a86cf9363573b89df",
+        "crates/game/src/key_config.rs": "dee348e404bd173cd9ac724d29261bc3e2638684ffc611377fd659985efba9c6",
+        "crates/game/src/lib.rs": "5710789bb4bb407134efd92ce22d3de541dd42640c0954cbfc4bd087bde84e98",
+        "crates/game/src/main.rs": "dbafa7b89e0120d2ce8769d16a6a715d4e541ceae8de0756ffcdb587dc2ebe4e",
+        "crates/game/src/menu_art.rs": "711cf6922968a901a02928a390958a93e4ed7ca5ff1531b3d5e72a11f28bb4a1",
+        "crates/game/src/music_room.rs": "1ce3e66e4190e287a270d723a485c621b9db162d0e5fbf48b117fcb418c354f8",
+        "crates/game/src/options.rs": "b5f3225a4745fa981319bc1eb28854cfcc698b9f3f42e31bd84b74e11f9e9766",
+        "crates/game/src/player_shots.rs": "ab8999eba15bbcdc1f5f565c2077092ec0f0a206fc0ad29298062d331565134c",
+        "crates/game/src/projectiles.rs": "092313f61360b7b8ac19e6910e0f21533509fabdab0940d05c1401fdc43b5d57",
+        "crates/game/src/replay.rs": "ad9b8e41a02cf52e26b59b0f6cc1e4ef66691663ac5f3c546dac27b69b912e37",
+        "crates/game/src/replay_menu.rs": "e354f62f8a6804c7f6aeae4ada1bebaabb3c73d9def289f8b2d760fb0d2f101d",
+        "crates/game/src/result.rs": "c58c920627cabc314e5dccb8d206c9d1779a65adf11780d5966e10fb8a5b4550",
+        "crates/game/src/retry_menu.rs": "45f02eb03a4941c6556c4423478c86fe4a7c9c559e67468012377f9ce7a31ead",
+        "crates/game/src/save.rs": "0ea674570bd43051ccd1a18cdd0efb1377d2e3bfb0edc44704519bf63d84de18",
+        "crates/game/src/score_popups.rs": "82128871a121a3bc833039ef5c7a7abde503ce5ad79240ea573e8da6d7e330d3",
+        "crates/game/src/selection.rs": "3c8652e438438e066f85fa04c209b243c27f614747a16b79877b65bffc54044b",
+        "crates/game/src/sprite_geometry.rs": "0024792d778abe996ff653a5c1d2a77473455d9a15d606a1eb251ed78a393ef5",
+        "crates/game/src/stage.rs": "31f5e900c1fbc8f7ad0127aeb498d4f05034ac46ff0b0eda666dfe6d7389bea9",
+        "crates/game/src/title.rs": "f17fec4ec1451828c127e5aab7d955d5067cb87ad26ebb83356950383b088e2c",
+        "crates/game/src/web.rs": "a77a77f75254d10d32d4eb5185344d7501b4a3710f2a0be23756f2be2b9341a8"
+      },
+      "binary_sha256": "877f18acf9ffa72c31582351628497c5f2fca08512f0a38394a739ffa156b9fb"
+    },
+    "harness_sha256": {
+      "scripts/run_port_references.py": "fa8b60ff66b35813dcaccf15ffa7e6ede6690f5a67de39d00542f78fccd64c4c",
+      "scripts/verify_scenario_reference.py": "49aaf902421896336972d2c4a1289694afe0039a304bff36cd881b3b6627e644",
+      "oracle/refcap/audio_trace.h": "d15f55b53aacb6dc7039a39914f0286672a949fa4e8f3eb19dcf6ccd2cbe9e42",
+      "oracle/refcap/bullet_trace.h": "b3330e30c59b49a981872e5786e596b788d33f4bb07c1e8c93b297a9f45a2e13",
+      "oracle/refcap/d3d8proxy.c": "96e2084766d07e755db78e2f1b03ac82d49175edbee118423a2ef9fd85c91abf",
+      "oracle/refcap/d3d8proxy.def": "dec1b742bc1fe4041414894cb7d639a08c7484d73a9a4b44033853cce39e125a",
+      "oracle/refcap/ending_scenarios.py": "a904c71cc20a455d33c267b9cc87574d9cc6cf53a5e4247a0343e8afe26eab33",
+      "oracle/refcap/ending_trace.h": "c4c20e6dde3d1a037a74da8ba889e2a2d85872f4030eca7f6e689bba17b6769c",
+      "oracle/refcap/make_transition_replay.py": "3df5a919403be75f3d08732993171e772f889f47f6c24b758909e8eb38b03b76",
+      "oracle/refcap/menu_scenarios.py": "ef015c43e064b75adca00ca3e5c2f10986b97f3c557799045005719ce937c7b8",
+      "oracle/refcap/menu_trace.h": "7fcecbe7cf8191bcd311f08c4e2d17a9f1d1415805b0e3d4b22a1230e77a93bd",
+      "oracle/refcap/merge_replays.py": "60da95fdf782763609277d14bd1ef6322529ddad4b1bf324a1087a87a4072b03",
+      "oracle/refcap/midi_trace.h": "1ab2bb689ae27692efe7be24a366f7e9cca31735142803ab83984d4f81304ca8",
+      "oracle/refcap/pool_trace.h": "f3bbfca0de69f84be47a8f5fe3ec15b523f904362c1449f10c446807949c7d2c",
+      "oracle/refcap/scenarios.py": "fc588c79063fefcb1c84571cb1f31bc1290ff6c65af9906a1595f67f7a1b16fe",
+      "oracle/refcap/transition_trace.h": "d74e4e6db1f1e3234451b8471b53702a54a2b6c82a54e632ecadcb854baee369",
+      "oracle/refcap/vm_trace.h": "221a1bf4c744244f14f113ae69ec1a1e46ea1480dc3662f8c922c5f0402a436e",
+      "oracle/refcap/wave_trace.h": "1c7be78b1a912933037dfdc36af9c945101d6de2a176a2b045e7326fd29c4966"
+    },
+    "cases": [
+      {
+        "id": "replay-c0-d2-s5",
+        "passed": true,
+        "compared_observations": 22699,
+        "compared_pool_checkpoints": 417,
+        "first_difference_frame": null,
+        "scalar_difference_count": 0,
+        "pool_difference_count": 0,
+        "error_count": 0
+      },
+      {
+        "id": "replay-c0-d3-s5",
+        "passed": true,
+        "compared_observations": 20489,
+        "compared_pool_checkpoints": 382,
+        "first_difference_frame": null,
+        "scalar_difference_count": 0,
+        "pool_difference_count": 0,
+        "error_count": 0
+      },
+      {
+        "id": "replay-c1-d2-s5",
+        "passed": true,
+        "compared_observations": 22136,
+        "compared_pool_checkpoints": 407,
+        "first_difference_frame": null,
+        "scalar_difference_count": 0,
+        "pool_difference_count": 0,
+        "error_count": 0
+      },
+      {
+        "id": "replay-c1-d3-s5",
+        "passed": true,
+        "compared_observations": 23229,
+        "compared_pool_checkpoints": 426,
+        "first_difference_frame": null,
+        "scalar_difference_count": 0,
+        "pool_difference_count": 0,
+        "error_count": 0
+      },
+      {
+        "id": "replay-c2-d3-s5",
+        "passed": true,
+        "compared_observations": 22624,
+        "compared_pool_checkpoints": 412,
+        "first_difference_frame": null,
+        "scalar_difference_count": 0,
+        "pool_difference_count": 0,
+        "error_count": 0
+      }
+    ]
+  },
+  "validated_binary_sha256": [
+    "877f18acf9ffa72c31582351628497c5f2fca08512f0a38394a739ffa156b9fb",
+    "d075dd8d8ee4b1915842a6d137dfc8dbd0d59e9bba72c6a798b9ae3735c29583",
+    "d0fc9132211dab77d950ca20cc665106064ffe62bfc481cd6f74ea500c49dda1"
+  ],
+  "latest_validated_binary_sha256": "d0fc9132211dab77d950ca20cc665106064ffe62bfc481cd6f74ea500c49dda1",
+  "status": "Six natural paths have exact listed transition/audio/gameplay and saved-file comparisons. Strict Result callback presence exposed one extra historical native diagnostic atPresent2820; its diagnostic-only guard is fixed and awaits the final frozen binary rerun.",
+  "compared_audio_requests": 4242,
+  "compared_gameplay_observations": 23159,
+  "passed_scope": "Only the listed strict state/audio comparisons and interpreted saved-file records. The separately measured pixel comparison remains partial.",
+  "source_evidence": {
+    "warning29": {
+      "path": "Gui.cpp",
+      "function": "Gui::DrawGameScene",
+      "line": 1030,
+      "matching_commit": "bd90685fa40eaf2e16789dcf788843b304e6e02d",
+      "behavior": "Before calculation, when message index<0 and bossPresent+bossHealthBarState>0, request SOUND_1D(29) if seconds<10 and differ from last drawn seconds. Last drawn seconds update only in that UI draw branch.",
+      "validated_practice_clear_missing_warnings_restored": 33
+    },
+    "practice_clear": {
+      "path": "Gui.cpp",
+      "behavior": "MSG_STAGEEND requests Supervisor ResultFromGame directly, without opening retry."
+    },
+    "retry_decline": {
+      "path": "AsciiManager.cpp",
+      "behavior": "The callback requests ResultFromGame and clears retry before the remaining GameManager/Player/Enemy callbacks complete. The stage recording includes that final callback."
+    },
+    "name_escape": {
+      "path": "ResultScreen.cpp",
+      "behavior": "TH_BUTTON_RETURNMENU contributes to the erase branch, and Escape also finishes the highscore name in the same update."
+    },
+    "save_semantics": {
+      "path": "ReplayManager.cpp",
+      "behavior": "The original can call StopRecordingReplay twice; playback stops at the first9999999 sentinel. Compare the complete interpreted stream through that sentinel and report ignored tail length."
+    }
+  },
+  "saved_comparator_tests": {
+    "passed": 7,
+    "scope": "Equal saves, ignored tail reporting, valid-checksum input mutation, checksum corruption, invalid offsets, changed/missing highscore and zero-sized score records."
+  },
+  "candidate_validation": {
+    "observed_at_utc": "2026-10-13T13:26:25.080445+00:00",
+    "binary_sha256": "cf4350ddeede8a2c93233abef00ff833190901c1b431e554fe0110da96f8ae6d",
+    "runtime_source_sha256": "2fac9c2fd9bd2707fda889e8a78cd5843bbf462a99ff1a778072acd42aa8d366",
+    "passed": true,
+    "counts": {
+      "transition_presentations": 29284,
+      "gameplay_observations": 23159,
+      "return_navigation_observations": 422,
+      "results_observations": 759,
+      "transition_audio_requests": 4242,
+      "menu_audio_requests": 162
+    },
+    "audio_passed_cases": 13,
+    "audio_requests": 4404,
+    "scope": "Six natural pause/Continue/Practice/Result/save paths and seven Options/MusicRoom audio probes, bound only to this frozen candidate. Exact declared callback/presentation clocks and field sets. Sound/music request order and fades are compared; pixels, gameplay object pools and physical output PCM are outside this receipt. Current local original/native files and successful execution output hashes were checked against the comparison receipts. Saved replay playback semantics and highscore records at or above 5,000,000 are compared; byte identity of saved files is not claimed.",
+    "full_private_receipt_sha256": "a58c188b82715c03a551b594896cdb059f5f605682da3ddc7df9b283854db767",
+    "compared_fields": {
+      "transition-comparison": [
+        "scene",
+        "frame",
+        "stage",
+        "pause_state",
+        "pause_timer",
+        "retry_state",
+        "retry_timer",
+        "game_menu",
+        "retry"
+      ],
+      "return-navigation-comparison": [
+        "menu_state",
+        "cursor",
+        "timer"
+      ],
+      "stage-comparison": [
+        "frame",
+        "stage",
+        "x",
+        "y",
+        "lives",
+        "bombs",
+        "power",
+        "score",
+        "graze_stage",
+        "graze_total",
+        "rank",
+        "subrank",
+        "rng",
+        "bullets",
+        "lasers",
+        "items",
+        "particle_timer"
+      ],
+      "results-comparison": [
+        "state",
+        "timer",
+        "cursor",
+        "cheat_step",
+        "progress"
+      ]
+    },
+    "cases": [
+      {
+        "id": "pause-replay",
+        "passed": true,
+        "execution_sha256": "447850e4bd098789d78dedf1c79df20be2ffce9658a21335b0d3bd57dd5d7b4e",
+        "audio_comparison_sha256": "4644e50f34886364a5abe2181c941b2df03a46b6cf49bd55a8b22a660673bfe8",
+        "audio_requests": 208,
+        "transition-comparison": {
+          "sha256": "b83a2c31c0301b306a72fc84275657104f538300970956808477841f34ce4806",
+          "observations": 1119
+        },
+        "return-navigation-comparison": {
+          "sha256": "a18cba1bd1e5a0b486418daa21a3235f15da2ded76c19710ac6bd4f3cbe29125",
+          "observations": 79
+        }
+      },
+      {
+        "id": "live-continue",
+        "passed": true,
+        "execution_sha256": "c31f5d7dd0008e5d707617605ab2bf2a82d048614bddd4fb29897f4914a625c6",
+        "audio_comparison_sha256": "cf4809a517180f9a75d80b8df23437a154009886b6cd378534d77d66d814cb00",
+        "audio_requests": 29,
+        "transition-comparison": {
+          "sha256": "ce95b31691df5f43b028ea6669bd1374ed5df46d0240def1fce3ed3902f442cf",
+          "observations": 2829
+        },
+        "stage-comparison": {
+          "sha256": "067872c9a1d75e750bbcd97a39c6e18a0c02a575ae3a1cfc1a26c9ae0adb1858",
+          "observations": 1435
+        }
+      },
+      {
+        "id": "live-decline",
+        "passed": true,
+        "execution_sha256": "dea19e46e33c2f941e722d0411cbace042aac2117cbef51ef8d17fc6d0f09578",
+        "audio_comparison_sha256": "fd4e54e4c643ccfecdbebc9b59aa9042e15db201968e516f43dfa95857290e89",
+        "audio_requests": 16,
+        "transition-comparison": {
+          "sha256": "91e44fa965f23a62b7981c1688e338710e5d79a1967a9ee29242ea8c729dc0cc",
+          "observations": 2829
+        },
+        "stage-comparison": {
+          "sha256": "b61701b58e666b692a865c146eb995160bf92ce79e47cf4c32842ee5bcb4a98f",
+          "observations": 956
+        }
+      },
+      {
+        "id": "practice-death",
+        "passed": true,
+        "execution_sha256": "312508573d9841d4e149113357085db6837aedfbe46b890fe4fcf7aa637f443d",
+        "audio_comparison_sha256": "45cd85de99f3475fe009f8c9a1dd878341ab6bce3623c80704ee80c5ac22e5e1",
+        "audio_requests": 25,
+        "transition-comparison": {
+          "sha256": "a0b27b82f0bfb4da65ec3348f7469ff0b882c626e00737ada47697feb1d27d6e",
+          "observations": 2439
+        },
+        "stage-comparison": {
+          "sha256": "20559eb2557dddabed29f587856f3c4c923192adafe62d7fc6d6b30e56ec9382",
+          "observations": 2358
+        },
+        "return-navigation-comparison": {
+          "sha256": "400afde3ce4bfb1fe4bdb66ba49eb2a6b6907050caaf06835b1a153262a8c7f8",
+          "observations": 80
+        }
+      },
+      {
+        "id": "practice-clear",
+        "passed": true,
+        "execution_sha256": "e7b7020387804add6abf14df742a830edabbe95cdc25a3c3d47248272cf49eb3",
+        "audio_comparison_sha256": "28cbe711f62483082deeb82dcb98ab3e6aa1a5554b0ffdf1dd830820e32ed132",
+        "audio_requests": 3929,
+        "transition-comparison": {
+          "sha256": "96bb82c5fe030d272622d2158908d9fdd5fd731e47f235d22c6df7bf1f14b7ae",
+          "observations": 17539
+        },
+        "stage-comparison": {
+          "sha256": "404b8b04823fac000bbaec6dd9116e9dd9b4727bc4a6f537142eec7a046628f9",
+          "observations": 17454
+        },
+        "return-navigation-comparison": {
+          "sha256": "d573416e99ee84abb320d59debec396052b09c395aba99b81464cf8405f55257",
+          "observations": 84
+        }
+      },
+      {
+        "id": "score-save",
+        "passed": true,
+        "execution_sha256": "3cb46a9b1a4269ea7fbd8666867ebef5dc4d914dce966e19b6160e8817886a26",
+        "audio_comparison_sha256": "b2ca6a439ddc65dfc8caa68acd7279312dc9817e7989bbfd7d776c8e7bb877f6",
+        "audio_requests": 35,
+        "transition-comparison": {
+          "sha256": "ec850f9954c8b69dd0e8ce0a34481838e0274deb8f06d4b31716e3ac5137cf5d",
+          "observations": 2529
+        },
+        "stage-comparison": {
+          "sha256": "c96e88ae1ccef6398fa97161a934bf4ad144463430bfd7d7e1869bdc226af4d0",
+          "observations": 956
+        },
+        "return-navigation-comparison": {
+          "sha256": "a9c45080879585091f247134fb74be4f897c096d157d52dbf205dae2cde4807f",
+          "observations": 179
+        },
+        "results-comparison": {
+          "sha256": "c1499699b148e1eb9c943668d6efd25b1dee3b5e9aee790549453a53edfe0016",
+          "observations": 759
+        },
+        "saved-comparison": {
+          "sha256": "342d3bab046df91a48f35afe062b71361161fe6c568c11862704ec36e88b5056",
+          "passed": true,
+          "minimum_compared_highscore": 5000000
+        }
+      },
+      {
+        "id": "audio-options-defaults",
+        "passed": true,
+        "execution_sha256": "088d6d768dfa1bb3818232684d8505bd5593fb86091592c78bdd7fb08b6a9759",
+        "audio_comparison_sha256": "e0ec92ed23ede9826e163cb1e40590a33c594af49a7d4d388cffeba2a373dbde",
+        "audio_requests": 11
+      },
+      {
+        "id": "audio-options-ranges",
+        "passed": true,
+        "execution_sha256": "909cc3ff95e5237bb6e31906851b04113f8776b72fff82901654579affdde0aa",
+        "audio_comparison_sha256": "64564aa831ce0bcd6152e7ef872b6d4017bfa2afd63281760d638c9f903dce1a",
+        "audio_requests": 93
+      },
+      {
+        "id": "audio-options-repeat",
+        "passed": true,
+        "execution_sha256": "f134d4b674accd54828436b261d3a8df68aab9082fe127c613ae16a4be2480d9",
+        "audio_comparison_sha256": "927fcafd9af75b4c34e9e0fd29dd30b890ae732b7d93f00e5d10cfc8fe28eb02",
+        "audio_requests": 13
+      },
+      {
+        "id": "audio-musicroom-mode0",
+        "passed": true,
+        "execution_sha256": "0d91ace6c4cc3670786b7246dd8d235ed66cc90cf8a5f5090de4c96587a04c2c",
+        "audio_comparison_sha256": "8a6927e49ccca12410e89314cedab8813d79581d222c9ee929e83d95643709a5",
+        "audio_requests": 11
+      },
+      {
+        "id": "audio-musicroom-mode1",
+        "passed": true,
+        "execution_sha256": "9a326727b3c1aa96e7f32e5c2480f03f11387b735fc594a15eed0469dbf4fee6",
+        "audio_comparison_sha256": "05f5f5e182d19468f7d56947a23090dee890037a21598fc330602679a79f17d1",
+        "audio_requests": 11
+      },
+      {
+        "id": "audio-musicroom-mode2",
+        "passed": true,
+        "execution_sha256": "39beaa92fe6218bd326eeeba5a3e001c999245fe294f31805b8a94e2680c55db",
+        "audio_comparison_sha256": "79a411c0976a13e10f36f66abe026f1713631a75c218088805214317812a6f9d",
+        "audio_requests": 11
+      },
+      {
+        "id": "audio-musicroom-combined",
+        "passed": true,
+        "execution_sha256": "d5a0da4a9857fb7802777273df86ee976da7da87ab14a885dd94f248e30f4353",
+        "audio_comparison_sha256": "01f5411fc2f1b1cc9ae2c017ef602cd6cab40aba49104a90ebd788c3d610c357",
+        "audio_requests": 12
+      }
+    ]
+  },
+  "final_saved_validation": {
+    "observed_at_utc": "2026-10-14T10:05:42.989780+00:00",
+    "passed": true,
+    "binary_sha256": "330508878953a1bdf306054b764cdd1c4bfeee4073dc6df7d2afc36e70a13158",
+    "runtime_source_sha256": "b94dcce4e17bbbb122f7be36c0dabdfa0b00882046254a34a9055a7d988f2b98",
+    "native_execution_sha256": "39cce48bdd2f774a4f10550217702dc2290b5f654662bff19a9e8b2615e2b995",
+    "native_build_source_receipt_sha256": "3ee17f96feab732694694c5c82f9b8894297697e40228b3423f7b4859f957a0d",
+    "full_private_comparison_receipt_sha256": "a40e68dd21a4829a4eabcf69d59510fb864bf26bf3d5a43021162018d9a80b82",
+    "original_aggregate_sha256": "aaf13332c6a52818780fabff9490a0ff4456bbd010bd201ad5c25be1df40816c",
+    "original_job": "/home/ubuntu/touhou6-web/reference/transition-completion/score-save-final-date-20261014",
+    "original_execution_sha256": "b78f656455a54c355204fc6285406cc520be083853c1b23c718119433f20397a",
+    "original_executable_sha256": "7f38496b31b8625196900a69cd1bfed243cab1f9612073e7881dc354b876fd39",
+    "original_runner_sha256": "c7984a6fe46d8605619daee183de8b1e12480f73a59a2076898c368cc3fed6c2",
+    "in_memory_original_runner_sha256": "e1f5c87a9ecb63f57a00d631335629225602a7611a3c19a5d6f857f110df59a8",
+    "parser_sha256": "dff034406a718a8d71f30b3737e84e7f6d365fd2678311460d6635cf0ba9acfb",
+    "comparator_sha256": "b7f90c8dba84bb1a6e698585bdd9001085252c4537d1671e986408217a775638",
+    "fixture": {
+      "present": 1200,
+      "score": 5000000,
+      "writes": "GameManager.score only; rolling GUI score, lives, RNG, clocks and Result states unchanged"
+    },
+    "original_date": "10/14/26",
+    "native_date": "10/14/26",
+    "dates_identical": true,
+    "date_normalization": false,
+    "canonical_semantics_identical": true,
+    "canonical_semantics_sha256": "33689d3b58704136f0d23fdcdadf58963965b66c56d79477c59ef110a3fb8b4b",
+    "original_file_sha256": {
+      "replay/th6_01.rpy": "b1cfd1d17211ef5fe388f458c5e5d77122cbd805be3eb50410a444c2bdd3672b",
+      "score.dat": "6ba605f4e4146b778152487a39ac0e5d1b620dcf479bb764257605d6035a6adc"
+    },
+    "native_file_sha256": {
+      "replay/th6_01.rpy": "a0801a46c0ee2b0eed58f4a61127f5ed20e19905b17bcf24ccd7b68a0d1485bb",
+      "score.dat": "23e1b2f81f9c9916c3d209a98f3a9f1d44c7105d4f5969e0c6887ea4bfb99eea"
+    },
+    "original_replay_checksum_valid": true,
+    "original_score_checksum_valid": true,
+    "native_replay_checksum_valid": true,
+    "native_score_checksum_valid": true,
+    "minimum_compared_highscore": 5000000,
+    "original_highscores": [
+      {
+        "character": 0,
+        "difficulty": 1,
+        "name": "AB      ",
+        "score": 5000500,
+        "stage": 1
+      }
+    ],
+    "native_highscores": [
+      {
+        "score": 5000500,
+        "character": 0,
+        "difficulty": 1,
+        "stage": 1,
+        "name": "AB      "
+      }
+    ],
+    "ignored_inputs_after_first_sentinel": {
+      "original": {
+        "1": 2
+      },
+      "native": {
+        "1": 0
+      }
+    },
+    "previous_original13_unchanged_sha256": {
+      "execution.json": "bf498e72cb2e73f831543c64124023987ab3e8c68eb7478cbc9e01aae1afdf1c",
+      "game/replay/th6_01.rpy": "b7887b05119a0453657f48795f7fcd17f27fb3e27224919043af7e3a70d43d3b",
+      "game/score.dat": "6ba605f4e4146b778152487a39ac0e5d1b620dcf479bb764257605d6035a6adc"
+    },
+    "raw_reference_files_transferred": false,
+    "original_files_reconstructed_from_aggregate": false,
+    "scope": "Exact canonical replay metadata including creation date, stage headers and every interpreted input through the first sentinel, plus ordered highscore records at the declared threshold. Both file checksums and boundaries are independently parsed. The original files stay on the server; no original file is reconstructed from the aggregate."
+  }
+}

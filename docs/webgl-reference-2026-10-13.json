@@ -1,0 +1,242 @@
+{
+  "kind": "actual-browser-webgl-backpressure-probe",
+  "passed": true,
+  "wasm_sha256": "4dcaea15c61d14fd322ee5a7bfd2ae408b5a10b6b2ef502479d67f7335daba8d",
+  "runtime_source_sha256": "41b340844d0f27abb1cf51c082a87227f9e13d7e69f04d3e3ade03b82fddc721",
+  "probe_sha256": "40f9ac339370a9df63c2b8811570a18fdd7c03abfff7e9761d16bfc2cf13bf08",
+  "backend": "WebGL2; GLES Normal fences",
+  "backendObserved": true,
+  "counts": {
+    "baseline": {
+      "historyChains": 61,
+      "otherSubmits": 121,
+      "unclassifiedSubmits": 0,
+      "quadDraws": 394,
+      "triangleDraws": 121,
+      "unknownDraws": 0,
+      "heartbeat": 50,
+      "finish": 0,
+      "waits": 0,
+      "maxWaitNanoseconds": 0,
+      "statusPolls": 424,
+      "maxPendingHistory": 1,
+      "maxPendingAll": 2
+    },
+    "hold": {
+      "historyChains": 1,
+      "otherSubmits": 120,
+      "unclassifiedSubmits": 0,
+      "quadDraws": 6,
+      "triangleDraws": 120,
+      "unknownDraws": 0,
+      "heartbeat": 50,
+      "finish": 0,
+      "waits": 0,
+      "maxWaitNanoseconds": 0,
+      "statusPolls": 242,
+      "maxPendingHistory": 2,
+      "maxPendingAll": 123
+    },
+    "resume": {
+      "historyChains": 63,
+      "otherSubmits": 120,
+      "unclassifiedSubmits": 0,
+      "quadDraws": 378,
+      "triangleDraws": 120,
+      "unknownDraws": 0,
+      "heartbeat": 50,
+      "finish": 0,
+      "waits": 0,
+      "maxWaitNanoseconds": 0,
+      "statusPolls": 550,
+      "maxPendingHistory": 2,
+      "maxPendingAll": 3
+    }
+  },
+  "pendingAtRelease": 123,
+  "pendingAfterResume": 2,
+  "historyAfterResume": 1,
+  "browser_errors_or_warnings": [],
+  "scope": "Actual localhost final WASM. Completion status held UNSIGNALED for1000ms. Two pending logical history draw chains maximum; surface blits and their fences counted separately. Short test does not prove long-term browser GPU memory stability.",
+  "harness_source": {
+    "production_html_source_sha256": "4ec03afc8bf63949acb55bb84d3b8f383a337e25c0ce4af69546ec28593ee8f9",
+    "probe_source_sha256": "40f9ac339370a9df63c2b8811570a18fdd7c03abfff7e9761d16bfc2cf13bf08",
+    "harness_html_sha256": "3d1bd7967ec83ebd3f2b103d41fbc76aa1d015270392c9e38fcaf06598ae2acc",
+    "production_modified": false,
+    "diagnostic_control": "V\u00e9rifier WebGL; executes probe through a local click handler, displays JSON in pre#webglProbeResult",
+    "audio_instrumentation_added": false,
+    "wasm_assets": "Coordinator will supply exact pkg/midi-worklet/assets/build manifest"
+  },
+  "rgb565_diagnostics": [
+    {
+      "wasm_sha256": "4dcaea15c61d14fd322ee5a7bfd2ae408b5a10b6b2ef502479d67f7335daba8d",
+      "profile_options_hex": "0102030102010001",
+      "scene": "Stage4 demo",
+      "probe_passed": false,
+      "baseline_history_submissions": 2619,
+      "baseline_surface_submissions": 33,
+      "max_pending_history_submissions": 312,
+      "scope": "Original probe counts intermediate RGB565 submits as chains. This is a diagnostic of chunk/fence overhead, not a logical-frame backpressure verdict."
+    },
+    {
+      "wasm_sha256": "553efbff367dfc23cc8130475c4e88a1256fa4b08aa0dac202494c8b3dd6eae0",
+      "profile_options_hex": "0102030102010001",
+      "scene": "Stage4 demo",
+      "probe_passed": false,
+      "phase_history_chains": {
+        "baseline": 14,
+        "hold": 0,
+        "resume": 16
+      },
+      "max_pending_history_chains": 2,
+      "pending_after_resume": 4,
+      "history_after_resume": 2,
+      "errors_or_warnings": [],
+      "scope": "No intermediate WASM submissions. Two history chains already pending at hold entry, so probe requirement hold>=1 fails while cap2/recovery are observed. Native capture was concurrent; these counts are not a controlled performance benchmark."
+    }
+  ],
+  "candidate_cf4350dd_validation": {
+    "wasm_sha256": "f19ee134d81fbcea0bed9e85a7e2fad613d943ec04cdd8eeb15ba037a208b651",
+    "runtime_source_sha256": "2fac9c2fd9bd2707fda889e8a78cd5843bbf462a99ff1a778072acd42aa8d366",
+    "browser": "Codex In-app Browser / WebGL2 GLES Normal fences",
+    "local_harness_sha256": "3d1bd7967ec83ebd3f2b103d41fbc76aa1d015270392c9e38fcaf06598ae2acc",
+    "profiles_harness_sha256": "5ebc4164ec578c0548159a521e37f2fb20dc5abb9053c8cae5e048828651ee29",
+    "method": "UI click invokes scripts/webgl_backpressure_probe.js; SYNC_STATUS held UNSIGNALED1000ms, then restored; run shortly after Q returns to title; no resize/alignment",
+    "mode32": {
+      "options_hex": "0102030001010101",
+      "passed": true,
+      "baseline_history_surface": [
+        60,
+        120
+      ],
+      "hold_history_surface": [
+        2,
+        120
+      ],
+      "resume_history_surface": [
+        62,
+        120
+      ],
+      "hold_heartbeat": 50,
+      "maximum_pending_history": 2,
+      "pending_at_release": 123,
+      "pending_after_resume": 1,
+      "history_after_resume": 0,
+      "finish_calls": 0,
+      "cpu_wait_calls": 0,
+      "errors_or_warnings": []
+    },
+    "mode16": {
+      "options_hex": "0102030102010001",
+      "passed": true,
+      "baseline_history_surface": [
+        60,
+        120
+      ],
+      "hold_history_surface": [
+        1,
+        120
+      ],
+      "resume_history_surface": [
+        62,
+        120
+      ],
+      "hold_heartbeat": 50,
+      "maximum_pending_history": 2,
+      "pending_at_release": 123,
+      "pending_after_resume": 1,
+      "history_after_resume": 0,
+      "finish_calls": 0,
+      "cpu_wait_calls": 0,
+      "errors_or_warnings": []
+    },
+    "scope": "Two logical history draw chains. Surface blit submissions continue eachRAF and fences count separately. Short recovery test, not long-term browser GPU memory proof or controlled FPS benchmark."
+  },
+  "final_validation": {
+    "date": "2026-10-14",
+    "wasm_sha256": "0cb6025d5b0909daca4d28664f0a40fe11cfa57eb289e602a1913cc3a87d05d8",
+    "runtime_source_sha256": "b94dcce4e17bbbb122f7be36c0dabdfa0b00882046254a34a9055a7d988f2b98",
+    "browser": "Codex In-app Browser / WebGL2",
+    "local_harness_sha256": "3d1bd7967ec83ebd3f2b103d41fbc76aa1d015270392c9e38fcaf06598ae2acc",
+    "profiles_harness_sha256": "5ebc4164ec578c0548159a521e37f2fb20dc5abb9053c8cae5e048828651ee29",
+    "probe_sha256": "40f9ac339370a9df63c2b8811570a18fdd7c03abfff7e9761d16bfc2cf13bf08",
+    "method": "Actual production loader and final version-tagged WASM. UI selects persisted options, launches game, Q returns to title, diagnostic click holds SYNC_STATUS UNSIGNALED1000ms then restores it.",
+    "mode32": {
+      "passed": true,
+      "backend": "WebGL2; GLES Normal fences",
+      "backend_observed": true,
+      "hold_heartbeat": 50,
+      "maximum_pending_history": 2,
+      "pending_at_release": 123,
+      "finish_calls": 0,
+      "cpu_wait_calls": 0,
+      "unclassified_submits": 0,
+      "unknown_draws": 0,
+      "errors_or_warnings": [],
+      "options_hex": "0102030001010101",
+      "baseline_history_surface": [
+        60,
+        120
+      ],
+      "hold_history_surface": [
+        2,
+        120
+      ],
+      "resume_history_surface": [
+        63,
+        120
+      ],
+      "phase_quad_draws": [
+        399,
+        12,
+        378
+      ],
+      "phase_status_polls": [
+        420,
+        244,
+        550
+      ],
+      "pending_after_resume": 2,
+      "history_after_resume": 1
+    },
+    "mode16": {
+      "passed": true,
+      "backend": "WebGL2; GLES Normal fences",
+      "backend_observed": true,
+      "hold_heartbeat": 50,
+      "maximum_pending_history": 2,
+      "pending_at_release": 123,
+      "finish_calls": 0,
+      "cpu_wait_calls": 0,
+      "unclassified_submits": 0,
+      "unknown_draws": 0,
+      "errors_or_warnings": [],
+      "options_hex": "0102030102010001",
+      "baseline_history_surface": [
+        60,
+        120
+      ],
+      "hold_history_surface": [
+        2,
+        120
+      ],
+      "resume_history_surface": [
+        63,
+        121
+      ],
+      "phase_quad_draws": [
+        2493,
+        48,
+        1512
+      ],
+      "phase_status_polls": [
+        420,
+        244,
+        554
+      ],
+      "pending_after_resume": 1,
+      "history_after_resume": 0
+    },
+    "scope": "Two logical history draw chains, not two total GL submissions. Surface blits continue eachRAF and fences count separately. Short recovery test; not proof of long-term browser GPU memory stability or controlled FPS benchmark."
+  }
+}

@@ -1,0 +1,13 @@
+statefile state.csv
+scenefile scenes.csv
+menufile menus.csv
+lifecyclefile lifecycle.csv
+capdir capture
+capstride 100000
+key 180 184 Q
+key 240 244 DOWN
+key 270 274 Z
+tap 380 60 4 Z
+god 1
+key 600 24000 Z
+stopafter 24000

@@ -112,6 +112,7 @@ impl MenuFont {
                 if let Some(sp) = sheet.sprites.get(&idx) {
                     let [w, h] = sheet.size;
                     cmds.push(DrawCmd {
+                        clip: None,
                         tex: sheet.tex,
                         dst: [pos[0], pos[1], sp.width * scale[0], sp.height * scale[1]],
                         src: [
@@ -124,6 +125,7 @@ impl MenuFont {
                         rot: 0.0,
                         additive: false,
                         color_add: false,
+                        depth: None,
                     });
                 }
             }
@@ -133,15 +135,17 @@ impl MenuFont {
 }
 
 /// Supervisor.cpp's common 30-frame delay, then eight-frame input repeat.
-#[derive(Default)]
+#[derive(Clone, Copy, Default)]
 pub struct MenuInput {
     previous: u16,
+    before: u16,
     held_frames: u16,
     repeating: bool,
 }
 impl MenuInput {
     pub fn tick(&mut self, input: &th06_engine::Input) {
         let buttons = input.buttons();
+        self.before = self.previous;
         self.repeating = false;
         if buttons == self.previous {
             if self.held_frames >= 30 {
@@ -158,6 +162,12 @@ impl MenuInput {
     }
     pub fn pressed(&self, input: &th06_engine::Input, key: th06_engine::Key) -> bool {
         input.pressed(key) || (input.held(key) && self.repeating)
+    }
+    /// WAS_PRESSED_WEIRD on a combined mask also notices a released member
+    /// when another member remains held; individual pressed-key tests do not.
+    pub fn pressed_mask(&self, input: &th06_engine::Input, mask: u16) -> bool {
+        let current = input.buttons() & mask;
+        current != 0 && (current != self.before & mask || self.repeating)
     }
 }
 
@@ -332,17 +342,15 @@ impl MenuArt {
         let r = &vm.runner;
         let sp = vm.sprites.get(&sprite)?;
         let (w, h) = (sp.width * r.scale[0], sp.height * r.scale[1]);
-        let mut pos = [
+        let pos = [
             r.pos[0] + r.pos_offset[0] + offset[0],
             r.pos[1] + r.pos_offset[1] + offset[1],
         ];
-        if !r.corner {
-            pos[0] -= w / 2.0;
-            pos[1] -= h / 2.0;
-        }
+        let geometry = crate::sprite_geometry::screen_rotated(pos, [w, h], r.rotation, r.corner);
         Some(DrawCmd {
+            clip: None,
             tex: vm.tex,
-            dst: [pos[0], pos[1], w, h],
+            dst: geometry.dst,
             src: [
                 sp.x / vm.size[0],
                 sp.y / vm.size[1],
@@ -350,9 +358,10 @@ impl MenuArt {
                 (sp.y + sp.height) / vm.size[1],
             ],
             tint: [tint[0], tint[1], tint[2], tint[3] * r.alpha],
-            rot: r.rotation,
+            rot: geometry.rotation,
             additive: r.additive,
             color_add: false,
+            depth: None,
         })
     }
     pub fn draw(
@@ -360,6 +369,7 @@ impl MenuArt {
         mut style: impl FnMut(usize) -> Option<([f32; 2], [f32; 4])>,
     ) -> Vec<DrawCmd> {
         let mut cmds = vec![DrawCmd {
+            clip: None,
             tex: self.background,
             dst: [0.0, 0.0, 640.0, 480.0],
             src: [0.0, 0.0, 1.0, 1.0],
@@ -367,6 +377,7 @@ impl MenuArt {
             rot: 0.0,
             additive: false,
             color_add: false,
+            depth: None,
         }];
         for (&idx, vm) in &self.vms {
             let r = &vm.runner;
@@ -381,14 +392,12 @@ impl MenuArt {
             };
             let [w, h] = [sp.width * r.scale[0], sp.height * r.scale[1]];
             let [tw, th] = vm.size;
-            let [mut x, mut y] = [
+            let pos = [
                 r.pos[0] + r.pos_offset[0] + offset[0],
                 r.pos[1] + r.pos_offset[1] + offset[1],
             ];
-            if !r.corner {
-                x -= w * 0.5;
-                y -= h * 0.5;
-            }
+            let geometry =
+                crate::sprite_geometry::screen_rotated(pos, [w, h], r.rotation, r.corner);
             let (u0, u1) = if r.flip_x {
                 ((sp.x + sp.width) / tw, sp.x / tw)
             } else {
@@ -400,17 +409,19 @@ impl MenuArt {
                 (sp.y / th, (sp.y + sp.height) / th)
             };
             cmds.push(DrawCmd {
+                clip: None,
                 tex: if vm.highlighted {
                     vm.highlight_tex.unwrap_or(vm.tex)
                 } else {
                     vm.tex
                 },
-                dst: [x, y, w, h],
+                dst: geometry.dst,
                 src: [u0, v0, u1, v1],
                 tint: [tint[0], tint[1], tint[2], tint[3] * r.alpha],
-                rot: r.rotation,
+                rot: geometry.rotation,
                 additive: r.additive,
                 color_add: false,
+                depth: None,
             });
         }
         cmds
@@ -451,6 +462,288 @@ mod tests {
     }
 
     #[test]
+    fn title_registration_sets_context_cursor_and_selection_startup_keeps_timer_one() {
+        let art = MenuArt {
+            background: 0,
+            vms: BTreeMap::new(),
+            sounds: Vec::new(),
+        };
+        let mut title = crate::title::Title::new(art);
+        title.reset(5);
+        assert_eq!(title.reference_navigation(), (1, 5, 60));
+        title.reset(0);
+        assert_eq!(title.reference_navigation(), (1, 0, 60));
+        title.begin_startup(2);
+        assert_eq!(title.reference_navigation(), (1, 2, 1));
+        let _ = title.update(&Input::from_buttons(1, 0));
+        assert_eq!(title.reference_navigation(), (1, 2, 2));
+    }
+
+    #[test]
+    fn difficulty_cancel_retains_unload_then_startup_present() {
+        use crate::selection::{RunMode, Selection, SelectionAction};
+        for (mode, expected_cursor) in [
+            (RunMode::Story, 0),
+            (RunMode::Extra, 1),
+            (RunMode::Practice, 2),
+        ] {
+            let art = MenuArt {
+                background: 0,
+                vms: BTreeMap::new(),
+                sounds: Vec::new(),
+            };
+            let font = MenuFont {
+                normal: FontSheet {
+                    tex: 0,
+                    size: [1.0; 2],
+                    sprites: HashMap::new(),
+                },
+                selected: FontSheet {
+                    tex: 0,
+                    size: [1.0; 2],
+                    sprites: HashMap::new(),
+                },
+            };
+            let mut selection = Selection::new(art, font);
+            selection.begin(mode, 2);
+            assert!(matches!(
+                selection.update(&Input::from_buttons(2, 0), [true; 4], 6),
+                SelectionAction::None
+            ));
+            assert_eq!(selection.reference_navigation(), (8, expected_cursor, 1));
+            for timer in 2..=36 {
+                assert!(matches!(
+                    selection.update(&Input::default(), [true; 4], 6),
+                    SelectionAction::None
+                ));
+                assert_eq!(
+                    selection.reference_navigation(),
+                    (8, expected_cursor, timer)
+                );
+            }
+            assert!(matches!(
+                selection.update(&Input::default(), [true; 4], 6),
+                SelectionAction::None
+            ));
+            assert_eq!(selection.reference_navigation(), (0, expected_cursor, 1));
+            assert!(
+                matches!(selection.update(&Input::default(), [true; 4], 6), SelectionAction::Back { cursor } if cursor == expected_cursor)
+            );
+        }
+    }
+
+    #[test]
+    fn original_main_menu_held_input_survives_difficulty_load_and_cancel() {
+        use crate::selection::{RunMode, Selection, SelectionAction};
+        use crate::title::{Title, TitleAction};
+        // Genuine 102h.exe natural keyboard probes: selection-entry-held and
+        // selection-cancel-held. These are MainMenu state changes, so the
+        // Supervisor repeat counter is neither reset nor ticked twice.
+        for held_direction in [false, true] {
+            let art = || MenuArt {
+                background: 0,
+                vms: BTreeMap::new(),
+                sounds: Vec::new(),
+            };
+            let sheet = || FontSheet {
+                tex: 0,
+                size: [1.0; 2],
+                sprites: HashMap::new(),
+            };
+            let mut title = Title::new(art());
+            let mut selection = Selection::new(
+                art(),
+                MenuFont {
+                    normal: sheet(),
+                    selected: sheet(),
+                },
+            );
+            let mut in_selection = false;
+            let mut previous = 0;
+            for present in 0..=413 {
+                let buttons = if (180..184).contains(&present) {
+                    1 << 9 // Q dismisses PRE_INPUT.
+                } else if held_direction && (240..340).contains(&present) {
+                    (1 << 5) | 1 // Down + Z held through difficulty loading.
+                } else if !held_direction && (240..244).contains(&present) {
+                    1
+                } else if !held_direction && (340..450).contains(&present) {
+                    2 // X held through cancel and title startup.
+                } else {
+                    0
+                };
+                let input = Input::from_buttons(buttons, previous);
+                previous = buttons;
+                if in_selection {
+                    if let SelectionAction::Back { cursor } =
+                        selection.update(&input, [false; 4], 6)
+                    {
+                        title.begin_startup(cursor);
+                        title.input = selection.input;
+                        let _ = title.update(&input);
+                        in_selection = false;
+                    }
+                } else {
+                    let (_, action) = title.update(&input);
+                    let mode = match action {
+                        TitleAction::StartGame => Some(RunMode::Story),
+                        TitleAction::Practice => Some(RunMode::Practice),
+                        _ => None,
+                    };
+                    if let Some(mode) = mode {
+                        selection.begin(mode, 1);
+                        selection.input = title.input;
+                        in_selection = true;
+                    }
+                }
+                if held_direction && present == 305 {
+                    assert_eq!(selection.reference_navigation(), (7, 2, 66));
+                }
+                if !held_direction && present == 410 {
+                    assert_eq!(title.reference_navigation(), (1, 0, 35));
+                }
+                if !held_direction && present == 413 {
+                    assert_eq!(title.reference_navigation(), (2, 0, 1));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn restore_defaults_preserves_original_display_choices_and_restarts_music() {
+        use crate::options::{Options, OptionsAction, OptionsMenu};
+        let art = MenuArt {
+            background: 0,
+            vms: BTreeMap::new(),
+            sounds: Vec::new(),
+        };
+        let mut menu = OptionsMenu::new(art);
+        menu.midi_available = true;
+        menu.begin();
+        let mut options = Options {
+            life_count: 4,
+            bomb_count: 0,
+            color_16bit: true,
+            music_mode: 2,
+            play_sounds: false,
+            windowed: true,
+            default_difficulty: 3,
+            hardware_texture_blending: true,
+        };
+        for _ in 0..32 {
+            menu.update(&Input::default(), &mut options);
+        }
+        for _ in 0..6 {
+            menu.update(&Input::from_buttons(1 << 5, 0), &mut options);
+            menu.update(&Input::default(), &mut options);
+        }
+        assert!(matches!(
+            menu.update(&Input::from_buttons(1, 0), &mut options),
+            OptionsAction::DefaultsRestored
+        ));
+        assert_eq!(menu.take_music_modes(), [1]);
+        assert_eq!(options.life_count, 2);
+        assert_eq!(options.bomb_count, 3);
+        assert_eq!(options.music_mode, 1);
+        assert!(options.play_sounds);
+        assert_eq!(options.default_difficulty, 1);
+        assert!(options.color_16bit);
+        assert!(options.windowed);
+        assert!(options.hardware_texture_blending);
+        // Restoring an already-default audio mode still has its own action:
+        // the dispatcher must stop/restart title playback in this case too.
+        menu.update(&Input::default(), &mut options);
+        assert!(matches!(
+            menu.update(&Input::from_buttons(1, 0), &mut options),
+            OptionsAction::DefaultsRestored
+        ));
+        assert_eq!(menu.take_music_modes(), [1]);
+    }
+
+    #[test]
+    fn simultaneous_options_inputs_follow_original_order_and_retain_music_requests() {
+        use crate::options::{Options, OptionsAction, OptionsMenu};
+        let art = MenuArt {
+            background: 0,
+            vms: BTreeMap::new(),
+            sounds: Vec::new(),
+        };
+        let mut menu = OptionsMenu::new(art);
+        menu.midi_available = true;
+        menu.begin();
+        let mut options = Options::default();
+        for _ in 0..32 {
+            menu.update(&Input::default(), &mut options);
+        }
+        for _ in 0..3 {
+            menu.update(&Input::from_buttons(1 << 5, 0), &mut options);
+            menu.update(&Input::default(), &mut options);
+        }
+        menu.update(&Input::from_buttons((1 << 6) | (1 << 7), 0), &mut options);
+        assert_eq!(options.music_mode, 1);
+        assert_eq!(menu.take_music_modes(), [0, 1]);
+        menu.update(&Input::default(), &mut options);
+        // UP wins over DOWN: music row3 becomes color row2.
+        menu.update(&Input::from_buttons((1 << 4) | (1 << 5), 0), &mut options);
+        menu.update(&Input::default(), &mut options);
+        menu.update(&Input::from_buttons(1 << 7, 0), &mut options);
+        assert!(options.color_16bit);
+        assert!(menu.take_music_modes().is_empty());
+        menu.begin();
+        for _ in 0..32 {
+            menu.update(&Input::default(), &mut options);
+        }
+        // LEFT changes lives before cancel selects Exit; confirm then exits.
+        assert!(matches!(
+            menu.update(&Input::from_buttons((1 << 6) | 2 | 1, 0), &mut options),
+            OptionsAction::Back
+        ));
+        assert_eq!(options.life_count, 1);
+    }
+
+    #[test]
+    fn options_music_requests_preserve_sound_interleaving_and_silent_defaults() {
+        use crate::options::{Options, OptionsAudio, OptionsMenu};
+        let art = MenuArt {
+            background: 0,
+            vms: BTreeMap::new(),
+            sounds: Vec::new(),
+        };
+        let mut menu = OptionsMenu::new(art);
+        menu.midi_available = true;
+        menu.begin();
+        let mut options = Options::default();
+        for _ in 0..32 {
+            menu.update(&Input::default(), &mut options);
+        }
+        for _ in 0..3 {
+            menu.update(&Input::from_buttons(1 << 5, 0), &mut options);
+            menu.update(&Input::default(), &mut options);
+            menu.take_audio_events();
+        }
+        menu.update(&Input::from_buttons((1 << 6) | (1 << 7), 0), &mut options);
+        assert_eq!(
+            menu.take_audio_events(),
+            [
+                OptionsAudio::Sound("select00"),
+                OptionsAudio::Music(0),
+                OptionsAudio::Sound("select00"),
+                OptionsAudio::Music(1)
+            ]
+        );
+        for _ in 0..3 {
+            menu.update(&Input::from_buttons(1 << 5, 0), &mut options);
+            menu.update(&Input::default(), &mut options);
+            menu.take_audio_events();
+        }
+        for _ in 0..2 {
+            menu.update(&Input::from_buttons(1, 0), &mut options);
+            assert_eq!(menu.take_audio_events(), [OptionsAudio::Music(1)]);
+            menu.update(&Input::default(), &mut options);
+        }
+    }
+
+    #[test]
     fn title_waits_sixty_frames_before_loading_difficulty() {
         use crate::title::{Title, TitleAction};
         let art = MenuArt {
@@ -459,6 +752,12 @@ mod tests {
             sounds: Vec::new(),
         };
         let mut title = Title::new(art);
+        // The first confirm dismisses PRE_INPUT. Selection begins only after
+        // the active title menu's separate twenty-frame input gate.
+        assert_eq!(
+            title.update(&Input::from_buttons(1, 0)).1,
+            TitleAction::None
+        );
         for _ in 0..20 {
             title.update(&Input::default());
         }

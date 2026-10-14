@@ -11,6 +11,26 @@ use th06_formats::ecl::{Ecl, Instr};
 pub const FIELD_W: f32 = 384.0;
 pub const FIELD_H: f32 = 448.0;
 
+/// Player::AngleToPlayer shoots down when both positions coincide.
+pub(crate) fn player_angle_from(player: [f32; 2], origin: [f32; 2]) -> f32 {
+    let dx = player[0] - origin[0];
+    let dy = player[1] - origin[1];
+    if dx == 0.0 && dy == 0.0 {
+        std::f32::consts::FRAC_PI_2
+    } else {
+        f64::from(dy).atan2(f64::from(dx)) as f32
+    }
+}
+
+/// ZunMath::sincosmul retains the FSINCOS result until after multiplication;
+/// rounding the trigonometric value to f32 first changes the stored velocity.
+pub(crate) fn sincos_mul(angle: f32, multiplier: f32) -> [f32; 2] {
+    [
+        (f64::from(angle).cos() * f64::from(multiplier)) as f32,
+        (f64::from(angle).sin() * f64::from(multiplier)) as f32,
+    ]
+}
+
 /// The original 16-bit RNG (Global.cpp: Rng).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Rng {
@@ -292,7 +312,6 @@ pub struct Enemy {
     death_anm1: u8,
     death_anm2: u8,
     /// True once this enemy's death effects have been spawned (fire once).
-    pub death_fx_done: bool,
     // ANM presentation
     pub anm_script: i32,
     pub anm_poses: [i16; 5], // default, far left, far right, left, right
@@ -325,6 +344,13 @@ pub struct Enemy {
     star_angle: [f32; 6],
     star_enemy_pos: [f32; 2],
     star_player_pos: [f32; 2],
+}
+
+impl Enemy {
+    /// Read-only ECL context for comparison with the supplied 1.02h executable.
+    pub fn reference_ecl_state(&self) -> (u16, u32, i32, i32) {
+        (self.ctx.sub, self.ctx.pc, self.ctx.time, self.boss_timer)
+    }
 }
 
 impl Default for Enemy {
@@ -395,7 +421,6 @@ impl Default for Enemy {
             item_drop: -1,
             death_anm1: 0,
             death_anm2: 0,
-            death_fx_done: false,
             anm_script: -1,
             anm_poses: [-1; 5],
             anm_pose_state: 0xff,
@@ -430,6 +455,8 @@ pub enum WorldEvent {
     BulletCancel(Vec<[f32; 2]>),
     ScorePopup([f32; 2], i64, [f32; 4]),
     BossSet(bool),
+    BossLifeCount(i32),
+    BossSeconds(i32),
     DropItem([f32; 2], i32),
     /// ECL op125 STDUNPAUSE: release the background camera park (Stage::unpauseFlag).
     Unpause,
@@ -447,6 +474,9 @@ pub struct World {
     pub min_rank: i32,
     pub max_rank: i32,
     pub player_pos: [f32; 2],
+    /// Player::positionCenter.z, initially 0.49 and 0.2 after a respawn.
+    /// Sakuya's knife arc normalizes the complete three-dimensional vector.
+    pub player_z: f32,
     pub bullets: Vec<Bullet>,
     pub next_bullet_index: usize,
     pub lasers: Vec<Laser>,
@@ -516,7 +546,6 @@ pub struct Effect {
     angle_rel: f32,
     /// SpellBubble pop: -1 = live; >= 0 = fading out (`unk_17b`), freed at 16.
     pop: i32,
-    pub color: [f32; 4],
     /// True for the spellcard-declaration bubble (g_Effects 13, Callback4): drawn
     /// in 3D via the stage camera rather than as a flat 2D particle.
     pub spell_bubble: bool,
@@ -640,6 +669,11 @@ impl World {
             return;
         };
         for _ in 0..count.max(0) {
+            let mut runner = AnmRunner::new(instrs.clone());
+            // SpawnParticles assigns vm.color after SetAndExecuteScript. A
+            // fade already started by that script keeps its original RGBA
+            // endpoints and can overwrite this tint on the next calculation.
+            runner.set_rgba(color);
             let eff = Effect {
                 in_use: true,
                 pos,
@@ -652,9 +686,8 @@ impl World {
                 sweep: 0.0,
                 angle_rel: 0.0,
                 pop: -1,
-                color,
                 spell_bubble: false,
-                runner: AnmRunner::new(instrs.clone()),
+                runner,
             };
             if self.alloc_effect(eff).is_none() {
                 break;
@@ -673,6 +706,8 @@ impl World {
     ) -> Option<usize> {
         let (script, cb) = g_effects(13);
         let instrs = self.eff_scripts.get(&script).cloned()?;
+        let mut runner = AnmRunner::new(instrs);
+        runner.set_rgba(color);
         let eff = Effect {
             in_use: true,
             pos,
@@ -685,9 +720,8 @@ impl World {
             sweep: 0.0,
             angle_rel: 0.0,
             pop: -1,
-            color,
             spell_bubble: true,
-            runner: AnmRunner::new(instrs),
+            runner,
         };
         self.alloc_effect(eff)
     }
@@ -701,11 +735,11 @@ impl World {
         color: [f32; 4],
         vel: [f32; 3],
         accel: [f32; 3],
-    ) {
+    ) -> Option<usize> {
         let (script, cb) = g_effects(effect_idx);
-        let Some(instrs) = self.eff_scripts.get(&script).cloned() else {
-            return;
-        };
+        let instrs = self.eff_scripts.get(&script).cloned()?;
+        let mut runner = AnmRunner::new(instrs);
+        runner.set_rgba(color);
         let eff = Effect {
             in_use: true,
             pos,
@@ -718,11 +752,10 @@ impl World {
             sweep: 0.0,
             angle_rel: 0.0,
             pop: -1,
-            color,
             spell_bubble: false,
-            runner: AnmRunner::new(instrs),
+            runner,
         };
-        self.alloc_effect(eff);
+        self.alloc_effect(eff)
     }
 
     fn alloc_effect(&mut self, mut effect: Effect) -> Option<usize> {
@@ -759,7 +792,7 @@ impl World {
                 b.begin_despawn();
             }
         }
-        self.cancel_lasers(false, &mut Vec::new());
+        self.cancel_lasers(false, false, &mut Vec::new());
     }
 
     /// RemoveAllBullets(true) excludes bullets already running their despawn
@@ -774,7 +807,7 @@ impl World {
                 true
             }
         });
-        self.cancel_lasers(true, &mut points);
+        self.cancel_lasers(true, false, &mut points);
         points
     }
 
@@ -803,18 +836,16 @@ impl World {
                 bullet.begin_despawn();
             }
         }
-        if award_points {
-            for laser in &self.lasers {
-                if laser.in_use && laser.state < 2 {
-                    points.push(laser.pos);
-                }
-            }
-        }
-        self.cancel_lasers(award_points, &mut points);
+        self.cancel_lasers(award_points, true, &mut points);
         (points, total)
     }
 
-    fn cancel_lasers(&mut self, award_points: bool, points: &mut Vec<[f32; 2]>) {
+    fn cancel_lasers(
+        &mut self,
+        award_points: bool,
+        include_origin: bool,
+        points: &mut Vec<[f32; 2]>,
+    ) {
         for laser in &mut self.lasers {
             if !laser.in_use {
                 continue;
@@ -827,6 +858,12 @@ impl World {
             laser.timer = 0;
             laser.hitbox_end = 0;
             if award_points {
+                // DespawnBullets emits each laser's origin immediately before
+                // its sampled line. RemoveAllBullets samples only the line.
+                // ItemManager slot allocation makes this ordering observable.
+                if include_origin {
+                    points.push(laser.pos);
+                }
                 let (sin, cos) = laser.angle.sin_cos();
                 let mut offset = laser.start_offset;
                 while laser.end_offset > offset {
@@ -921,7 +958,7 @@ impl World {
                             continue;
                         }
                         let alpha = 1.0 - e.pop as f32 / 16.0;
-                        e.color[3] = alpha;
+                        e.runner.alpha = (alpha * 255.0) as i32 as f32 / 255.0;
                         let sc = 2.0 - alpha;
                         e.runner.scale = [sc, sc];
                     }
@@ -1021,16 +1058,28 @@ impl Enemy {
             -10002 => self.ctx.ivars[1],
             -10003 => self.ctx.ivars[2],
             -10004 => self.ctx.ivars[3],
-            -10005 => self.ctx.fvars[0] as i32,
-            -10006 => self.ctx.fvars[1] as i32,
-            -10007 => self.ctx.fvars[2] as i32,
-            -10008 => self.ctx.fvars[3] as i32,
+            -10005 => self.ctx.fvars[0].to_bits() as i32,
+            -10006 => self.ctx.fvars[1].to_bits() as i32,
+            -10007 => self.ctx.fvars[2].to_bits() as i32,
+            -10008 => self.ctx.fvars[3].to_bits() as i32,
             -10009 => self.ctx.ivars[4],
             -10010 => self.ctx.ivars[5],
             -10011 => self.ctx.ivars[6],
             -10012 => self.ctx.ivars[7],
             -10013 => world.difficulty as i32,
             -10014 => world.rank,
+            -10015 => self.pos[0].to_bits() as i32,
+            -10016 => self.pos[1].to_bits() as i32,
+            -10017 => self.pos[2].to_bits() as i32,
+            -10018 => world.player_pos[0].to_bits() as i32,
+            -10019 => world.player_pos[1].to_bits() as i32,
+            -10020 => 0,
+            -10021 => self.angle_to_player(world).to_bits() as i32,
+            -10023 => {
+                let dx = world.player_pos[0] - self.pos[0];
+                let dy = world.player_pos[1] - self.pos[1];
+                (dx * dx + dy * dy).sqrt().to_bits() as i32
+            }
             -10022 => self.boss_timer,
             -10024 => self.life,
             -10025 => world.character as i32 * 2 + world.shot_type as i32,
@@ -1038,42 +1087,20 @@ impl Enemy {
         }
     }
 
-    /// Resolve a possibly-variable f32 argument. Variable IDs arrive as the
-    /// integer bit pattern of small negative integers.
+    /// EclGetVarFloat converts the numeric sentinel to an integer ID, then
+    /// reinterprets the referenced 32 bits as a float without numeric conversion.
     fn get_f32(&self, raw: f32, world: &World) -> f32 {
-        let as_int = raw as i32;
-        if raw != raw.floor() || !(-10025..=-10001).contains(&as_int) {
-            return raw;
+        let id = raw as i32;
+        if (-10025..=-10001).contains(&id) {
+            f32::from_bits(self.get_i32(id, world) as u32)
+        } else {
+            raw
         }
-        match as_int {
-            -10001 => self.ctx.ivars[0] as f32,
-            -10002 => self.ctx.ivars[1] as f32,
-            -10003 => self.ctx.ivars[2] as f32,
-            -10004 => self.ctx.ivars[3] as f32,
-            -10005 => self.ctx.fvars[0],
-            -10006 => self.ctx.fvars[1],
-            -10007 => self.ctx.fvars[2],
-            -10008 => self.ctx.fvars[3],
-            -10009 => self.ctx.ivars[4] as f32,
-            -10010 => self.ctx.ivars[5] as f32,
-            -10011 => self.ctx.ivars[6] as f32,
-            -10012 => self.ctx.ivars[7] as f32,
-            -10013 => world.difficulty as f32,
-            -10014 => world.rank as f32,
-            -10015 => self.pos[0],
-            -10016 => self.pos[1],
-            -10017 => self.pos[2],
-            -10018 => world.player_pos[0],
-            -10019 => world.player_pos[1],
-            -10020 => 0.0,
-            -10021 => self.angle_to_player(world),
-            -10023 => {
-                let dx = world.player_pos[0] - self.pos[0];
-                let dy = world.player_pos[1] - self.pos[1];
-                (dx * dx + dy * dy).sqrt()
-            }
-            _ => raw,
-        }
+    }
+
+    /// EclSetVar copies the referenced four bytes for either SET opcode.
+    fn set_var_bits(&mut self, id: i32, bits: u32) {
+        self.set_var(id, bits as i32, f32::from_bits(bits));
     }
 
     fn set_var(&mut self, id: i32, int: i32, float: f32) {
@@ -1100,7 +1127,7 @@ impl Enemy {
     }
 
     fn angle_to_player(&self, world: &World) -> f32 {
-        (world.player_pos[1] - self.pos[1]).atan2(world.player_pos[0] - self.pos[0])
+        player_angle_from(world.player_pos, [self.pos[0], self.pos[1]])
     }
 
     /// Faithful port of EclManager::RunEcl.
@@ -1158,8 +1185,7 @@ impl Enemy {
                 1 => {
                     self.angle = normalize_angle(self.angle + self.angular_velocity);
                     self.speed += self.acceleration;
-                    self.axis_speed =
-                        [self.angle.cos() * self.speed, self.angle.sin() * self.speed];
+                    self.axis_speed = sincos_mul(self.angle, self.speed);
                 }
                 2 => {
                     self.move_timer -= 1;
@@ -1206,7 +1232,11 @@ impl Enemy {
                         self.shoot_timer = 0;
                     }
                 }
-                // EXINSREPEAT's per-frame callback (EclManager.cpp:1034).
+                // RunEcl chooses the pose after computing this tick's velocity,
+                // including during SpawnEnemy's initial RunEcl. The following
+                // EnemyManager bounds test therefore sees that initial sprite.
+                self.update_anm_pose();
+                // EXINSREPEAT's per-frame callback (EclManager.cpp:1080).
                 if self.ctx.func_set_func >= 0 {
                     let idx = self.ctx.func_set_func;
                     self.exec_ex(idx, 0, world);
@@ -1225,63 +1255,56 @@ impl Enemy {
             3 => {
                 // JUMPDEC
                 let v = self.get_i32(instr.arg_i32(2), world) - 1;
-                self.set_var(instr.arg_i32(2), v, v as f32);
+                self.set_var_bits(instr.arg_i32(2), v as u32);
                 if v > 0 {
                     return self.jump(instr);
                 }
             }
-            4 => {
-                // SETINT
-                let raw = instr.arg_i32(1);
-                let v = self.get_i32(raw, world);
-                self.set_var(instr.arg_i32(0), v, v as f32);
-            }
-            5 => {
-                // SETFLOAT
-                let v = self.get_f32(instr.arg_f32(1), world);
-                self.set_var(instr.arg_i32(0), v as i32, v);
+            4 | 5 => {
+                // SET_INT and SET_FLOAT both copy raw variable/immediate bits.
+                let bits = self.get_i32(instr.arg_i32(1), world) as u32;
+                self.set_var_bits(instr.arg_i32(0), bits);
             }
             6 => {
                 // SETINTRAND
                 let range = self.get_i32(instr.arg_i32(1), world);
                 let v = world.rng.u32_in_range(range.max(0) as u32) as i32;
-                self.set_var(instr.arg_i32(0), v, v as f32);
+                self.set_var_bits(instr.arg_i32(0), v as u32);
             }
             7 => {
                 // SETINTRANDMIN
                 let range = self.get_i32(instr.arg_i32(1), world);
                 let min = self.get_i32(instr.arg_i32(2), world);
                 let v = world.rng.u32_in_range(range.max(0) as u32) as i32 + min;
-                self.set_var(instr.arg_i32(0), v, v as f32);
+                self.set_var_bits(instr.arg_i32(0), v as u32);
             }
             8 => {
                 // SETFLOATRAND
                 let range = self.get_f32(instr.arg_f32(1), world);
                 let v = world.rng.f32_in_range(range);
-                self.set_var(instr.arg_i32(0), v as i32, v);
+                self.set_var_bits(instr.arg_i32(0), v.to_bits());
             }
             9 => {
                 // SETFLOATRANDMIN
                 let range = self.get_f32(instr.arg_f32(1), world);
                 let min = self.get_f32(instr.arg_f32(2), world);
                 let v = world.rng.f32_in_range(range) + min;
-                self.set_var(instr.arg_i32(0), v as i32, v);
+                self.set_var_bits(instr.arg_i32(0), v.to_bits());
             }
-            10 => self.set_var(instr.arg_i32(0), self.pos[0] as i32, self.pos[0]),
-            11 => self.set_var(instr.arg_i32(0), self.pos[1] as i32, self.pos[1]),
-            12 => self.set_var(instr.arg_i32(0), self.pos[2] as i32, self.pos[2]),
-            13..=17 => self.alu_int(instr, world), // int add/sub/mul/div/mod
+            10 => self.set_var_bits(instr.arg_i32(0), self.pos[0].to_bits()),
+            11 => self.set_var_bits(instr.arg_i32(0), self.pos[1].to_bits()),
+            12 => self.set_var_bits(instr.arg_i32(0), self.pos[2].to_bits()),
+            13..=17 | 20..=24 => self.alu(instr, world), // destination determines value type
             18 => {
                 // MATHINC
                 let v = self.get_i32(instr.arg_i32(0), world) + 1;
-                self.set_var(instr.arg_i32(0), v, v as f32);
+                self.set_var_bits(instr.arg_i32(0), v as u32);
             }
             19 => {
                 // MATHDEC
                 let v = self.get_i32(instr.arg_i32(0), world) - 1;
-                self.set_var(instr.arg_i32(0), v, v as f32);
+                self.set_var_bits(instr.arg_i32(0), v as u32);
             }
-            20..=24 => self.alu_float(instr, world), // float add/sub/mul/div/mod
             25 => {
                 // MATHATAN2: angle from point (arg1,arg2) to point (arg3,arg4).
                 // Decomp result = atan2f(arg4 - arg2, arg3 - arg1)
@@ -1290,13 +1313,14 @@ impl Enemy {
                 let y1 = self.get_f32(instr.arg_f32(2), world);
                 let x2 = self.get_f32(instr.arg_f32(3), world);
                 let y2 = self.get_f32(instr.arg_f32(4), world);
-                let v = (y2 - y1).atan2(x2 - x1);
-                self.set_var(instr.arg_i32(0), v as i32, v);
+                let v = f64::from(y2 - y1).atan2(f64::from(x2 - x1)) as f32;
+                self.set_var_bits(instr.arg_i32(0), v.to_bits());
             }
             26 => {
                 // MATHNORMANGLE
-                let v = normalize_angle(self.get_f32(instr.arg_f32(0), world));
-                self.set_var(instr.arg_i32(0), v as i32, v);
+                let id = instr.arg_i32(0);
+                let v = normalize_angle(f32::from_bits(self.get_i32(id, world) as u32));
+                self.set_var_bits(id, v.to_bits());
             }
             27 => {
                 let l = self.get_i32(instr.arg_i32(0), world);
@@ -1587,16 +1611,17 @@ impl Enemy {
             }
             85 | 86 => {
                 // LASERCREATE / LASERCREATEAIMED
+                let origin = [
+                    self.pos[0] + self.shoot_offset[0],
+                    self.pos[1] + self.shoot_offset[1],
+                ];
                 let mut angle = self.get_f32(instr.arg_f32(1), world);
                 if instr.opcode == 86 {
-                    angle += self.angle_to_player(world);
+                    angle += player_angle_from(world.player_pos, origin);
                 }
                 let laser = Laser {
                     in_use: true,
-                    pos: [
-                        self.pos[0] + self.shoot_offset[0],
-                        self.pos[1] + self.shoot_offset[1],
-                    ],
+                    pos: origin,
                     angle,
                     speed: self.get_f32(instr.arg_f32(2), world),
                     start_offset: self.get_f32(instr.arg_f32(3), world),
@@ -1637,7 +1662,7 @@ impl Enemy {
                 if let Some(idx) = self.lasers[slot] {
                     let player = world.player_pos;
                     if let Some(l) = world.lasers.get_mut(idx) {
-                        l.angle = (player[1] - l.pos[1]).atan2(player[0] - l.pos[0]) + delta;
+                        l.angle = player_angle_from(player, l.pos) + delta;
                     }
                 }
             }
@@ -1677,9 +1702,8 @@ impl Enemy {
             93 => {
                 // SPELLCARDSTART (EclRawInstrSpellcardStartArgs): portrait sprite
                 // at byte 0, id at byte 2, Shift-JIS name from byte 4.
-                // A new declaration ends the previous card: pop its bubbles
-                // (the decomp resets the effectArray at card end, EnemyManager:463).
-                self.reset_effect_array(world);
+                // EclManager.cpp:752 leaves effectArray alive. Its bubbles are
+                // owned by the enemy and can outlive a spell declaration.
                 let sprite = instr.arg_i16(0) as i32;
                 let id = instr.arg_i16(2) as i32;
                 let name = instr
@@ -1704,7 +1728,7 @@ impl Enemy {
                 self.rank_amount2_high = 0;
             }
             94 => {
-                self.reset_effect_array(world); // card ended: pop its bubbles
+                // SPELLCARDEND also leaves the enemy's effectArray intact.
                 if world.spellcard_active != 0 {
                     let (points, bonus) = if world.spellcard_active == 1 {
                         world.despawn_bullets_for_bonus(true)
@@ -1886,8 +1910,13 @@ impl Enemy {
                 ));
             }
             125 => world.events.push(WorldEvent::Unpause), // STDUNPAUSE
-            126 => self.spell_count = instr.arg_i32(0),    // BOSSSETLIFECOUNT (gui)
-            127 => {}                                      // DEBUGWATCH
+            126 => {
+                self.spell_count = instr.arg_i32(0); // BOSSSETLIFECOUNT (global Gui value)
+                world
+                    .events
+                    .push(WorldEvent::BossLifeCount(self.spell_count));
+            }
+            127 => {} // DEBUGWATCH
             // ANMINTERRUPTMAIN: queue an interrupt for the primary anm runner.
             128 => self.pending_interrupt = Some(instr.arg_i32(0)),
             129 => {
@@ -1950,7 +1979,7 @@ impl Enemy {
                             b.ex_int0 = 220;
                             b.timer = 0;
                             let a = world.rng.f32_zero_to_one() * TAU - PI;
-                            b.ex_accel = [a.cos() * 0.01, a.sin() * 0.01];
+                            b.ex_accel = sincos_mul(a, 0.01);
                         }
                         _ => {}
                     }
@@ -2007,8 +2036,8 @@ impl Enemy {
                         let td = (var2 % 30) as f32 / 30.0;
                         let a0 = self.star_angle[i];
                         let a1 = self.star_angle[i + 1];
-                        let t0 = [a0.cos() * r, a0.sin() * r];
-                        let t1 = [a1.cos() * r, a1.sin() * r];
+                        let t0 = sincos_mul(a0, r);
+                        let t1 = sincos_mul(a1, r);
                         let tt = [(t1[0] - t0[0]) * td + t0[0], (t1[1] - t0[1]) * td + t0[1]];
                         self.bullet_props.pos = [base[0] + tt[0], base[1] + tt[1]];
                         let backup = self.bullet_props.speed1;
@@ -2039,6 +2068,7 @@ impl Enemy {
                 // redirect: re-aim a capped number of big (>=30px) bullets and
                 // swap them to colour offset 5.
                 if param < 2 {
+                    world.spawn_particles(12, self.pos, 1, [1.0; 4]);
                     world.time_stopped = (param & 0xff) != 0;
                 } else {
                     let normal = world.difficulty <= 1; // <= NORMAL
@@ -2046,6 +2076,9 @@ impl Enemy {
                     let player = world.player_pos;
                     let rng = &mut world.rng;
                     for b in world.bullets.iter_mut() {
+                        if b.despawn_timer > 0 {
+                            continue;
+                        }
                         if b.height >= 30.0 && b.sprite_offset != 5 && rng.u16().is_multiple_of(4) {
                             let base = b.base_sprite;
                             b.sprite_offset = 5;
@@ -2060,9 +2093,9 @@ impl Enemy {
                                 }
                             } else {
                                 // AngleFromPlayer (player -> bullet) + π/2 + rand(2π).
-                                dy.atan2(dx) + PI / 2.0 + rng.f32_in_range(TAU)
+                                player_angle_from(b.pos, player) + PI / 2.0 + rng.f32_in_range(TAU)
                             };
-                            b.velocity = [b.angle.cos() * b.speed, b.angle.sin() * b.speed];
+                            b.velocity = sincos_mul(b.angle, b.speed);
                             left -= 1;
                             if left == 0 {
                                 break;
@@ -2095,9 +2128,13 @@ impl Enemy {
                         world.player_pos[0] - self.pos[0],
                         world.player_pos[1] - self.pos[1],
                     ];
-                    let len = (mo[0] * mo[0] + mo[1] * mo[1]).sqrt();
+                    let dz = world.player_z - self.pos[2];
+                    let len = (mo[0] * mo[0] + mo[1] * mo[1] + dz * dz).sqrt();
                     let mut mi = if len > 0.0 {
-                        [mo[0] / len, mo[1] / len]
+                        // D3DXVec3Normalize (EXE0x43f13f) computes one
+                        // rounded reciprocal, then multiplies each component.
+                        let inverse_length = 1.0 / len;
+                        [mo[0] * inverse_length, mo[1] * inverse_length]
                     } else {
                         [0.0, 0.0]
                     };
@@ -2140,8 +2177,8 @@ impl Enemy {
                     let r = self.ctx.fvars[3];
                     let off = self.ctx.fvars[1];
                     for _ in 0..n {
-                        self.bullet_props.pos =
-                            [base_angle.cos() * r + 192.0, base_angle.sin() * r + 224.0];
+                        let radial = sincos_mul(base_angle, r);
+                        self.bullet_props.pos = [radial[0] + 192.0, radial[1] + 224.0];
                         self.bullet_props.angle1 = base_angle + off;
                         let props = std::mem::take(&mut self.bullet_props);
                         spawn_bullet_pattern(world, &props);
@@ -2295,7 +2332,7 @@ impl Enemy {
                     let d2 = (ex - b.pos[0]) * (ex - b.pos[0]) + (ey - b.pos[1]) * (ey - b.pos[1]);
                     let dist = if d2 > 0.1 { d2.sqrt() } else { 0.0 };
                     let a = dist * PI / 256.0 + rand_mod;
-                    b.ex_accel = [a.cos() * 0.01, a.sin() * 0.01];
+                    b.ex_accel = sincos_mul(a, 0.01);
                 }
             }
             11 => {
@@ -2317,7 +2354,7 @@ impl Enemy {
                     b.timer = 0;
                     b.ex_int0 = 120;
                     let a = world.rng.f32_in_range(TAU) - PI;
-                    b.ex_accel = [a.cos() * 0.01, a.sin() * 0.01];
+                    b.ex_accel = sincos_mul(a, 0.01);
                 }
             }
             10 => self.ex_bat_transform(world),
@@ -2337,7 +2374,7 @@ impl Enemy {
                 let (ex, ey) = (self.pos[0], self.pos[1]);
                 for bp in big {
                     total += 1;
-                    let enemy_angle = (bp[1] - ey).atan2(bp[0] - ex);
+                    let enemy_angle = f64::from(bp[1] - ey).atan2(f64::from(bp[0] - ex)) as f32;
                     for b in world.bullets.iter_mut() {
                         if b.despawn_timer != 0 || b.height >= 30.0 || b.speed != 0.0 {
                             continue;
@@ -2351,9 +2388,10 @@ impl Enemy {
                         b.speed = 0.01;
                         b.timer = 0;
                         b.ex_int0 = 120;
-                        let bullets_angle = (b.pos[1] - ey).atan2(b.pos[0] - ex);
+                        let bullets_angle =
+                            f64::from(b.pos[1] - ey).atan2(f64::from(b.pos[0] - ex)) as f32;
                         b.angle = (bullets_angle - enemy_angle) * 2.2 + enemy_angle;
-                        b.ex_accel = [b.angle.cos() * 0.01, b.angle.sin() * 0.01];
+                        b.ex_accel = sincos_mul(b.angle, 0.01);
                         let base = b.base_sprite;
                         b.sprite_offset += 1;
                         b.sprite = base + b.sprite_offset as u32;
@@ -2374,10 +2412,14 @@ impl Enemy {
                     else {
                         continue;
                     };
-                    self.bullet_props.pos = [
-                        self.pos[0] + angle.cos() * 64.0,
-                        self.pos[1] + angle.sin() * 64.0,
-                    ];
+                    // utils::Rotate is called with the same input/output
+                    // vector. Its second assignment reads the newly written
+                    // x, preserving the original aliasing quirk and handedness.
+                    let cosine = f64::from(angle).cos() as f32;
+                    let sine = f64::from(angle).sin() as f32;
+                    let x = cosine * 64.0;
+                    let y = -sine * x;
+                    self.bullet_props.pos = [self.pos[0] + x, self.pos[1] + y];
                     spawn_bullet_pattern(world, &self.bullet_props);
                 }
             }
@@ -2420,32 +2462,40 @@ impl Enemy {
     fn ex_bat_wing(&mut self, world: &mut World) {
         use std::f32::consts::PI;
         if self.invisible {
-            return; // ResetEffectArray: the port has no per-enemy effect list
+            self.reset_effect_array(world);
+            return;
         }
         let deg = PI / 180.0;
         self.exins_func6_angle += deg;
-        if self.exins_func6_angle >= 45.0 * deg {
-            self.exins_func6_angle -= 90.0 * deg;
+        if self.exins_func6_angle >= 45.0 * PI / 180.0 {
+            self.exins_func6_angle -= 90.0 * PI / 180.0;
         }
         let t = self.exins_func6_timer;
-        let fire = t > 120 || (t > 60 && t % 2 == 0) || (t > 30 && t % 4 == 0) || t % 8 == 0;
+        // EnemyManager memset leaves both ZunTimer.current/previous at0;
+        // HasTicked is false on this callback's first invocation.
+        let fire =
+            t != 0 && (t > 120 || (t > 60 && t % 2 == 0) || (t > 30 && t % 4 == 0) || t % 8 == 0);
         if fire {
             let bam = t % 16;
             let bam = world.rng.u16_in_range((bam / 2) as u16) as i32 + bam / 2;
             let dist = (bam as f32 * 160.0) / 16.0 + 32.0;
             let final_angle = self.exins_func6_angle - (bam as f32 * PI) / 40.0;
             let dvy = (8.0 * bam as f32) / 60.0 - 4.0 / 15.0;
-            let color = [0.188, 0.188, 1.0, 1.0]; // COLOR_DEEPBLUE 0xff3030ff
+            let color = [48.0 / 255.0, 48.0 / 255.0, 1.0, 1.0]; // COLOR_DEEPBLUE 0xff3030ff
             for side in [1.0f32, -1.0] {
                 let p = [
                     self.pos[0] + side * final_angle.cos() * dist,
                     self.pos[1] + final_angle.sin() * dist,
                     self.pos[2],
                 ];
+                // SpawnParticles executes its ANM (including random sprite)
+                // before the EXINS draws the particle's horizontal velocity.
+                let slot = world.spawn_particle_moving(19, p, color, [0.0; 3], [0.0; 3]);
                 let vx = (world.rng.f32_zero_to_one() * 40.0 - 20.0) / 60.0;
-                let vel = [vx, dvy, 0.0];
-                let accel = [-vel[0] / 120.0, -vel[1] / 120.0, 0.0];
-                world.spawn_particle_moving(19, p, color, vel, accel);
+                if let Some(effect) = slot.and_then(|i| world.effects[i].as_mut()) {
+                    effect.vel = [vx, dvy, 0.0];
+                    effect.accel = [-vx / 120.0, -dvy / 120.0, 0.0];
+                }
             }
         }
         self.exins_func6_timer += 1;
@@ -2511,56 +2561,34 @@ impl Enemy {
         Flow::Jumped
     }
 
-    fn alu_int(&mut self, instr: &Instr, world: &World) {
+    fn alu(&mut self, instr: &Instr, world: &World) {
         let out = instr.arg_i32(0);
-        let a = self.get_i32(instr.arg_i32(1), world);
-        let b = self.get_i32(instr.arg_i32(2), world);
-        let v = match instr.opcode {
-            13 => a.wrapping_add(b),
-            14 => a.wrapping_sub(b),
-            15 => a.wrapping_mul(b),
-            16 => {
-                if b != 0 {
-                    a / b
-                } else {
-                    0
-                }
-            }
-            _ => {
-                if b != 0 {
-                    a % b
-                } else {
-                    0
-                }
-            }
-        };
-        self.set_var(out, v, v as f32);
-    }
-
-    fn alu_float(&mut self, instr: &Instr, world: &World) {
-        let out = instr.arg_i32(0);
-        let a = self.get_f32(instr.arg_f32(1), world);
-        let b = self.get_f32(instr.arg_f32(2), world);
-        let v = match instr.opcode {
-            20 => a + b,
-            21 => a - b,
-            22 => a * b,
-            23 => {
-                if b != 0.0 {
-                    a / b
-                } else {
-                    0.0
-                }
-            }
-            _ => {
-                if b != 0.0 {
-                    a % b
-                } else {
-                    0.0
-                }
-            }
-        };
-        self.set_var(out, v as i32, v);
+        let operation = (instr.opcode - 13) % 7;
+        // Both opcode families call the same EclMath functions. Their branch
+        // depends on EclGetVar's destination type, rather than the opcode name.
+        if matches!(out, -10008..=-10005 | -10017..=-10015) {
+            let a = self.get_f32(instr.arg_f32(1), world);
+            let b = self.get_f32(instr.arg_f32(2), world);
+            let v = match operation {
+                0 => a + b,
+                1 => a - b,
+                2 => a * b,
+                3 => a / b,
+                _ => a % b,
+            };
+            self.set_var_bits(out, v.to_bits());
+        } else {
+            let a = self.get_i32(instr.arg_i32(1), world);
+            let b = self.get_i32(instr.arg_i32(2), world);
+            let v = match operation {
+                0 => a.wrapping_add(b),
+                1 => a.wrapping_sub(b),
+                2 => a.wrapping_mul(b),
+                3 => a.checked_div(b).unwrap_or(0),
+                _ => a.checked_rem(b).unwrap_or(0),
+            };
+            self.set_var_bits(out, v as u32);
+        }
     }
 
     fn start_interp(&mut self, duration: i32) {
@@ -2583,7 +2611,10 @@ impl Enemy {
         }
         self.pos[1] += self.axis_speed[1];
         self.clamp();
-        // Pose selection from horizontal motion (left/right banking).
+    }
+
+    fn update_anm_pose(&mut self) {
+        // EclManager::RunEcl, after movement/autofire and before EXINSREPEAT.
         if self.anm_poses[3] >= 0 {
             let state = if self.axis_speed[0] < 0.0 {
                 1
@@ -2656,10 +2687,6 @@ impl Enemy {
     /// (RandomSplash → 2 RNG each). Every death mode runs the after-switch pair;
     /// mode 3 also pops three bubbles first, modes 0/1/2 add the item splash.
     pub fn spawn_death_effects(&mut self, world: &mut World) {
-        if self.death_fx_done {
-            return;
-        }
-        self.death_fx_done = true;
         let a1 = self.death_anm1 as i32;
         let a2 = self.death_anm2 as i32 + 4;
         if self.death_mode == 3 {
@@ -2735,6 +2762,14 @@ impl Enemy {
         // HandleTimerCallback (EnemyManager.cpp:386). The boss timer is ticked
         // once per frame by the enemy loop (Enemy::Move's sibling at line 737),
         // not here — this only tests and acts on it.
+        if self.timer_cb_threshold >= 0 && self.is_boss {
+            // SetSpellcardSeconds precedes the timeout test and timer reset.
+            // This also runs for a boss initialized by this calculation's
+            // timeline, before GUI12; a Stage pre-enemy lookup misses its birth.
+            world.events.push(WorldEvent::BossSeconds(
+                (self.timer_cb_threshold - self.boss_timer) / 60,
+            ));
+        }
         if self.timer_cb_threshold >= 0 && self.boss_timer >= self.timer_cb_threshold {
             if self.life_cb_threshold > 0 {
                 self.life = self.life_cb_threshold;
@@ -2776,10 +2811,16 @@ impl Enemy {
             world.time_stopped = false;
             world.events.push(WorldEvent::BossSet(false));
         }
+        // Enemy::Despawn owns this cleanup (EnemyManager.cpp:475), including
+        // non-boss enemies. Starting/ending a spell does not perform it.
+        self.reset_effect_array(world);
     }
 
     pub fn on_death(&mut self, ecl: &Ecl, world: &mut World) {
-        self.reset_effect_array(world); // pop any live spellcard bubbles
+        let mode = self.death_mode;
+        if self.is_boss && (mode == 0 || mode == 1) {
+            self.reset_effect_array(world);
+        }
         self.life_cb_threshold = -1;
         self.timer_cb_threshold = -1;
         match self.death_mode {
@@ -2793,10 +2834,10 @@ impl Enemy {
             0 => self.occupied = false,
             _ => {}
         }
-        if self.death_mode != 3 {
+        if mode != 3 {
             self.life = 0;
         }
-        if self.is_boss && (self.death_mode == 0 || self.death_mode == 1) {
+        if self.is_boss && (mode == 0 || mode == 1) {
             world.boss_present = false;
             world.time_stopped = false;
             world.events.push(WorldEvent::BossSet(false));
@@ -2833,7 +2874,9 @@ impl Enemy {
         }
     }
 
-    /// Remaining seconds of the current boss attack, for the HUD timer.
+    /// Per-enemy timer observation used by the original attack-oracle test.
+    /// Runtime GUI timing is latched by HandleTimerCallback instead.
+    #[cfg(test)]
     pub fn spell_seconds_left(&self) -> Option<i32> {
         if self.is_boss && self.timer_cb_threshold > 0 {
             Some(((self.timer_cb_threshold - self.boss_timer) / 60).max(0))
@@ -2865,7 +2908,7 @@ pub const BULLET_BASE_SPRITE: [u32; 10] = [14, 30, 46, 62, 78, 94, 110, 118, 122
 
 /// Faithful port of BulletManager::SpawnSingleBullet's aim-mode math.
 pub fn spawn_bullet_pattern(world: &mut World, props: &BulletProps) {
-    let aim_angle = (world.player_pos[1] - props.pos[1]).atan2(world.player_pos[0] - props.pos[0]);
+    let aim_angle = player_angle_from(world.player_pos, props.pos);
     let tau = std::f32::consts::TAU;
     let pi = std::f32::consts::PI;
     'pattern: for idx2 in 0..props.count2 as i32 {
@@ -2943,6 +2986,9 @@ pub fn spawn_bullet_pattern(world: &mut World, props: &BulletProps) {
             // No bullet mirroring: SpawnSingleBullet (BulletManager.cpp:118)
             // never flips the angle. `invertX` only negates the enemy's X
             // movement (Enemy::Move), not its fire pattern.
+            // SpawnSingleBullet keeps bulletAngle for EX_ACCELERATION even
+            // though the stored direction and initial velocity are normalized.
+            let pattern_angle = angle;
             angle = normalize_angle(angle);
             let base = BULLET_BASE_SPRITE
                 .get(props.sprite.max(0) as usize)
@@ -2971,14 +3017,11 @@ pub fn spawn_bullet_pattern(world: &mut World, props: &BulletProps) {
             let mut ex_int1 = 0;
             if props.flags & 0x10 != 0 {
                 let dir = if props.ex_floats[1] <= -999.0 {
-                    angle
+                    pattern_angle
                 } else {
                     props.ex_floats[1]
                 };
-                ex_accel = [
-                    dir.cos() * props.ex_floats[0],
-                    dir.sin() * props.ex_floats[0],
-                ];
+                ex_accel = sincos_mul(dir, props.ex_floats[0]);
                 ex_int0 = if props.ex_ints[0] > 0 {
                     props.ex_ints[0]
                 } else {
@@ -3022,7 +3065,7 @@ pub fn spawn_bullet_pattern(world: &mut World, props: &BulletProps) {
                     pos: props.pos,
                     angle,
                     speed,
-                    velocity: [angle.cos() * speed, angle.sin() * speed],
+                    velocity: sincos_mul(angle, speed),
                     type_index: bullet_type,
                     visuals: world
                         .bullet_templates
@@ -3067,6 +3110,446 @@ mod tests {
     use super::*;
 
     #[test]
+    fn extra_reflection_keeps_original_atan2_rounding() {
+        // Original Marisa A / Extra, just before replay calculation 20209.
+        // atan2f loses one bit here; the subsequent 2.2 reflection amplifies
+        // that difference until the accelerated trajectory diverges.
+        let mut world = world();
+        for _ in 0..2 {
+            spawn_bullet_pattern(&mut world, &BulletProps::default());
+        }
+        world.bullets[0].pos = [64.0, f32::from_bits(0x4333fff9)];
+        world.bullets[0].height = 16.0;
+        world.bullets[1].pos = [f32::from_bits(0x42eb9cd1), f32::from_bits(0x43178663)];
+        world.bullets[1].height = 32.0;
+        let mut enemy = Enemy {
+            pos: [f32::from_bits(0x433ee3ca), 48.0, 0.0],
+            life: 0, // The independently tested bat callback is irrelevant here.
+            ..Default::default()
+        };
+        enemy.exec_ex(15, 0, &mut world);
+        assert_eq!(world.bullets[0].angle.to_bits(), 0x40212067);
+        assert_eq!(world.bullets[0].ex_flags & 0x10, 0x10);
+        assert_eq!(world.bullets[0].ex_int0, 120);
+    }
+
+    #[test]
+    fn boss_seconds_callback_latches_before_timeout_and_timer_increment() {
+        let ecl = Ecl {
+            data: Vec::new(),
+            sub_offsets: Vec::new(),
+            timeline_offset: 0,
+        };
+        for (threshold, timer, seconds) in [(1500, 1, 24), (60, 1, 0), (0, 60, -1)] {
+            let mut world = world();
+            world.time_stopped = true;
+            let mut enemy = Enemy {
+                is_boss: true,
+                timer_cb_threshold: threshold,
+                boss_timer: timer,
+                ..Default::default()
+            };
+            let rng = world.rng.seed();
+            enemy.handle_callbacks(&ecl, &mut world);
+            assert!(
+                matches!(world.events.first(), Some(WorldEvent::BossSeconds(n)) if *n == seconds)
+            );
+            assert_eq!(world.rng.seed(), rng);
+            if timer < threshold {
+                assert_eq!(enemy.boss_timer, timer);
+            } else {
+                assert_eq!(enemy.timer_cb_threshold, -1);
+            }
+        }
+        for (is_boss, threshold) in [(true, -1), (false, 1500)] {
+            let mut world = world();
+            let mut enemy = Enemy {
+                is_boss,
+                timer_cb_threshold: threshold,
+                ..Default::default()
+            };
+            enemy.handle_callbacks(&ecl, &mut world);
+            assert!(
+                !world
+                    .events
+                    .iter()
+                    .any(|e| matches!(e, WorldEvent::BossSeconds(_)))
+            );
+        }
+    }
+
+    #[test]
+    fn spawn_ecl_selects_pose_before_first_bounds_and_move_does_not_reselect() {
+        // Extra/ReimuA first divergence11758: Flandre at x=-28.282 has a
+        // 64px pose sprite already, and becomes the homing target this tick.
+        fn instruction(data: &mut Vec<u8>, time: i32, opcode: u16, args: &[u8]) {
+            data.extend(time.to_le_bytes());
+            data.extend(opcode.to_le_bytes());
+            data.extend(((12 + args.len()) as u16).to_le_bytes());
+            data.extend([0, 31, 0, 0]);
+            data.extend(args);
+        }
+        let mut data = Vec::new();
+        let poses = [160i16, 163, 164, 161, 162, 0]
+            .into_iter()
+            .flat_map(i16::to_le_bytes)
+            .collect::<Vec<_>>();
+        instruction(&mut data, 0, 98, &poses);
+        let mut motion = 120i32.to_le_bytes().to_vec();
+        motion.extend(192f32.to_le_bytes());
+        motion.extend(96f32.to_le_bytes());
+        motion.extend(0f32.to_le_bytes());
+        instruction(&mut data, 0, 57, &motion);
+        instruction(&mut data, 120, 0, &[]);
+        let ecl = Ecl {
+            data,
+            sub_offsets: vec![0],
+            timeline_offset: 0,
+        };
+        let mut world = world();
+        let mut enemy = Enemy::spawn(
+            &ecl,
+            &mut world,
+            &SpawnReq {
+                sub: 0,
+                pos: [-32.0, 96.0, 0.0],
+                life: 15000,
+                item: -2,
+                score: 0,
+                mirror: false,
+            },
+        )
+        .unwrap();
+        assert_eq!((enemy.anm_script, enemy.anm_pose_state), (162, 2));
+        enemy.frame_move();
+        assert!((enemy.pos[0] - -28.282225).abs() < 0.00001);
+        assert!(enemy.update_bounds(64.0, 80.0, [384.0, 448.0]));
+        assert!(enemy.ready_for_damage());
+        enemy.movement_mode = 0;
+        enemy.axis_speed[0] = -1.0;
+        enemy.frame_move();
+        assert_eq!(enemy.anm_script, 162);
+        enemy.run_ecl(&ecl, &mut world);
+        assert_eq!((enemy.anm_script, enemy.anm_pose_state), (161, 1));
+    }
+
+    #[test]
+    fn aiming_uses_double_atan2_before_rounding_to_float() {
+        // The EXE's 0x428766 calls the double atan2 runtime entry, followed
+        // by FSTP f32. A float atan2 implementation differs by one ULP here.
+        assert_eq!(
+            player_angle_from([150.62506, 127.82745], [0.0, 0.0]).to_bits(),
+            0x3f342633
+        );
+    }
+
+    #[test]
+    fn normalize_angle_opcode_reads_integer_destination_id() {
+        let mut enemy = Enemy::default();
+        enemy.ctx.fvars[0] = 3.2;
+        let mut world = world();
+        let ecl = Ecl {
+            data: Vec::new(),
+            sub_offsets: Vec::new(),
+            timeline_offset: 0,
+        };
+        let args = (-10005i32).to_le_bytes();
+        enemy.exec(
+            &ecl,
+            &mut world,
+            &Instr {
+                time: 0,
+                opcode: 26,
+                offset_to_next: 16,
+                skip_for_difficulty: 31,
+                args: &args,
+            },
+        );
+        assert_eq!(enemy.ctx.fvars[0], normalize_angle(3.2));
+        assert!(enemy.ctx.fvars[0].is_finite());
+    }
+
+    #[test]
+    fn set_opcodes_copy_float_register_bits_without_truncation() {
+        let mut enemy = Enemy::default();
+        enemy.ctx.fvars[0] = f32::from_bits(0xbf0bbdd8);
+        let mut world = world();
+        let ecl = Ecl {
+            data: Vec::new(),
+            sub_offsets: Vec::new(),
+            timeline_offset: 0,
+        };
+        // Stage5 child25 uses SET_INT f0,f0 before its first bullet fan.
+        for opcode in [4, 5] {
+            let mut args = (-10006i32).to_le_bytes().to_vec();
+            args.extend((-10005i32).to_le_bytes());
+            enemy.exec(
+                &ecl,
+                &mut world,
+                &Instr {
+                    time: 0,
+                    opcode,
+                    offset_to_next: 20,
+                    skip_for_difficulty: 31,
+                    args: &args,
+                },
+            );
+            assert_eq!(enemy.ctx.fvars[1].to_bits(), enemy.ctx.fvars[0].to_bits());
+        }
+        assert_eq!(
+            enemy.get_i32(-10005, &world) as u32,
+            enemy.ctx.fvars[0].to_bits()
+        );
+        enemy.ctx.ivars[0] = 1.25f32.to_bits() as i32;
+        assert_eq!(enemy.get_f32(-10001.0, &world), 1.25);
+    }
+
+    #[test]
+    fn arithmetic_opcode_families_use_destination_type() {
+        let mut enemy = Enemy::default();
+        let mut world = world();
+        let ecl = Ecl {
+            data: Vec::new(),
+            sub_offsets: Vec::new(),
+            timeline_offset: 0,
+        };
+        let mut args = (-10005i32).to_le_bytes().to_vec();
+        args.extend(0.25f32.to_le_bytes());
+        args.extend(0.5f32.to_le_bytes());
+        for opcode in [13, 20] {
+            enemy.exec(
+                &ecl,
+                &mut world,
+                &Instr {
+                    time: 0,
+                    opcode,
+                    offset_to_next: 24,
+                    skip_for_difficulty: 31,
+                    args: &args,
+                },
+            );
+            assert_eq!(enemy.ctx.fvars[0], 0.75);
+        }
+        let mut args = (-10001i32).to_le_bytes().to_vec();
+        args.extend(25i32.to_le_bytes());
+        args.extend(50i32.to_le_bytes());
+        for opcode in [13, 20] {
+            enemy.exec(
+                &ecl,
+                &mut world,
+                &Instr {
+                    time: 0,
+                    opcode,
+                    offset_to_next: 24,
+                    skip_for_difficulty: 31,
+                    args: &args,
+                },
+            );
+            assert_eq!(enemy.ctx.ivars[0], 75);
+        }
+    }
+
+    #[test]
+    fn projectile_velocity_keeps_original_sincos_multiply_precision() {
+        // Actual 1.02h replay-c0-d1-s1 bullet slot344 at frame2880.
+        let velocity = sincos_mul(f32::from_bits(0xc040b062), f32::from_bits(0x3fcd5555));
+        assert_eq!(velocity.map(f32::to_bits), [0xbfcb9420, 0xbe564af5]);
+        assert_eq!(
+            player_angle_from([20.0, 30.0], [20.0, 30.0]),
+            std::f32::consts::FRAC_PI_2
+        );
+    }
+
+    #[test]
+    fn sakuya_knife_fan_uses_original_three_dimensional_normalization() {
+        // Passive original EXE probe at stage5 Normal replay frame9468.
+        // positionCenter.z remains 0.49 before the first respawn.
+        let mut world = world();
+        world.difficulty = 1;
+        world.player_pos = [194.0, 384.0];
+        let mut enemy = Enemy {
+            pos: [192.0, 112.0, 0.0],
+            ..Default::default()
+        };
+        enemy.exec_ex(5, 0, &mut world);
+        assert_eq!(world.bullets.len(), 9);
+        let expected = [
+            [0x423a0949, 0x4393b00e],
+            [0x42a9fa78, 0x438863d8],
+            [0x42fd9de3, 0x43809ae0],
+            [0x432ab228, 0x43792364],
+            [0x43575181, 0x4378cf65],
+            [0x4381a8f2, 0x43801e29],
+            [0x4396ae87, 0x43879834],
+            [0x43aa15fb, 0x43929bac],
+            [0x43bb485f, 0x43a0d2e4],
+        ];
+        assert_eq!(
+            world
+                .bullets
+                .iter()
+                .map(|b| b.pos.map(f32::to_bits))
+                .collect::<Vec<_>>(),
+            expected
+        );
+    }
+
+    #[test]
+    fn acceleration_retains_the_unwrapped_pattern_angle() {
+        let mut world = world();
+        let props = BulletProps {
+            aim_mode: 1,
+            count1: 1,
+            count2: 1,
+            angle1: 5.0 * std::f32::consts::PI / 4.0,
+            speed1: 0.3,
+            flags: 0x10,
+            ex_ints: [100, 0, 0, 0],
+            ex_floats: [0.015, -999.0, 0.0, 0.0],
+            ..Default::default()
+        };
+        spawn_bullet_pattern(&mut world, &props);
+        let bullet = &world.bullets[0];
+        assert_eq!(bullet.angle, normalize_angle(props.angle1));
+        assert_eq!(bullet.ex_accel, sincos_mul(props.angle1, 0.015));
+        assert_ne!(bullet.ex_accel, sincos_mul(bullet.angle, 0.015));
+    }
+
+    #[test]
+    fn aimed_laser_uses_shifted_spawn_position() {
+        let mut world = world();
+        world.player_pos = [192.0, 400.0];
+        let ecl = Ecl {
+            data: Vec::new(),
+            sub_offsets: Vec::new(),
+            timeline_offset: 0,
+        };
+        let mut enemy = Enemy {
+            pos: [64.0, 100.0, 0.0],
+            shoot_offset: [30.0, -20.0],
+            ..Default::default()
+        };
+        let mut args = vec![0; 4];
+        for value in [0.25f32, 1.0, 0.0, 100.0, 100.0, 16.0] {
+            args.extend(value.to_le_bytes());
+        }
+        for value in [0i32, 60, 10, 0, 0, 0] {
+            args.extend(value.to_le_bytes());
+        }
+        enemy.exec(
+            &ecl,
+            &mut world,
+            &Instr {
+                time: 0,
+                opcode: 86,
+                offset_to_next: (12 + args.len()) as i16,
+                skip_for_difficulty: 31,
+                args: &args,
+            },
+        );
+        let laser = &world.lasers[0];
+        assert_eq!(laser.pos, [94.0, 80.0]);
+        assert_eq!(
+            laser.angle,
+            0.25 + player_angle_from(world.player_pos, laser.pos)
+        );
+    }
+
+    #[test]
+    #[ignore = "requires original decomp; build with TH06_DECOMP_SRC=... python3 oracle/player/build.py"]
+    fn original_cpp_repeated_phase_deaths_emit_every_particle() {
+        use std::fmt::Write;
+        let mut actual = String::new();
+        for mode in 0..4 {
+            for drop in [-2, 0] {
+                let mut world = world();
+                for script in [3, 9] {
+                    world.eff_scripts.insert(
+                        script,
+                        vec![AnmInstr {
+                            time: 0,
+                            opcode: 21,
+                            args: Vec::new(),
+                            offset: 0,
+                        }],
+                    );
+                }
+                let mut enemy = Enemy {
+                    death_mode: mode,
+                    item_drop: drop,
+                    ..Default::default()
+                };
+                for phase in 0..2 {
+                    enemy.spawn_death_effects(&mut world);
+                    writeln!(
+                        actual,
+                        "{mode} {drop} {phase} {}",
+                        world.effects.iter().flatten().count()
+                    )
+                    .unwrap();
+                }
+            }
+        }
+        let binary = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../oracle/player/build/player_reference");
+        let output = std::process::Command::new(binary)
+            .arg("deathfx")
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert_eq!(actual, String::from_utf8(output.stdout).unwrap());
+    }
+
+    #[test]
+    #[ignore = "requires original decomp; build with TH06_DECOMP_SRC=... python3 oracle/player/build.py"]
+    fn original_cpp_enemy_death_modes_keep_set_hp_to_one_alive() {
+        use std::fmt::Write;
+        let ecl = Ecl {
+            data: Vec::new(),
+            sub_offsets: Vec::new(),
+            timeline_offset: 0,
+        };
+        let mut actual = String::new();
+        for mode in 0..4 {
+            for boss in 0..2 {
+                let mut world = world();
+                world.boss_present = true;
+                let mut enemy = Enemy {
+                    life: -9,
+                    death_mode: mode,
+                    is_boss: boss != 0,
+                    occupied: true,
+                    interactable: true,
+                    damageable: true,
+                    effect_slots: vec![999],
+                    ..Default::default()
+                };
+                enemy.on_death(&ecl, &mut world);
+                writeln!(
+                    actual,
+                    "{mode} {boss} {} {} {} {} {} {} {}",
+                    enemy.life,
+                    enemy.death_mode,
+                    u8::from(enemy.damageable),
+                    u8::from(enemy.interactable),
+                    u8::from(enemy.occupied),
+                    u8::from(world.boss_present),
+                    u8::from(enemy.effect_slots.is_empty())
+                )
+                .unwrap();
+            }
+        }
+        let binary = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../oracle/player/build/player_reference");
+        let output = std::process::Command::new(binary)
+            .arg("death")
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert_eq!(actual, String::from_utf8(output.stdout).unwrap());
+    }
+
+    #[test]
     #[ignore = "requires original decomp; build with TH06_DECOMP_SRC=... python3 oracle/player/build.py"]
     fn original_cpp_enemy_damage_feedback_matches_sound_and_color_cadence() {
         use std::fmt::Write;
@@ -3103,6 +3586,78 @@ mod tests {
         assert_eq!(actual, String::from_utf8(output.stdout).unwrap());
     }
 
+    #[test]
+    #[ignore = "requires original decomp; build with TH06_DECOMP_SRC=... python3 oracle/enemy/build.py"]
+    fn original_cpp_bat_wings_match_timer_cadence_and_particle_rng_order() {
+        use std::fmt::Write;
+        let mut actual = String::new();
+        for random in 0..2 {
+            let mut world = world();
+            let mut script = vec![AnmInstr {
+                time: 0,
+                opcode: 1,
+                args: 11u32.to_le_bytes().to_vec(),
+                offset: 0,
+            }];
+            if random != 0 {
+                script[0] = AnmInstr {
+                    time: 0,
+                    opcode: 16,
+                    args: [11u32.to_le_bytes(), 8u32.to_le_bytes()].concat(),
+                    offset: 0,
+                };
+            }
+            script.push(AnmInstr {
+                time: 0,
+                opcode: 21,
+                args: Vec::new(),
+                offset: 12,
+            });
+            world.eff_scripts.insert(19, script);
+            let mut enemy = Enemy {
+                pos: [192.0, 96.0, 0.0],
+                ..Default::default()
+            };
+            for frame in 0..140 {
+                enemy.invisible = (130..135).contains(&frame);
+                world.effects.clear();
+                enemy.ex_bat_wing(&mut world);
+                let effects: Vec<_> = world.effects.iter().flatten().collect();
+                write!(
+                    actual,
+                    "{random} {frame} {} {} {} {}",
+                    enemy.exins_func6_timer,
+                    enemy.exins_func6_angle.to_bits(),
+                    world.rng.seed(),
+                    effects.len()
+                )
+                .unwrap();
+                for effect in effects {
+                    write!(
+                        actual,
+                        " {} {} {} {} {} {} {}",
+                        effect.pos[0].to_bits(),
+                        effect.pos[1].to_bits(),
+                        effect.vel[0].to_bits(),
+                        effect.vel[1].to_bits(),
+                        effect.accel[0].to_bits(),
+                        effect.accel[1].to_bits(),
+                        effect.runner.sprite.unwrap()
+                    )
+                    .unwrap();
+                }
+                actual.push('\n');
+            }
+        }
+        let binary = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../oracle/enemy/build/enemy_reference");
+        let output = std::process::Command::new(binary)
+            .output()
+            .expect("build oracle/enemy/build.py first");
+        assert!(output.status.success());
+        assert_eq!(actual, String::from_utf8(output.stdout).unwrap());
+    }
+
     fn world() -> World {
         World {
             rng: Rng::new(0x1234),
@@ -3112,6 +3667,7 @@ mod tests {
             min_rank: 14,
             max_rank: 18,
             player_pos: [192.0, 384.0],
+            player_z: 0.49,
             bullets: Vec::new(),
             next_bullet_index: 0,
             lasers: Vec::new(),
@@ -3134,6 +3690,77 @@ mod tests {
             eff_scripts: HashMap::new(),
             random_item_spawn_index: 0,
             random_item_table_index: 0,
+        }
+    }
+
+    #[test]
+    fn spell_start_and_end_preserve_bubbles_until_enemy_despawns() {
+        // Real102h MarisaA Extra keeps five sub32 bubbles when sub33 declares
+        // its spell at replay11949. Prematurely popping them at11964 makes
+        // room for three extra effects at25012 and consumes11extra RNG draws.
+        // EclManager SPELLCARD_START/END do not call Enemy_ResetEffectArray;
+        // Enemy::Despawn does, independently of the boss flag.
+        for is_boss in [false, true] {
+            let mut world = world();
+            world.eff_scripts.insert(
+                18,
+                vec![AnmInstr {
+                    time: 0,
+                    opcode: 21,
+                    args: Vec::new(),
+                    offset: 0,
+                }],
+            );
+            let mut enemy = Enemy {
+                occupied: true,
+                is_boss,
+                ..Default::default()
+            };
+            for _ in 0..5 {
+                enemy.effect_slots.push(
+                    world
+                        .spawn_spell_bubble([0.0; 3], [1.0, 0.0, 0.0], [1.0; 4])
+                        .unwrap(),
+                );
+            }
+            let ecl = Ecl {
+                data: Vec::new(),
+                sub_offsets: Vec::new(),
+                timeline_offset: 0,
+            };
+            for opcode in [93, 94] {
+                enemy.exec(
+                    &ecl,
+                    &mut world,
+                    &Instr {
+                        time: 0,
+                        opcode,
+                        offset_to_next: 16,
+                        skip_for_difficulty: 31,
+                        args: &[0; 4],
+                    },
+                );
+                for _ in 0..16 {
+                    world.update_effects();
+                }
+                assert_eq!(enemy.effect_slots.len(), 5);
+                assert_eq!(world.effects.iter().flatten().count(), 5);
+                assert!(
+                    world
+                        .effects
+                        .iter()
+                        .flatten()
+                        .all(|effect| effect.pop == -1)
+                );
+            }
+            enemy.despawn(&mut world);
+            assert!(enemy.effect_slots.is_empty());
+            for _ in 0..15 {
+                world.update_effects();
+            }
+            assert_eq!(world.effects.iter().flatten().count(), 5);
+            world.update_effects();
+            assert_eq!(world.effects.iter().flatten().count(), 0);
         }
     }
 
@@ -3272,6 +3899,25 @@ mod tests {
             [None, None, Some(7), None, None, None, None, None]
         );
         assert_eq!(enemy.get_i32(-10025, &world), 3);
+    }
+
+    #[test]
+    fn misdirection_skips_despawning_bullets_without_drawing_rng() {
+        let mut world = world();
+        spawn_bullet_pattern(
+            &mut world,
+            &BulletProps {
+                count1: 1,
+                count2: 1,
+                ..Default::default()
+            },
+        );
+        world.bullets[0].height = 32.0;
+        world.bullets[0].despawn_timer = 1;
+        let rng = world.rng;
+        Enemy::default().exec_ex(4, 2, &mut world);
+        assert_eq!(world.rng, rng);
+        assert_eq!(world.bullets[0].sprite_offset, 0);
     }
 
     #[test]

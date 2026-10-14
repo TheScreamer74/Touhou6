@@ -17,7 +17,6 @@ pub struct KeyConfig {
     cursor: usize,
     timer: u16,
     last_button: u16,
-    input: MenuInput,
 }
 impl KeyConfig {
     pub fn begin(art: &mut MenuArt) -> Self {
@@ -33,19 +32,20 @@ impl KeyConfig {
         Self {
             mapping,
             cursor: 0,
-            timer: 0,
+            timer: 1,
             last_button: u16::MAX,
-            input: MenuInput::default(),
         }
     }
-    pub fn update(&mut self, input: &Input, art: &mut MenuArt) -> bool {
+    pub fn update(&mut self, input: &Input, art: &mut MenuArt, menu_input: &MenuInput) -> bool {
+        let back = self.update_inner(input, art, menu_input);
         self.timer = self.timer.saturating_add(1);
-        self.input.tick(input);
-        if self.input.pressed(input, Key::Up) {
+        back
+    }
+    fn update_inner(&mut self, input: &Input, art: &mut MenuArt, menu_input: &MenuInput) -> bool {
+        if menu_input.pressed(input, Key::Up) {
             art.sound("select00");
             self.cursor = (self.cursor + 10) % 11;
-        }
-        if self.input.pressed(input, Key::Down) {
+        } else if menu_input.pressed(input, Key::Down) {
             art.sound("select00");
             self.cursor = (self.cursor + 1) % 11;
         }
@@ -58,9 +58,11 @@ impl KeyConfig {
         } else {
             buttons.trailing_zeros() as u16
         };
-        if button != u16::MAX && button != self.last_button && self.cursor < 9 {
-            assign(&mut self.mapping, self.cursor, button);
+        if button != u16::MAX && button != self.last_button {
             art.sound("ok00");
+            if self.cursor < 9 {
+                assign(&mut self.mapping, self.cursor, button);
+            }
         }
         self.last_button = button;
         if input.pressed(Key::Shoot) || input.pressed(Key::Enter) {
@@ -75,6 +77,9 @@ impl KeyConfig {
             }
         }
         false
+    }
+    pub fn reference_navigation(&self) -> (u8, usize, u16) {
+        (5, self.cursor, self.timer)
     }
     pub fn draw(&self, art: &mut MenuArt) -> Vec<DrawCmd> {
         for idx in 34..72 {

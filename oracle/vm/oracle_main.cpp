@@ -60,13 +60,7 @@ f32 AddNormalizeAngle(f32 a, f32 b) {
     while (a < -ZUN_PI) { a += ZUN_2PI; if (i++ > 16) break; }
     return a;
 }
-void Rotate(D3DXVECTOR3* out, D3DXVECTOR3* in, f32 angle) {
-    f32 c = cosf(angle), s = sinf(angle);
-    f32 x = in->x, y = in->y;
-    out->x = x * c + y * s;
-    out->y = y * c - x * s;
-    out->z = in->z;
-}
+#include "original_rotate.inc"
 void DebugPrint2(const char*, ...) {}
 } // namespace utils
 

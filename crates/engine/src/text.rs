@@ -154,16 +154,48 @@ pub fn render_sprite_shiftjis(
     right_align: bool,
     color: [u8; 3],
 ) -> TextImage {
+    render_sprite_shiftjis_aligned(
+        bytes,
+        width,
+        height,
+        15,
+        if right_align {
+            SpriteTextAlign::Right
+        } else {
+            SpriteTextAlign::Left
+        },
+        color,
+    )
+}
+
+/// DrawStringFormat/DrawStringFormat2 align using Shift-JIS byte count.
+#[derive(Clone, Copy)]
+pub enum SpriteTextAlign {
+    Left,
+    Center,
+    Right,
+}
+
+pub fn render_sprite_shiftjis_aligned(
+    bytes: &[u8],
+    width: u32,
+    height: u32,
+    font_size: u32,
+    alignment: SpriteTextAlign,
+    color: [u8; 3],
+) -> TextImage {
     let bytes = bytes.split(|byte| *byte == 0).next().unwrap_or_default();
-    let glyphs = render_shiftjis(bytes, 30.0, color, Some([0, 0, 0]));
+    let glyphs = render_shiftjis(bytes, font_size as f32 * 2.0, color, Some([0, 0, 0]));
     let source_width = width.saturating_mul(2).saturating_sub(2).max(1);
-    let mut source = image::RgbaImage::new(source_width, 28);
-    let offset = if right_align {
-        (i64::from(width) - bytes.len() as i64 * 8) * 2
-    } else {
-        0
+    let source_height = font_size.saturating_mul(2).saturating_sub(2).max(1);
+    let mut source = image::RgbaImage::new(source_width, source_height);
+    let text_width = bytes.len() as i64 * i64::from(font_size + 1);
+    let offset = match alignment {
+        SpriteTextAlign::Left => 0,
+        SpriteTextAlign::Center => i64::from(width) - text_width / 2,
+        SpriteTextAlign::Right => i64::from(width) * 2 - text_width,
     };
-    for y in 0..glyphs.height.min(28) {
+    for y in 0..glyphs.height.min(source_height) {
         for x in 0..glyphs.width {
             let target = i64::from(x) + offset;
             if target >= 0 && target < i64::from(source_width) {

@@ -28,7 +28,10 @@ fn compose(pos: vec2f, source: vec4f, additive: bool, premultiplied: bool) -> ve
     let source_factor = select(source.a, 1.0, premultiplied);
     let dest_factor = select(1.0 - source.a, 1.0, additive);
     let rgb = clamp(source.rgb * source_factor + dest * dest_factor, vec3f(0.0), vec3f(1.0));
-    return vec4f(floor(rgb * maximum + vec3f(0.5)) / 255.0, 1.0);
+    // Authenticated 1.02h R5G6B5 captures truncate upper bits (e.g.
+    // RGB8 47,48,61 -> codes5,12,7), rather than nearest normalized levels.
+    let codes = min(floor(rgb * vec3f(32.0, 64.0, 32.0)), maximum);
+    return vec4f(codes / 255.0, 1.0);
 }
 "#;
 
@@ -44,8 +47,10 @@ struct Out { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 }
 @fragment fn fs(in: Out) -> @location(0) vec4f {
     let point = clamp(vec2i(in.uv * vec2f(640.0, 480.0)), vec2i(0), vec2i(639, 479));
-    let rgb = round(textureLoad(previous, point, 0).rgb * 255.0) / vec3f(31.0, 63.0, 31.0);
-    return vec4f(rgb, 1.0);
+    let codes = round(textureLoad(previous, point, 0).rgb * 255.0);
+    // Expand the stored bits exactly as the original framebuffer receipt.
+    let rgb8 = codes * vec3f(8.0, 4.0, 8.0) + floor(codes / vec3f(4.0, 16.0, 4.0));
+    return vec4f(rgb8 / 255.0, 1.0);
 }
 "#;
 
@@ -88,9 +93,13 @@ pub(super) fn texture(
     format: u32,
 ) -> wgpu::BindGroup {
     let levels = match format {
+        // The framebuffer color mode does not change texture formats.
+        // Original opts.force16bitColorMode is a separate advanced setting.
         2 => [31u32, 31, 31, 1],
-        3 | 4 => [31, 63, 31, 1],
-        _ => [15, 15, 15, 15],
+        3 => [31, 63, 31, 1],
+        4 => [255, 255, 255, 1],
+        5 => [15, 15, 15, 15],
+        _ => [255u32; 4],
     };
     let bytes: Vec<u8> = rgba
         .chunks_exact(4)
@@ -101,6 +110,7 @@ pub(super) fn texture(
                 }
                 pixel[channel]
                     >> match levels[channel] {
+                        255 => 0,
                         63 => 2,
                         31 => 3,
                         15 => 4,
@@ -179,10 +189,11 @@ pub(super) struct Renderer {
     color_bind: wgpu::BindGroup,
     previous_layout: wgpu::BindGroupLayout,
     depth: wgpu::TextureView,
-    sprite: [wgpu::RenderPipeline; 2],
-    background: [wgpu::RenderPipeline; 2],
+    sprite: [wgpu::RenderPipeline; 8],
+    background: [wgpu::RenderPipeline; 4],
     present_shader: wgpu::ShaderModule,
     present: HashMap<wgpu::TextureFormat, wgpu::RenderPipeline>,
+    initialized: bool,
 }
 
 impl Renderer {
@@ -208,7 +219,7 @@ impl Renderer {
         };
         let color_bind = bind(&view);
         let previous_bind = bind(&previous_view);
-        let make_pipeline = |background: bool, additive: bool| {
+        let make_pipeline = |background: bool, additive: bool, depth_index: usize| {
             let original = if background {
                 super::BG_SHADER
             } else {
@@ -251,7 +262,7 @@ impl Renderer {
                 bind_group_layouts: &bind_group_layouts,
                 push_constant_ranges: &[],
             });
-            let sprite_attributes = wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x4, 3 => Uint32];
+            let sprite_attributes = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32x4, 3 => Uint32];
             let bg_attributes = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32, 3 => Float32x4];
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("R5G6B5 draw"),
@@ -285,20 +296,24 @@ impl Renderer {
                     })],
                 }),
                 primitive: Default::default(),
-                depth_stencil: background.then_some(wgpu::DepthStencilState {
-                    format: wgpu::TextureFormat::Depth32Float,
-                    depth_write_enabled: !additive,
-                    depth_compare: wgpu::CompareFunction::LessEqual,
-                    stencil: Default::default(),
-                    bias: Default::default(),
+                depth_stencil: Some(if background {
+                    wgpu::DepthStencilState {
+                        format: wgpu::TextureFormat::Depth16Unorm,
+                        depth_write_enabled: depth_index & 1 != 0,
+                        depth_compare: wgpu::CompareFunction::LessEqual,
+                        stencil: Default::default(),
+                        bias: Default::default(),
+                    }
+                } else {
+                    super::sprite_depth_state(depth_index)
                 }),
                 multisample: Default::default(),
                 multiview: None,
                 cache: None,
             })
         };
-        let sprite = [make_pipeline(false, false), make_pipeline(false, true)];
-        let background = [make_pipeline(true, false), make_pipeline(true, true)];
+        let sprite = std::array::from_fn(|index| make_pipeline(false, index & 4 != 0, index));
+        let background = std::array::from_fn(|index| make_pipeline(true, index & 2 != 0, index));
         let present_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("R5G6B5 display"),
             source: wgpu::ShaderSource::Wgsl(PRESENT.into()),
@@ -315,6 +330,7 @@ impl Renderer {
             background,
             present_shader,
             present: HashMap::new(),
+            initialized: false,
         }
     }
 
@@ -330,18 +346,37 @@ impl Renderer {
         );
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub(super) fn encode(
+    #[allow(unused_variables)]
+    fn submit_checkpoint(engine: &Engine, encoder: &mut wgpu::CommandEncoder, passes: &mut usize) {
+        *passes += 1;
+        // Metal allocates native command buffers while encoding passes. Its
+        // finite pool can fill before a large scene reaches the final submit.
+        // Submit bounded chunks in order; color/depth and texture resources
+        // remain persistent, so limited-precision composition is unchanged.
+        // GLES records commands in a Vec and creates a fence/flush per submit.
+        // Submit its complete draw chain once, bounded by the two-frame limit.
+        #[cfg(not(target_arch = "wasm32"))]
+        if *passes == 8 {
+            let next = engine
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("R5G6B5 continuation"),
+                });
+            let previous = std::mem::replace(encoder, next);
+            engine.queue.submit([previous.finish()]);
+            *passes = 0;
+        }
+    }
+
+    pub(super) fn draw(
         &mut self,
         engine: &Engine,
         encoder: &mut wgpu::CommandEncoder,
-        target: &wgpu::TextureView,
-        format: wgpu::TextureFormat,
-        size: (u32, u32),
         cmds: &[DrawCmd],
         textures: &[&Texture],
         bg: Option<&BgScene>,
     ) {
+        let mut passes = 0;
         let clear = bg
             .map(|scene| scene.fog_color)
             .unwrap_or([0.0, 0.0, 0.0, 1.0]);
@@ -352,12 +387,16 @@ impl Renderer {
                     view: &self.view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: f64::from((clear[0] * 31.0 + 0.5).floor() / 255.0),
-                            g: f64::from((clear[1] * 63.0 + 0.5).floor() / 255.0),
-                            b: f64::from((clear[2] * 31.0 + 0.5).floor() / 255.0),
-                            a: 1.0,
-                        }),
+                        load: if self.initialized {
+                            wgpu::LoadOp::Load
+                        } else {
+                            wgpu::LoadOp::Clear(wgpu::Color {
+                                r: f64::from((clear[0] * 32.0).floor().min(31.0) / 255.0),
+                                g: f64::from((clear[1] * 64.0).floor().min(63.0) / 255.0),
+                                b: f64::from((clear[2] * 32.0).floor().min(31.0) / 255.0),
+                                a: 1.0,
+                            })
+                        },
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -374,18 +413,33 @@ impl Renderer {
             });
         }
         if let Some(scene) = bg {
-            for additive in [false, true] {
+            for range in scene.ranges() {
+                let additive = range.additive;
+                // Slice BEFORE culling: retained vertices/batches belong to
+                // this source draw range and cannot cross a blend transition.
                 let verts = if additive {
-                    &scene.verts_add
+                    &scene.verts_add[range.start as usize..range.end as usize]
                 } else {
-                    &scene.verts
+                    &scene.verts[range.start as usize..range.end as usize]
                 };
+                // GLES needs no framebuffer copy for geometry wholly clipped
+                // by the same homogeneous plane. Keep intersecting quads in
+                // original order, including those crossing w=0 or the near
+                // plane; projected screen rectangles cannot classify them.
+                #[cfg(target_arch = "wasm32")]
+                let visible = visible_background_quads(
+                    verts,
+                    scene.mvp,
+                    [1.0 / scene.arcade[2], -1.0 / scene.arcade[3]],
+                );
+                #[cfg(target_arch = "wasm32")]
+                let verts = visible.as_slice();
                 if verts.is_empty() {
                     continue;
                 }
                 let vbuf = engine.device.create_buffer(&wgpu::BufferDescriptor {
                     label: None,
-                    size: std::mem::size_of_val(verts.as_slice()) as u64,
+                    size: std::mem::size_of_val(verts) as u64,
                     usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
                 });
@@ -396,6 +450,7 @@ impl Renderer {
                     mvp: scene.mvp,
                     fog_color: scene.fog_color,
                     fog_params: [scene.fog_near, scene.fog_far, f32::from(additive), 0.0],
+                    pixel_offset: [1.0 / scene.arcade[2], -1.0 / scene.arcade[3], 0.0, 0.0],
                 };
                 let ubuf = engine.device.create_buffer(&wgpu::BufferDescriptor {
                     label: None,
@@ -465,8 +520,11 @@ impl Renderer {
                         occlusion_query_set: None,
                     });
                     let [x, y, width, height] = scene.arcade;
-                    pass.set_viewport(x, y, width, height, 0.0, 1.0);
-                    pass.set_pipeline(&self.background[usize::from(additive)]);
+                    pass.set_viewport(x, y, width, height, 0.5, 1.0);
+                    pass.set_pipeline(
+                        &self.background
+                            [usize::from(additive) * 2 + usize::from(range.write_depth)],
+                    );
                     pass.set_bind_group(0, &textures[scene.tex].bind_group_16bit, &[]);
                     pass.set_bind_group(1, &uniform, &[]);
                     pass.set_bind_group(2, &self.previous_bind, &[]);
@@ -475,6 +533,8 @@ impl Renderer {
                         start as u32 * 6..(end as u32 * 6).min(verts.len() as u32),
                         0..1,
                     );
+                    drop(pass);
+                    Self::submit_checkpoint(engine, encoder, &mut passes);
                 }
             }
         }
@@ -501,18 +561,44 @@ impl Renderer {
                         store: wgpu::StoreOp::Store,
                     },
                 })],
-                depth_stencil_attachment: None,
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
             pass.set_vertex_buffer(0, vbuf.slice(..));
             pass.set_bind_group(1, &self.previous_bind, &[]);
             for (index, cmd) in cmds.iter().enumerate().take(end).skip(start) {
-                pass.set_pipeline(&self.sprite[usize::from(cmd.additive)]);
+                let Some([x, y, width, height]) =
+                    super::sprite_scissor(cmd.clip, (SCREEN_W, SCREEN_H))
+                else {
+                    continue;
+                };
+                pass.set_scissor_rect(x, y, width, height);
+                pass.set_pipeline(&self.sprite[cmd.pipeline_index()]);
                 pass.set_bind_group(0, &textures[cmd.tex].bind_group_16bit, &[]);
                 pass.draw(index as u32 * 6..index as u32 * 6 + 6, 0..1);
             }
+            drop(pass);
+            Self::submit_checkpoint(engine, encoder, &mut passes);
         }
+        self.initialized = true;
+    }
+
+    pub(super) fn present(
+        &mut self,
+        engine: &Engine,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        format: wgpu::TextureFormat,
+        size: (u32, u32),
+    ) {
         let pipeline = self.present.entry(format).or_insert_with(|| {
             let layout = engine
                 .device
@@ -571,6 +657,61 @@ impl Renderer {
     }
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
+fn visible_background_quads(
+    vertices: &[Vertex3],
+    mvp: [[f32; 4]; 4],
+    pixel_offset: [f32; 2],
+) -> Vec<Vertex3> {
+    let matrix = glam::Mat4::from_cols_array_2d(&mvp);
+    let absolute_matrix = glam::Mat4::from_cols_array_2d(&mvp.map(|col| col.map(f32::abs)));
+    let mut visible = Vec::with_capacity(vertices.len());
+    for quad in vertices.chunks(6) {
+        let mut all_outside = [true; 6];
+        let mut finite = true;
+        for vertex in quad {
+            let point = glam::Vec4::new(vertex.pos[0], vertex.pos[1], vertex.pos[2], 1.0);
+            let mut clip = matrix * point;
+            // Match BG_SHADER's D3D8 pixel-center correction before clipping.
+            clip.x += pixel_offset[0] * clip.w;
+            clip.y += pixel_offset[1] * clip.w;
+            if !clip.is_finite() {
+                finite = false;
+                break;
+            }
+            let distances = [
+                clip.x + clip.w,
+                clip.w - clip.x,
+                clip.y + clip.w,
+                clip.w - clip.y,
+                clip.z,
+                clip.w - clip.z,
+            ];
+            // CPU SIMD and shader dot products may round differently. Keep
+            // near-plane/far-plane cancellation within their error envelope;
+            // this guard is in homogeneous coordinates, never screen pixels.
+            let magnitude: f32 = (absolute_matrix * point.abs()).to_array().into_iter().sum();
+            let roundoff = 16.0
+                * f32::EPSILON
+                * magnitude
+                * (1.0 + pixel_offset[0].abs().max(pixel_offset[1].abs()));
+            if !roundoff.is_finite() || distances.iter().any(|distance| !distance.is_finite()) {
+                finite = false;
+                break;
+            }
+            for (outside, distance) in all_outside.iter_mut().zip(distances) {
+                *outside &= distance < -roundoff;
+            }
+        }
+        // An incomplete final primitive group and non-finite inputs take the
+        // original GPU path. Touching any plane also remains visible.
+        if quad.len() != 6 || !finite || !all_outside.contains(&true) {
+            visible.extend_from_slice(quad);
+        }
+    }
+    visible
+}
+
 fn rectangle(points: impl Iterator<Item = [f32; 2]>) -> [f32; 4] {
     points.fold(
         [
@@ -613,6 +754,156 @@ fn batches(bounds: &[[f32; 4]]) -> Vec<(usize, usize)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn clipping_quad(bounds: [f32; 4], z: [f32; 2], color: [f32; 4]) -> Vec<Vertex3> {
+        let [x0, y0, x1, y1] = bounds;
+        [
+            [x0, y0, z[0]],
+            [x1, y0, z[1]],
+            [x1, y1, z[1]],
+            [x0, y0, z[0]],
+            [x1, y1, z[1]],
+            [x0, y1, z[0]],
+        ]
+        .map(|pos| Vertex3 {
+            pos,
+            uv: [0.5; 2],
+            depth: 1.0,
+            color,
+        })
+        .to_vec()
+    }
+
+    #[test]
+    fn homogeneous_culling_keeps_intersections_boundaries_and_nonfinite_inputs() {
+        let identity = glam::Mat4::IDENTITY.to_cols_array_2d();
+        let offset = [1.0 / 640.0, -1.0 / 480.0];
+        let middle = [-0.5, -0.5, 0.5, 0.5];
+        for (bounds, z) in [
+            ([-3.0, -0.5, -2.0, 0.5], [0.5; 2]),
+            ([2.0, -0.5, 3.0, 0.5], [0.5; 2]),
+            ([-0.5, -3.0, 0.5, -2.0], [0.5; 2]),
+            ([-0.5, 2.0, 0.5, 3.0], [0.5; 2]),
+            (middle, [-0.5; 2]),
+            (middle, [1.5; 2]),
+        ] {
+            let quad = clipping_quad(bounds, z, [1.0; 4]);
+            assert!(visible_background_quads(&quad, identity, offset).is_empty());
+        }
+        for (bounds, z) in [
+            ([-2.0, -0.5, 0.0, 0.5], [0.5; 2]),
+            ([-3.0, -3.0, 3.0, 3.0], [0.5; 2]),
+            (middle, [-0.5, 0.5]),
+            (middle, [0.5, 1.5]),
+            // Correcting the half-pixel offset puts this quad inside.
+            ([-2.0, -0.5, -1.0005, 0.5], [0.5; 2]),
+            // Exactly touching the corrected plane is never rejected.
+            ([-2.0, -0.5, -1.0 - offset[0], 0.5], [0.5; 2]),
+            (middle, [-f32::EPSILON; 2]),
+        ] {
+            let quad = clipping_quad(bounds, z, [1.0; 4]);
+            assert_eq!(
+                visible_background_quads(&quad, identity, offset).len(),
+                quad.len()
+            );
+        }
+        let perspective = glam::Mat4::perspective_lh(1.0, 1.0, 1.0, 10.0).to_cols_array_2d();
+        for z in [[0.5, 2.0], [-2.0, 2.0]] {
+            let quad = clipping_quad(middle, z, [1.0; 4]);
+            assert_eq!(
+                visible_background_quads(&quad, perspective, offset).len(),
+                6
+            );
+        }
+        for special in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let mut quad = clipping_quad(middle, [0.5; 2], [1.0; 4]);
+            quad[0].pos[0] = special;
+            assert_eq!(visible_background_quads(&quad, identity, offset).len(), 6);
+        }
+        let partial = clipping_quad([-3.0, -0.5, -2.0, 0.5], [0.5; 2], [1.0; 4]);
+        assert_eq!(
+            visible_background_quads(&partial[..3], identity, offset).len(),
+            3
+        );
+    }
+
+    #[test]
+    #[ignore = "requires GPU adapter"]
+    fn homogeneous_culling_preserves_gpu_pixels_in_both_modes() {
+        let engine = Engine::new();
+        let texture = engine.create_texture(&[255, 255, 255, 255], 1, 1);
+        let offset = [1.0 / 640.0, -1.0 / 480.0];
+        for perspective in [false, true] {
+            let mvp = if perspective {
+                glam::Mat4::perspective_lh(1.0, 1.0, 1.0, 10.0)
+            } else {
+                glam::Mat4::IDENTITY
+            }
+            .to_cols_array_2d();
+            let normal_z = if perspective { 2.0 } else { 0.5 };
+            let near = if perspective { 0.5 } else { -0.5 };
+            let far = if perspective { 12.0 } else { 1.5 };
+            let mut vertices = Vec::new();
+            for bounds in [
+                [-30.0, -0.5, -20.0, 0.5],
+                [20.0, -0.5, 30.0, 0.5],
+                [-0.5, -30.0, 0.5, -20.0],
+                [-0.5, 20.0, 0.5, 30.0],
+            ] {
+                vertices.extend(clipping_quad(bounds, [normal_z; 2], [0.9, 0.2, 0.7, 0.75]));
+            }
+            vertices.extend(clipping_quad([-0.5, -0.5, 0.5, 0.5], [near; 2], [1.0; 4]));
+            vertices.extend(clipping_quad([-0.5, -0.5, 0.5, 0.5], [far; 2], [1.0; 4]));
+            for (bounds, z, color) in [
+                ([-0.6, -0.6, 0.6, 0.6], [normal_z; 2], [0.4, 0.3, 0.8, 0.7]),
+                ([-3.0, -0.3, 3.0, 0.3], [normal_z; 2], [0.1, 0.8, 0.3, 0.4]),
+                (
+                    [-0.4, -0.7, 0.4, 0.7],
+                    [near, normal_z],
+                    [0.9, 0.2, 0.3, 0.5],
+                ),
+                (
+                    [-0.7, -0.4, 0.7, 0.4],
+                    [normal_z, far],
+                    [0.3, 0.6, 0.9, 0.6],
+                ),
+            ] {
+                vertices.extend(clipping_quad(bounds, z, color));
+            }
+            if perspective {
+                vertices.extend(clipping_quad(
+                    [-0.8, -0.8, 0.8, 0.8],
+                    [-2.0, 2.0],
+                    [0.7, 0.4, 0.1, 0.5],
+                ));
+            }
+            let visible = visible_background_quads(&vertices, mvp, offset);
+            assert!(visible.len() <= vertices.len() - 6 * 6);
+            let scene = |verts: Vec<Vertex3>| BgScene {
+                mvp,
+                fog_color: [0.03, 0.07, 0.11, 1.0],
+                fog_near: 0.0,
+                fog_far: 10.0,
+                verts: verts.clone(),
+                verts_add: verts,
+                draw_ranges: Vec::new(),
+                tex: 0,
+                arcade: [0.0, 0.0, 640.0, 480.0],
+            };
+            let full = scene(vertices);
+            let filtered = scene(visible);
+            for limited in [false, true] {
+                super::super::set_color_16bit(limited);
+                let expected = engine.render_to_image(&[], &[&texture], Some(&full));
+                let actual = engine.render_to_image(&[], &[&texture], Some(&filtered));
+                assert_eq!(
+                    actual, expected,
+                    "perspective={perspective} RGB565={limited}"
+                );
+            }
+        }
+        super::super::set_color_16bit(false);
+    }
     #[test]
     fn batches_never_combine_overlapping_quads() {
         assert_eq!(
@@ -626,7 +917,7 @@ mod tests {
     }
     #[test]
     #[ignore = "requires GPU adapter"]
-    fn actual_gpu_rounds_every_blend_and_uses_original_texture_precision() {
+    fn actual_gpu_quantizes_every_blend_and_uses_original_texture_precision() {
         super::super::set_color_16bit(true);
         let engine = Engine::new();
         let texture = engine.create_texture_with_format(&[255, 0, 0, 255], 1, 1, 1);
@@ -638,20 +929,25 @@ mod tests {
             rot: 0.0,
             additive: false,
             color_add: false,
+            depth: None,
+            clip: None,
         };
         let pixels = engine.render_to_image(&[cmd, cmd], &[&texture], None);
-        assert_eq!(&pixels[..4], &[197, 0, 0, 255]); // 16/31 after first draw; 24/31 after second.
+        assert_eq!(&pixels[..4], &[198, 0, 0, 255]); // codes16 after first draw;24 after second.
         cmd.additive = true;
         let pixels = engine.render_to_image(&[cmd, cmd], &[&texture], None);
         assert_eq!(&pixels[..4], &[255, 0, 0, 255]);
-        let texture = engine.create_texture_with_format(&[15, 31, 63, 255], 1, 1, 1);
+        let texture = engine.create_texture_with_format(&[15, 31, 63, 255], 1, 1, 5);
         cmd.tint[3] = 1.0;
         cmd.additive = false;
         let pixels = engine.render_to_image(&[cmd], &[&texture], None);
         assert_eq!(&pixels[..4], &[0, 16, 49, 255]); // A4R4G4B4 source codes 0,1,3.
-        let texture = engine.create_texture_with_format(&[15, 31, 63, 255], 1, 1, 4);
+        let texture = engine.create_texture_with_format(&[15, 31, 63, 255], 1, 1, 3);
         let pixels = engine.render_to_image(&[cmd], &[&texture], None);
-        assert_eq!(&pixels[..4], &[8, 28, 58, 255]); // R5G6B5 source codes 1,7,7.
+        assert_eq!(&pixels[..4], &[8, 28, 57, 255]); // R5G6B5 source codes 1,7,7.
+        let texture = engine.create_texture_with_format(&[15, 31, 63, 255], 1, 1, 1);
+        let pixels = engine.render_to_image(&[cmd], &[&texture], None);
+        assert_eq!(&pixels[..4], &[8, 28, 57, 255]); // A8R8G8B8 stays full precision, framebuffer truncates.
         super::super::set_color_16bit(false);
     }
 
@@ -668,13 +964,95 @@ mod tests {
             rot: 0.0,
             additive: false,
             color_add: true,
+            depth: None,
+            clip: None,
         };
         super::super::set_color_16bit(false);
         let pixels = engine.render_to_image(&[cmd], &[&texture], None);
         assert_eq!(&pixels[..4], &[32, 32, 64, 255]);
         super::super::set_color_16bit(true);
         let pixels = engine.render_to_image(&[cmd], &[&texture], None);
-        assert_eq!(&pixels[..4], &[33, 36, 66, 255]);
+        assert_eq!(&pixels[..4], &[33, 32, 66, 255]);
+        super::super::set_color_16bit(false);
+    }
+
+    #[test]
+    #[ignore = "requires GPU adapter"]
+    fn sprite_clip_changes_reset_and_empty_clips_preserve_depth_in_both_modes() {
+        use super::super::{DepthState, DepthTest};
+        let engine = Engine::new();
+        let texture = engine.create_texture(&[255, 255, 255, 255], 1, 1);
+        let quad = |dst, tint, clip, z| DrawCmd {
+            tex: 0,
+            dst,
+            src: [0.0, 0.0, 1.0, 1.0],
+            tint,
+            rot: 0.0,
+            additive: false,
+            color_add: false,
+            depth: Some(DepthState {
+                z,
+                test: DepthTest::LessEqual,
+                write: true,
+            }),
+            clip,
+        };
+        let full = [0.0, 0.0, 640.0, 480.0];
+        let commands = [
+            quad(full, [1.0, 0.0, 0.0, 1.0], Some([10, 10, 40, 30]), 0.2),
+            // Same texture and pipeline: changing only the clip must split a batch.
+            quad(full, [0.0, 0.0, 1.0, 1.0], Some([50, 10, 40, 30]), 0.3),
+            quad(full, [1.0; 4], Some([0, 0, 0, 480]), 0.0),
+            quad(full, [1.0; 4], Some([700, 0, 40, 480]), 0.0),
+            // None must restore the full scissor after the preceding clipped draws.
+            quad([0.0, 50.0, 100.0, 20.0], [0.0, 1.0, 0.0, 1.0], None, 0.4),
+            // A clipped draw must still retain depth written by its predecessor.
+            quad(full, [1.0, 1.0, 0.0, 1.0], Some([20, 20, 10, 10]), 0.8),
+            quad(full, [1.0, 0.0, 1.0, 1.0], Some([80, 20, 30, 10]), 0.1),
+        ];
+        for limited in [false, true] {
+            super::super::set_color_16bit(limited);
+            let pixels = engine.render_to_image(&commands, &[&texture], None);
+            for (x, y, expected) in [
+                (15, 15, [255, 0, 0, 255]),
+                (25, 25, [255, 0, 0, 255]),
+                (55, 15, [0, 0, 255, 255]),
+                (95, 25, [255, 0, 255, 255]),
+                (5, 55, [0, 255, 0, 255]),
+                (9, 15, [0, 0, 0, 255]),
+                (110, 25, [0, 0, 0, 255]),
+                (95, 45, [0, 0, 0, 255]),
+            ] {
+                let offset = (y * SCREEN_W + x) as usize * 4;
+                assert_eq!(
+                    &pixels[offset..offset + 4],
+                    &expected,
+                    "RGB565={limited}, pixel=({x},{y})"
+                );
+            }
+        }
+        super::super::set_color_16bit(false);
+    }
+
+    #[test]
+    #[ignore = "requires GPU adapter; regression for Metal command-buffer pool exhaustion"]
+    fn many_overlapping_passes_finish_and_preserve_composition() {
+        super::super::set_color_16bit(true);
+        let engine = Engine::new();
+        let texture = engine.create_texture_with_format(&[255, 0, 0, 255], 1, 1, 1);
+        let cmd = DrawCmd {
+            tex: 0,
+            dst: [0.0, 0.0, 640.0, 480.0],
+            src: [0.0, 0.0, 1.0, 1.0],
+            tint: [1.0, 1.0, 1.0, 0.5],
+            rot: 0.0,
+            additive: false,
+            color_add: false,
+            depth: None,
+            clip: None,
+        };
+        let pixels = engine.render_to_image(&vec![cmd; 256], &[&texture], None);
+        assert_eq!(&pixels[..4], &[255, 0, 0, 255]);
         super::super::set_color_16bit(false);
     }
 
@@ -708,6 +1086,7 @@ mod tests {
             fog_far: 1.0,
             verts: quad.clone(),
             verts_add: quad.clone(),
+            draw_ranges: Vec::new(),
             tex: 0,
             arcade: [0.0, 0.0, 640.0, 480.0],
         };
@@ -716,7 +1095,7 @@ mod tests {
         scene.verts_add.clear();
         scene.verts.extend(quad);
         let pixels = engine.render_to_image(&[], &[&texture], Some(&scene));
-        assert_eq!(&pixels[..4], &[197, 0, 0, 255]);
+        assert_eq!(&pixels[..4], &[198, 0, 0, 255]);
         super::super::set_color_16bit(false);
     }
 }

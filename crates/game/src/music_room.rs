@@ -27,6 +27,7 @@ pub enum MusicAction {
     None,
     Back,
     Play(String),
+    PlayAndBack(String),
 }
 impl MusicRoom {
     pub fn load(engine: &Engine, files: &GameFiles, textures: &mut Vec<Texture>) -> Self {
@@ -99,12 +100,14 @@ impl MusicRoom {
         if self.timer < 8 {
             return MusicAction::None;
         }
-        if input.pressed(Key::Bomb) || input.pressed(Key::Pause) {
-            return MusicAction::Back;
-        }
+        let back = input.pressed(Key::Bomb) || input.pressed(Key::Pause);
         let n = self.tracks.len();
         if n == 0 {
-            return MusicAction::None;
+            return if back {
+                MusicAction::Back
+            } else {
+                MusicAction::None
+            };
         }
         if input.pressed(Key::Up) {
             self.cursor = (self.cursor + n - 1) % n;
@@ -120,9 +123,18 @@ impl MusicRoom {
         }
         if input.pressed(Key::Shoot) || input.pressed(Key::Enter) {
             self.selected = self.cursor;
-            return MusicAction::Play(self.tracks[self.selected].path.clone());
+            let path = self.tracks[self.selected].path.clone();
+            return if back {
+                MusicAction::PlayAndBack(path)
+            } else {
+                MusicAction::Play(path)
+            };
         }
-        MusicAction::None
+        if back {
+            MusicAction::Back
+        } else {
+            MusicAction::None
+        }
     }
     pub fn draw(&self) -> Vec<DrawCmd> {
         let mut cmds = self.art.draw(|_| Some(([0.0; 2], [1.0; 4])));
@@ -177,6 +189,7 @@ impl MusicRoom {
     }
     fn text(cmds: &mut Vec<DrawCmd>, text: &Text, pos: [f32; 2], tint: [f32; 4]) {
         cmds.push(DrawCmd {
+            clip: None,
             tex: text.tex,
             dst: [pos[0], pos[1], text.w, text.h],
             src: [0.0, 0.0, 1.0, 1.0],
@@ -184,33 +197,39 @@ impl MusicRoom {
             rot: 0.0,
             additive: false,
             color_add: false,
+            depth: None,
         });
     }
 }
 /// The source leaves the title's CR/LF in place, producing an empty first comment line.
 fn parse_comments(bytes: &[u8]) -> Vec<(String, Vec<u8>, Vec<Vec<u8>>)> {
     let mut out = Vec::new();
-    for section in bytes.split(|&b| b == b'@').skip(1) {
-        let mut at = 0;
+    let mut at = 0;
+    while at < bytes.len() {
+        if bytes[at] != b'@' {
+            at += 1;
+            continue;
+        }
+        at += 1;
         let line = |at: &mut usize| {
             let start = *at;
-            while *at < section.len() && !b"\r\n".contains(&section[*at]) {
+            while *at < bytes.len() && !b"\r\n".contains(&bytes[*at]) {
                 *at += 1;
             }
-            section[start..*at].to_vec()
+            bytes[start..*at].to_vec()
         };
         let path = line(&mut at);
-        while at < section.len() && b"\r\n".contains(&section[at]) {
+        while at < bytes.len() && b"\r\n".contains(&bytes[at]) {
             at += 1;
         }
         let title = line(&mut at);
         let mut desc = Vec::new();
         for _ in 0..8 {
-            if at >= section.len() {
+            if at >= bytes.len() || bytes[at] == b'@' {
                 break;
             }
             desc.push(line(&mut at));
-            while at < section.len() && b"\r\n".contains(&section[at]) {
+            while at < bytes.len() && b"\r\n".contains(&bytes[at]) {
                 at += 1;
             }
         }
@@ -232,5 +251,15 @@ mod tests {
         assert_eq!(parsed[0].1, b"Title");
         assert_eq!(parsed[0].2[0], b"");
         assert_eq!(parsed[0].2[1], b"Description");
+    }
+
+    #[test]
+    fn shift_jis_at_byte_inside_a_comment_is_not_a_track_header() {
+        let parsed = parse_comments(
+            b"@bgm/th06_01.mid\r\nTitle\r\n\x81\x40Comment\r\n@bgm/th06_02.mid\r\nSecond\r\nDetails",
+        );
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[1].0, "bgm/th06_02.mid");
+        assert_eq!(parsed[0].2[1], b"\x81\x40Comment");
     }
 }

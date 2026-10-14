@@ -31,6 +31,7 @@ pub enum ResultAction {
     Back,
     SaveScore { name: String },
     SaveReplay { slot: usize, name: String },
+    UnlockAll,
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum State {
@@ -90,6 +91,7 @@ pub struct ResultScreen {
     character_names: [TextSprite; 4],
     spell_names: Vec<Option<TextSprite>>,
     unknown_spell: TextSprite,
+    unlock_code: UnlockCode,
 }
 const KEYBOARD:&[u8;96]=b"ABCDEFGHIJKLMNOPQRSTUVWXYZ.,:;\xa5@abcdefghijklmnopqrstuvwxyz+-/*=%0123456789(){}[]<>#!?'\"$      --";
 const SHORT_CHARACTERS: [&str; 4] = ["ReimuA ", "ReimuB ", "MarisaA", "MarisaB"];
@@ -100,6 +102,45 @@ const RIGHT_DIFFICULTY: [&str; 5] = [
     "  Lunatic",
     "    Extra",
 ];
+
+#[derive(Default)]
+struct UnlockCode {
+    step: u8,
+    previous: u16,
+}
+impl UnlockCode {
+    fn update(&mut self, input: &Input, active: bool) -> bool {
+        let buttons = input.buttons();
+        let changed_mask = |mask| buttons & mask != 0 && buttons & mask != self.previous & mask;
+        let mut unlocked = false;
+        if !active {
+            self.previous = buttons;
+            return false;
+        }
+        if !input.held(Key::Focus) && !input.held(Key::Skip) {
+            self.step = 0;
+        } else if self.step == 10 {
+            self.step = 0;
+            unlocked = true;
+        } else {
+            let expected = if self.step < 5 {
+                1 << 11
+            } else if self.step < 7 {
+                1 << 9
+            } else {
+                1 << 10
+            };
+            if changed_mask(expected) {
+                self.step += 1;
+            } else if changed_mask(1 | 2 | 8 | 512 | 1024 | 4096) {
+                self.step = 0;
+            }
+        }
+        self.previous = buttons;
+        unlocked
+    }
+}
+
 impl ResultScreen {
     pub fn new(
         engine: &Engine,
@@ -154,6 +195,7 @@ impl ResultScreen {
             character_names,
             spell_names: vec![],
             unknown_spell,
+            unlock_code: UnlockCode::default(),
         }
     }
     /// Pre-bake the 64 original spell names from ECL while the GPU texture
@@ -176,6 +218,7 @@ impl ResultScreen {
         }
     }
     pub fn begin_browse(&mut self, progress: &ScoreData) {
+        self.unlock_code = UnlockCode::default();
         self.progress = progress.clone();
         self.slots_ready = false;
         self.stats = None;
@@ -255,6 +298,17 @@ impl ResultScreen {
         let back = input.pressed(Key::Bomb);
         let menu = input.pressed(Key::Pause);
         let mut action = ResultAction::None;
+        // Original accepts the code only on the Extra score table, including
+        // its entrance animation, before applying normal table navigation.
+        if self
+            .unlock_code
+            .update(input, self.state == State::Scores && self.difficulty == 4)
+        {
+            self.progress.stages_cleared = [[99; 5]; 4];
+            self.progress.stages_cleared_without_continues = [[99; 5]; 4];
+            self.art.sound("extend");
+            action = ResultAction::UnlockAll;
+        }
         if self.timer == 20 {
             if self.state == State::Scores {
                 self.character = self.cursor;
@@ -327,7 +381,7 @@ impl ResultScreen {
                         self.type_character();
                     }
                 }
-                if self.input.pressed(input, Key::Bomb) {
+                if self.input.pressed(input, Key::Bomb) || self.input.pressed(input, Key::Pause) {
                     self.erase_character();
                 }
                 if menu && self.state == State::ScoreName {
@@ -426,7 +480,7 @@ impl ResultScreen {
                         self.type_character();
                     }
                 }
-                if self.input.pressed(input, Key::Bomb) {
+                if self.input.pressed(input, Key::Bomb) || self.input.pressed(input, Key::Pause) {
                     self.erase_character();
                 }
                 if menu {
@@ -464,6 +518,24 @@ impl ResultScreen {
     pub fn take_sounds(&mut self) -> Vec<&'static str> {
         self.art.take_sounds()
     }
+    pub fn reference_state(&self) -> (u8, u16, usize, u8) {
+        let state = match self.state {
+            State::Init => 0,
+            State::Menu => 1,
+            State::Leaving => 2,
+            State::Scores => 3 + self.difficulty as u8,
+            State::Spells => 8,
+            State::ScoreName => 9,
+            State::SaveQuestion => 10,
+            State::CannotSave => 11,
+            State::ChooseSlot => 12,
+            State::ReplayName => 13,
+            State::Overwrite => 14,
+            State::Stats => 15,
+            State::StatsLeaving => 16,
+        };
+        (state, self.timer, self.cursor, self.unlock_code.step)
+    }
     fn type_character(&mut self) {
         self.art.sound("ok00");
         self.name[self.name_cursor.min(7)] = if self.keyboard == 94 {
@@ -473,6 +545,7 @@ impl ResultScreen {
         };
         if self.name_cursor < 8 {
             self.name_cursor += 1;
+            self.cursor = self.name_cursor;
             if self.name_cursor == 8 {
                 self.keyboard = 95;
             }
@@ -483,6 +556,7 @@ impl ResultScreen {
         let at = self.name_cursor.min(7);
         if self.name_cursor > 0 {
             self.name_cursor -= 1;
+            self.cursor = self.name_cursor;
             self.name[at] = b' ';
         }
     }
@@ -873,6 +947,7 @@ fn bake(engine: &Engine, textures: &mut Vec<Texture>, text: &str) -> TextSprite 
 }
 fn draw_text_sprite(cmds: &mut Vec<DrawCmd>, sprite: &TextSprite, pos: [f32; 2], alpha: f32) {
     cmds.push(DrawCmd {
+        clip: None,
         tex: sprite.tex,
         dst: [pos[0], pos[1], sprite.w, sprite.h],
         src: [0.0, 0.0, 1.0, 1.0],
@@ -880,6 +955,7 @@ fn draw_text_sprite(cmds: &mut Vec<DrawCmd>, sprite: &TextSprite, pos: [f32; 2],
         rot: 0.0,
         additive: false,
         color_add: false,
+        depth: None,
     });
 }
 fn confirm(input: &Input) -> bool {
@@ -963,6 +1039,48 @@ fn keyboard_next(mut cursor: usize, delta: i32) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn extra_unlock_requires_modifier_sequence_and_one_later_tick() {
+        let mut code = UnlockCode::default();
+        for key in [
+            Key::Home,
+            Key::Home,
+            Key::Home,
+            Key::Home,
+            Key::Home,
+            Key::Quit,
+            Key::Quit,
+            Key::S,
+            Key::S,
+            Key::S,
+        ] {
+            assert!(!code.update(&Input::synthetic(&[Key::Focus, key], &[key]), true));
+            if code.step != 10 {
+                assert!(!code.update(&Input::synthetic(&[Key::Focus], &[]), true));
+            }
+        }
+        assert_eq!(code.step, 10);
+        assert!(code.update(&Input::synthetic(&[Key::Focus], &[]), true));
+        assert_eq!(code.step, 0);
+        assert!(!code.update(&Input::synthetic(&[Key::Home], &[Key::Home]), true));
+        assert_eq!(code.step, 0);
+        code.update(
+            &Input::synthetic(&[Key::Skip, Key::Home], &[Key::Home]),
+            false,
+        );
+        assert!(!code.update(&Input::synthetic(&[Key::Skip, Key::Home], &[]), true));
+        assert_eq!(code.step, 0);
+        code.update(&Input::synthetic(&[Key::Skip], &[]), true);
+        code.update(
+            &Input::synthetic(&[Key::Skip, Key::Home], &[Key::Home]),
+            true,
+        );
+        code.update(
+            &Input::synthetic(&[Key::Skip, Key::Shoot], &[Key::Shoot]),
+            true,
+        );
+        assert_eq!(code.step, 0);
+    }
     #[test]
     fn keyboard_routes_skip_spaces_and_preserve_row() {
         assert_eq!(keyboard_next(0, -1), 15);

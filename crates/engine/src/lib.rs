@@ -4,6 +4,7 @@
 pub mod audio;
 mod color565;
 pub mod controls;
+mod framebuffer;
 pub mod midi;
 pub mod text;
 pub use controls::{controller_mapping, set_controller_mapping};
@@ -22,6 +23,21 @@ use winit::window::{Window, WindowId};
 
 pub const SCREEN_W: u32 = 640;
 pub const SCREEN_H: u32 = 480;
+thread_local! {
+    static PRESENTED_FRAMES: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
+    static PRESENTATION_EPOCH: Instant = Instant::now();
+}
+/// Live original draw-chain clock, including the frame being assembled. Extra
+/// surface blits on a high-refresh display do not count as new game frames.
+/// Headless simulation has no presentation clock unless its caller supplies one.
+pub fn presentation_clock() -> Option<(u32, u64)> {
+    PRESENTED_FRAMES.with(|frames| {
+        frames.get().map(|frames| {
+            let milliseconds = PRESENTATION_EPOCH.with(|epoch| epoch.elapsed().as_millis() as u32);
+            (milliseconds, frames.wrapping_add(1))
+        })
+    })
+}
 thread_local! {static SUSPENDED:std::cell::Cell<bool>=const {std::cell::Cell::new(false)};}
 /// Freeze simulation while a browser dialog or background tab owns input.
 pub fn set_suspended(value: bool) {
@@ -53,6 +69,27 @@ fn display_viewport(size: (u32, u32)) -> [f32; 4] {
     ]
 }
 
+/// Intersect a logical screen clip with the display viewport, then scale it
+/// into the render target. An empty intersection never reaches the GPU.
+fn sprite_scissor(clip: Option<[u32; 4]>, target_size: (u32, u32)) -> Option<[u32; 4]> {
+    let [left, top, width, height] = clip.unwrap_or([0, 0, SCREEN_W, SCREEN_H]);
+    let right = left.saturating_add(width).min(SCREEN_W);
+    let bottom = top.saturating_add(height).min(SCREEN_H);
+    let left = left.min(SCREEN_W);
+    let top = top.min(SCREEN_H);
+    if left >= right || top >= bottom || target_size.0 == 0 || target_size.1 == 0 {
+        return None;
+    }
+    let [x, y, viewport_width, viewport_height] = display_viewport(target_size);
+    let sx = viewport_width / SCREEN_W as f32;
+    let sy = viewport_height / SCREEN_H as f32;
+    let x0 = ((x + left as f32 * sx).floor() as u32).min(target_size.0);
+    let y0 = ((y + top as f32 * sy).floor() as u32).min(target_size.1);
+    let x1 = ((x + right as f32 * sx).ceil() as u32).min(target_size.0);
+    let y1 = ((y + bottom as f32 * sy).ceil() as u32).min(target_size.1);
+    (x0 < x1 && y0 < y1).then_some([x0, y0, x1 - x0, y1 - y0])
+}
+
 const SHADER: &str = r#"
 struct VOut {
     @builtin(position) pos: vec4f,
@@ -62,9 +99,9 @@ struct VOut {
 };
 
 @vertex
-fn vs(@location(0) pos: vec2f, @location(1) uv: vec2f, @location(2) tint: vec4f, @location(3) color_add: u32) -> VOut {
+fn vs(@location(0) pos: vec3f, @location(1) uv: vec2f, @location(2) tint: vec4f, @location(3) color_add: u32) -> VOut {
     var out: VOut;
-    out.pos = vec4f(pos, 0.0, 1.0);
+    out.pos = vec4f(pos, 1.0);
     out.uv = uv;
     out.tint = tint;
     out.color_add = color_add;
@@ -79,6 +116,7 @@ fn fs(in: VOut) -> @location(0) vec4f {
     let sampled = textureSample(tex, samp, in.uv);
     var color = sampled * in.tint;
     if (in.color_add != 0u) { color = vec4f(min(sampled.rgb + in.tint.rgb, vec3f(1.0)), color.a); }
+    if (color.a < 4.0 / 255.0) { discard; }
     return color;
 }
 "#;
@@ -86,7 +124,7 @@ fn fs(in: VOut) -> @location(0) vec4f {
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Vertex {
-    pos: [f32; 2],
+    pos: [f32; 3],
     uv: [f32; 2],
     tint: [f32; 4],
     color_add: u32,
@@ -98,7 +136,7 @@ struct Vertex {
 /// the fragment shader from fog_params = (start, end).
 const BG_SHADER: &str = r#"
 // fog_params = (start, end, additive_flag, 0).
-struct U { mvp: mat4x4<f32>, fog_color: vec4f, fog_params: vec4f };
+struct U { mvp: mat4x4<f32>, fog_color: vec4f, fog_params: vec4f, pixel_offset: vec4f };
 @group(1) @binding(0) var<uniform> u: U;
 
 struct VOut {
@@ -112,6 +150,8 @@ struct VOut {
 fn vs(@location(0) pos: vec3f, @location(1) uv: vec2f, @location(2) depth: f32, @location(3) color: vec4f) -> VOut {
     var out: VOut;
     out.pos = u.mvp * vec4f(pos, 1.0);
+    // D3D8 pixel centers lie on integers; WebGPU centers are half-integers.
+    out.pos = vec4f(out.pos.xy + u.pixel_offset.xy * out.pos.w, out.pos.zw);
     out.uv = uv;
     out.depth = depth;
     out.color = color;
@@ -159,6 +199,18 @@ struct BgUniform {
     fog_color: [f32; 4],
     /// (fog_start, fog_end, 0, 0).
     fog_params: [f32; 4],
+    pixel_offset: [f32; 4],
+}
+
+/// A contiguous draw in one background vertex pool. The sequence preserves
+/// Stage::RenderObjects' z-level, instance and quad order across blend changes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BgDrawRange {
+    pub additive: bool,
+    /// Independent AnmVm ZWRITE state (opcode31), not implied by blending.
+    pub write_depth: bool,
+    pub start: u32,
+    pub end: u32,
 }
 
 /// A 3D background frame: a camera matrix, fog colour + range, the textured
@@ -170,12 +222,39 @@ pub struct BgScene {
     pub fog_far: f32,
     /// Alpha-blended quads.
     pub verts: Vec<Vertex3>,
-    /// Additive-blended quads (op13), drawn after `verts` with no depth write.
+    /// Additive-blended quads (op13), indexed separately from alpha vertices.
     pub verts_add: Vec<Vertex3>,
+    /// Source draw order; each range indexes its corresponding vertex pool.
+    /// Empty retains the legacy alpha-then-additive order for existing callers.
+    pub draw_ranges: Vec<BgDrawRange>,
     pub tex: usize,
     /// Playfield viewport in 640x480 px: [x, y, w, h]. Baseline 32/16/384/448
     /// (the arcade region); the ScreenEffect shake shifts/shrinks it.
     pub arcade: [f32; 4],
+}
+
+impl BgScene {
+    pub(crate) fn ranges(&self) -> impl Iterator<Item = BgDrawRange> + '_ {
+        let legacy = self.draw_ranges.is_empty();
+        self.draw_ranges.iter().copied().chain(
+            [
+                BgDrawRange {
+                    additive: false,
+                    write_depth: true,
+                    start: 0,
+                    end: self.verts.len() as u32,
+                },
+                BgDrawRange {
+                    additive: true,
+                    write_depth: false,
+                    start: 0,
+                    end: self.verts_add.len() as u32,
+                },
+            ]
+            .into_iter()
+            .filter(move |_| legacy),
+        )
+    }
 }
 
 /// One textured quad. `dst` is x, y, w, h in 640x480 screen pixels;
@@ -192,6 +271,52 @@ pub struct DrawCmd {
     pub additive: bool,
     /// D3DTOP_ADD texture-stage RGB operation; alpha still modulates normally.
     pub color_add: bool,
+    /// Original viewport-space depth and D3D8 test/write state. Unspecified
+    /// commands keep the overlay behavior: always pass without writing depth.
+    pub depth: Option<DepthState>,
+    /// Screen-space scissor [x, y, width, height] in logical 640x480 pixels.
+    /// None uses the full logical screen; zero-area clips skip the command.
+    pub clip: Option<[u32; 4]>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DepthTest {
+    Always,
+    LessEqual,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct DepthState {
+    pub z: f32,
+    pub test: DepthTest,
+    pub write: bool,
+}
+
+impl DrawCmd {
+    fn pipeline_index(&self) -> usize {
+        let state = self.depth.unwrap_or(DepthState {
+            z: 0.0,
+            test: DepthTest::Always,
+            write: false,
+        });
+        usize::from(self.additive) * 4
+            + usize::from(state.test == DepthTest::LessEqual) * 2
+            + usize::from(state.write)
+    }
+}
+
+fn sprite_depth_state(index: usize) -> wgpu::DepthStencilState {
+    wgpu::DepthStencilState {
+        format: wgpu::TextureFormat::Depth16Unorm,
+        depth_write_enabled: index & 1 != 0,
+        depth_compare: if index & 2 != 0 {
+            wgpu::CompareFunction::LessEqual
+        } else {
+            wgpu::CompareFunction::Always
+        },
+        stencil: Default::default(),
+        bias: Default::default(),
+    }
 }
 
 pub struct Texture {
@@ -214,6 +339,9 @@ pub struct Engine {
     bg_shader: wgpu::ShaderModule,
     bg_uniform_layout: wgpu::BindGroupLayout,
     color565: std::cell::RefCell<Option<color565::Renderer>>,
+    framebuffer: std::cell::RefCell<Option<framebuffer::Renderer>>,
+    last_frame_16bit: std::cell::Cell<bool>,
+    frames_in_flight: Arc<std::sync::atomic::AtomicU32>,
     bind_layout_16bit: wgpu::BindGroupLayout,
 }
 
@@ -336,20 +464,19 @@ impl Engine {
             bg_shader,
             bg_uniform_layout,
             color565: std::cell::RefCell::new(None),
+            framebuffer: std::cell::RefCell::new(None),
+            last_frame_16bit: std::cell::Cell::new(false),
+            frames_in_flight: Arc::new(std::sync::atomic::AtomicU32::new(0)),
             bind_layout_16bit,
         }
     }
 
-    fn make_bg_pipeline(&self, format: wgpu::TextureFormat) -> wgpu::RenderPipeline {
-        self.make_bg_pipeline_mode(format, false)
-    }
-
-    /// `additive` = One/One blend with depth-write disabled, for the bg's
-    /// additive glow layer (op13). Otherwise standard alpha blend + depth write.
+    /// Draw3 applies blend mode and ZWRITE independently for each VM.
     fn make_bg_pipeline_mode(
         &self,
         format: wgpu::TextureFormat,
         additive: bool,
+        write_depth: bool,
     ) -> wgpu::RenderPipeline {
         let layout = self
             .device
@@ -398,8 +525,8 @@ impl Engine {
                 ..Default::default()
             },
             depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth32Float,
-                depth_write_enabled: !additive,
+                format: wgpu::TextureFormat::Depth16Unorm,
+                depth_write_enabled: write_depth,
                 depth_compare: wgpu::CompareFunction::LessEqual,
                 stencil: Default::default(),
                 bias: Default::default(),
@@ -424,26 +551,26 @@ impl Engine {
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Depth32Float,
+                format: wgpu::TextureFormat::Depth16Unorm,
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
                 view_formats: &[],
             })
             .create_view(&Default::default())
     }
 
-    /// Render the 3D background into `target` (clearing it to the fog
-    /// colour), scissored to the 384x448 play field at (32, 16).
+    /// Draw the stage while clearing depth, preserving the default color
+    /// back buffer (GameManager::OnDraw only clears D3DCLEAR_ZBUFFER).
     #[allow(clippy::too_many_arguments)]
     fn encode_bg(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         target: &wgpu::TextureView,
         depth: &wgpu::TextureView,
-        pipeline: &wgpu::RenderPipeline,
-        pipeline_add: &wgpu::RenderPipeline,
+        pipelines: &[wgpu::RenderPipeline; 4],
         scene: &BgScene,
         textures: &[&Texture],
         target_size: (u32, u32),
+        preserve_color: bool,
     ) {
         let make_vbuf = |verts: &[Vertex3]| {
             let buf = self.device.create_buffer(&wgpu::BufferDescriptor {
@@ -466,6 +593,7 @@ impl Engine {
                 mvp: scene.mvp,
                 fog_color: scene.fog_color,
                 fog_params: [scene.fog_near, scene.fog_far, additive, 0.0],
+                pixel_offset: [1.0 / scene.arcade[2], -1.0 / scene.arcade[3], 0.0, 0.0],
             };
             let ubuf = self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("bg uniform"),
@@ -494,12 +622,16 @@ impl Engine {
                 view: target,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color {
-                        r: r as f64,
-                        g: g as f64,
-                        b: b as f64,
-                        a: 1.0,
-                    }),
+                    load: if preserve_color {
+                        wgpu::LoadOp::Load
+                    } else {
+                        wgpu::LoadOp::Clear(wgpu::Color {
+                            r: r as f64,
+                            g: g as f64,
+                            b: b as f64,
+                            a: 1.0,
+                        })
+                    },
                     store: wgpu::StoreOp::Store,
                 },
             })],
@@ -507,7 +639,7 @@ impl Engine {
                 view: depth,
                 depth_ops: Some(wgpu::Operations {
                     load: wgpu::LoadOp::Clear(1.0),
-                    store: wgpu::StoreOp::Discard,
+                    store: wgpu::StoreOp::Store,
                 }),
                 stencil_ops: None,
             }),
@@ -520,32 +652,35 @@ impl Engine {
         let sx = vw / SCREEN_W as f32;
         let sy = vh / SCREEN_H as f32;
         let [ax, ay, aw, ah] = scene.arcade;
-        pass.set_viewport(vx + ax * sx, vy + ay * sy, aw * sx, ah * sy, 0.0, 1.0);
+        pass.set_viewport(vx + ax * sx, vy + ay * sy, aw * sx, ah * sy, 0.5, 1.0);
         pass.set_bind_group(0, &textures[scene.tex].bind_group, &[]);
-        if !scene.verts.is_empty() {
-            pass.set_pipeline(pipeline);
-            pass.set_bind_group(1, &ubind, &[]);
-            pass.set_vertex_buffer(0, vbuf.slice(..));
-            pass.draw(0..scene.verts.len() as u32, 0..1);
-        }
-        if !scene.verts_add.is_empty() {
-            pass.set_pipeline(pipeline_add);
-            pass.set_bind_group(1, &ubind_add, &[]);
-            pass.set_vertex_buffer(0, vbuf_add.slice(..));
-            pass.draw(0..scene.verts_add.len() as u32, 0..1);
+        for range in scene.ranges() {
+            if range.start == range.end {
+                continue;
+            }
+            pass.set_pipeline(
+                &pipelines[usize::from(range.additive) * 2 + usize::from(range.write_depth)],
+            );
+            if range.additive {
+                pass.set_bind_group(1, &ubind_add, &[]);
+                pass.set_vertex_buffer(0, vbuf_add.slice(..));
+            } else {
+                pass.set_bind_group(1, &ubind, &[]);
+                pass.set_vertex_buffer(0, vbuf.slice(..));
+            }
+            pass.draw(range.start..range.end, 0..1);
         }
     }
 
-    fn make_pipeline(&self, format: wgpu::TextureFormat) -> wgpu::RenderPipeline {
-        self.make_pipeline_mode(format, false)
+    /// Eight combinations: alpha/additive, Always/LessEqual, no-write/write.
+    fn make_sprite_pipelines(&self, format: wgpu::TextureFormat) -> [wgpu::RenderPipeline; 8] {
+        std::array::from_fn(|index| self.make_sprite_pipeline(format, index))
     }
 
-    /// `additive` = SrcAlpha/One blend (glow particles, laser balls), matching
-    /// the original's AnmVmBlendMode_One; otherwise standard alpha.
-    fn make_pipeline_mode(
+    fn make_sprite_pipeline(
         &self,
         format: wgpu::TextureFormat,
-        additive: bool,
+        index: usize,
     ) -> wgpu::RenderPipeline {
         let layout = self
             .device
@@ -554,7 +689,7 @@ impl Engine {
                 bind_group_layouts: &[&self.bind_layout],
                 push_constant_ranges: &[],
             });
-        let blend = if additive {
+        let blend = if index & 4 != 0 {
             wgpu::BlendState {
                 color: wgpu::BlendComponent {
                     src_factor: wgpu::BlendFactor::SrcAlpha,
@@ -576,7 +711,7 @@ impl Engine {
                 buffers: &[wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<Vertex>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x4, 3 => Uint32],
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32x4, 3 => Uint32],
                 }],
             },
             fragment: Some(wgpu::FragmentState {
@@ -590,7 +725,7 @@ impl Engine {
                 })],
             }),
             primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
+            depth_stencil: Some(sprite_depth_state(index)),
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
             cache: None,
@@ -601,8 +736,15 @@ impl Engine {
         self.create_texture_with_format(rgba, width, height, 1)
     }
 
-    /// ANM header format index: UNKNOWN/A8R8G8B8 become A4R4G4B4 in
-    /// 16-bit mode, R8G8B8 becomes R5G6B5 (AnmManager::LoadTexture).
+    /// A procedural diffuse-color lookup, not an original ANM texture.
+    /// Original untextured D3DFVF_DIFFUSE vertices retain full 8-bit color
+    /// precision before framebuffer blending in both display modes.
+    pub fn create_diffuse_texture(&self, rgba: &[u8], width: u32, height: u32) -> Texture {
+        self.create_texture_with_format(rgba, width, height, u32::MAX)
+    }
+
+    /// Preserve the ANM header's texture format. The original advanced option
+    /// to force 16-bit textures is separate from its framebuffer color mode.
     pub fn create_texture_with_format(
         &self,
         rgba: &[u8],
@@ -624,6 +766,7 @@ impl Engine {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
+        let rgba32 = original_texture_rgba(rgba, original_format);
         self.queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &texture,
@@ -631,7 +774,7 @@ impl Engine {
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            rgba,
+            &rgba32,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(width * 4),
@@ -706,7 +849,7 @@ impl Engine {
             ];
             for ((px, py), uv) in quad {
                 verts.push(Vertex {
-                    pos: [nx(px), ny(py)],
+                    pos: [nx(px), ny(py), c.depth.map_or(0.0, |state| state.z)],
                     uv,
                     tint: c.tint,
                     color_add: u32::from(c.color_add),
@@ -721,12 +864,13 @@ impl Engine {
         &self,
         encoder: &mut wgpu::CommandEncoder,
         target: &wgpu::TextureView,
-        pipeline: &wgpu::RenderPipeline,
-        pipeline_add: &wgpu::RenderPipeline,
+        depth: &wgpu::TextureView,
+        pipelines: &[wgpu::RenderPipeline; 8],
         vbuf: &wgpu::Buffer,
         cmds: &[DrawCmd],
         textures: &[&Texture],
         load: bool,
+        load_depth: bool,
         target_size: (u32, u32),
     ) {
         let load_op = if load {
@@ -744,26 +888,45 @@ impl Engine {
                     store: wgpu::StoreOp::Store,
                 },
             })],
-            depth_stencil_attachment: None,
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: depth,
+                depth_ops: Some(wgpu::Operations {
+                    load: if load_depth {
+                        wgpu::LoadOp::Load
+                    } else {
+                        wgpu::LoadOp::Clear(1.0)
+                    },
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
             timestamp_writes: None,
             occlusion_query_set: None,
         });
         let [x, y, width, height] = display_viewport(target_size);
         pass.set_viewport(x, y, width, height, 0.0, 1.0);
         pass.set_vertex_buffer(0, vbuf.slice(..));
-        // One draw per run of consecutive commands sharing a texture AND blend
-        // mode; the pipeline (alpha vs additive) is switched per run.
+        // Depth values live in the vertices; test/write and blend state select
+        // the pipeline. Keep original command order across state changes.
         let mut start = 0usize;
         while start < cmds.len() {
             let tex = cmds[start].tex;
-            let add = cmds[start].additive;
+            let pipeline = cmds[start].pipeline_index();
+            let clip = cmds[start].clip;
             let mut end = start;
-            while end < cmds.len() && cmds[end].tex == tex && cmds[end].additive == add {
+            while end < cmds.len()
+                && cmds[end].tex == tex
+                && cmds[end].pipeline_index() == pipeline
+                && cmds[end].clip == clip
+            {
                 end += 1;
             }
-            pass.set_pipeline(if add { pipeline_add } else { pipeline });
-            pass.set_bind_group(0, &textures[tex].bind_group, &[]);
-            pass.draw(start as u32 * 6..end as u32 * 6, 0..1);
+            if let Some([x, y, width, height]) = sprite_scissor(clip, target_size) {
+                pass.set_scissor_rect(x, y, width, height);
+                pass.set_pipeline(&pipelines[pipeline]);
+                pass.set_bind_group(0, &textures[tex].bind_group, &[]);
+                pass.draw(start as u32 * 6..end as u32 * 6, 0..1);
+            }
             start = end;
         }
     }
@@ -786,16 +949,93 @@ impl Engine {
         buf
     }
 
-    /// Render one frame offscreen and return RGBA8 pixels (640x480).
+    /// Start a new presentation history. Isolated previews use this; live
+    /// play and capture sequences keep the existing back buffer.
+    pub fn reset_frame_history(&self) {
+        self.color565.borrow_mut().take();
+        self.framebuffer.borrow_mut().take();
+    }
+
+    /// Execute one original draw chain. Call once for each simulation update,
+    /// including updates whose resulting image is not selected for capture.
+    pub fn advance_frame(&self, cmds: &[DrawCmd], textures: &[&Texture], bg: Option<&BgScene>) {
+        let color_16bit = COLOR_16BIT.with(std::cell::Cell::get);
+        // A display-mode reset recreates the original swap chain.
+        if self.last_frame_16bit.replace(color_16bit) != color_16bit {
+            self.reset_frame_history();
+        }
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+        if color_16bit {
+            self.color565
+                .borrow_mut()
+                .get_or_insert_with(|| color565::Renderer::new(self))
+                .draw(self, &mut encoder, cmds, textures, bg);
+        } else {
+            self.framebuffer
+                .borrow_mut()
+                .get_or_insert_with(|| framebuffer::Renderer::new(self))
+                .draw(self, &mut encoder, cmds, textures, bg);
+        }
+        let frames_in_flight = self.frames_in_flight.clone();
+        frames_in_flight.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.queue.submit([encoder.finish()]);
+        self.queue.on_submitted_work_done(move || {
+            frames_in_flight.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+        });
+        // A headless capture may calculate thousands of frames before the next
+        // PNG readback. Metal retains every submitted frame's temporary buffers
+        // until GPU completion, so its queue must not grow at CPU replay speed.
+        #[cfg(not(target_arch = "wasm32"))]
+        self.device
+            .poll(wgpu::PollType::Wait)
+            .expect("complete draw frame");
+        PRESENTED_FRAMES.with(|frames| {
+            frames.set(frames.get().map(|count| count.wrapping_add(1)));
+        });
+    }
+
+    /// Browser GPU completion is asynchronous: defer the next calculation when
+    /// two draw chains are pending instead of blocking the JavaScript thread.
+    fn can_advance_frame(&self) -> bool {
+        self.frames_in_flight
+            .load(std::sync::atomic::Ordering::Relaxed)
+            < 2
+    }
+
+    fn present_frame(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        format: wgpu::TextureFormat,
+        size: (u32, u32),
+    ) {
+        if self.last_frame_16bit.get() {
+            if let Some(renderer) = &mut *self.color565.borrow_mut() {
+                renderer.present(self, encoder, target, format, size);
+            }
+        } else if let Some(renderer) = &mut *self.framebuffer.borrow_mut() {
+            renderer.present(self, encoder, target, format, size);
+        }
+    }
+
+    /// Render an isolated preview, starting from a fresh back buffer.
+    /// Sequential captures must use advance_frame + read_frame instead.
     pub fn render_to_image(
         &self,
         cmds: &[DrawCmd],
         textures: &[&Texture],
         bg: Option<&BgScene>,
     ) -> Vec<u8> {
+        self.reset_frame_history();
+        self.advance_frame(cmds, textures, bg);
+        self.read_frame()
+    }
+
+    /// Read the last completed frame without running its draw chain again.
+    pub fn read_frame(&self) -> Vec<u8> {
         let format = wgpu::TextureFormat::Rgba8Unorm;
         let target = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("offscreen"),
+            label: Some("offscreen presentation"),
             size: wgpu::Extent3d {
                 width: SCREEN_W,
                 height: SCREEN_H,
@@ -809,53 +1049,8 @@ impl Engine {
             view_formats: &[],
         });
         let view = target.create_view(&Default::default());
-        let pipeline = self.make_pipeline(format);
-        let pipeline_add = self.make_pipeline_mode(format, true);
-        let vbuf = self.vertex_buffer(cmds);
-
         let mut encoder = self.device.create_command_encoder(&Default::default());
-        if COLOR_16BIT.with(std::cell::Cell::get) {
-            let mut renderer = self.color565.borrow_mut();
-            renderer
-                .get_or_insert_with(|| color565::Renderer::new(self))
-                .encode(
-                    self,
-                    &mut encoder,
-                    &view,
-                    format,
-                    (SCREEN_W, SCREEN_H),
-                    cmds,
-                    textures,
-                    bg,
-                );
-        } else {
-            if let Some(scene) = bg {
-                let bg_pipeline = self.make_bg_pipeline(format);
-                let bg_pipeline_add = self.make_bg_pipeline_mode(format, true);
-                let depth = self.depth_texture(SCREEN_W, SCREEN_H);
-                self.encode_bg(
-                    &mut encoder,
-                    &view,
-                    &depth,
-                    &bg_pipeline,
-                    &bg_pipeline_add,
-                    scene,
-                    textures,
-                    (SCREEN_W, SCREEN_H),
-                );
-            }
-            self.encode_pass(
-                &mut encoder,
-                &view,
-                &pipeline,
-                &pipeline_add,
-                &vbuf,
-                cmds,
-                textures,
-                bg.is_some(),
-                (SCREEN_W, SCREEN_H),
-            );
-        }
+        self.present_frame(&mut encoder, &view, format, (SCREEN_W, SCREEN_H));
 
         let bytes_per_row = SCREEN_W * 4; // 2560, already 256-aligned
         let readback = self.device.create_buffer(&wgpu::BufferDescriptor {
@@ -899,14 +1094,12 @@ impl Engine {
         textures: Vec<Texture>,
         update: impl FnMut(&Input) -> Frame + 'static,
     ) -> App {
+        PRESENTED_FRAMES.with(|frames| frames.set(Some(0)));
         App {
             engine: self,
             title: title.to_string(),
             cmds: Vec::new(),
             bg: None,
-            bg_pipeline: None,
-            bg_pipeline_add: None,
-            depth: None,
             surface_size: (SCREEN_W, SCREEN_H),
             textures,
             update: Box::new(update),
@@ -923,8 +1116,6 @@ impl Engine {
             window: None,
             surface: None,
             surface_config: None,
-            pipeline: None,
-            pipeline_add: None,
             autoshot: std::env::var("TH06_AUTOSHOT")
                 .ok()
                 .filter(|s| !s.is_empty()),
@@ -987,6 +1178,9 @@ pub enum Key {
     Bomb,  // X
     Focus, // Shift
     Pause, // Esc
+    Quit,  // Q (pause menu shortcut)
+    S,     // Original S key (title input and score-screen unlock sequence)
+    Home,
     Enter,
     Skip, // Ctrl (dialogue / replay fast-forward)
 }
@@ -1001,6 +1195,9 @@ fn map_key(code: KeyCode) -> Option<Key> {
         KeyCode::KeyX => Key::Bomb,
         KeyCode::ShiftLeft | KeyCode::ShiftRight => Key::Focus,
         KeyCode::Escape => Key::Pause,
+        KeyCode::KeyQ => Key::Quit,
+        KeyCode::KeyS => Key::S,
+        KeyCode::Home => Key::Home,
         KeyCode::Enter => Key::Enter,
         KeyCode::ControlLeft | KeyCode::ControlRight => Key::Skip,
         _ => return None,
@@ -1029,6 +1226,9 @@ impl Input {
             (Key::Left, 6),
             (Key::Right, 7),
             (Key::Skip, 8),
+            (Key::Quit, 9),
+            (Key::S, 10),
+            (Key::Home, 11),
             (Key::Enter, 12),
         ];
         keys.iter().fold(0, |bits, &(key, bit)| {
@@ -1047,6 +1247,9 @@ impl Input {
             (Key::Left, 6),
             (Key::Right, 7),
             (Key::Skip, 8),
+            (Key::Quit, 9),
+            (Key::S, 10),
+            (Key::Home, 11),
             (Key::Enter, 12),
         ];
         Self::synthetic(
@@ -1096,9 +1299,6 @@ struct App {
     title: String,
     cmds: Vec<DrawCmd>,
     bg: Option<BgScene>,
-    bg_pipeline: Option<wgpu::RenderPipeline>,
-    bg_pipeline_add: Option<wgpu::RenderPipeline>,
-    depth: Option<wgpu::TextureView>,
     surface_size: (u32, u32),
     textures: Vec<Texture>,
     update: Box<dyn FnMut(&Input) -> Frame>,
@@ -1112,8 +1312,6 @@ struct App {
     window: Option<Arc<Window>>,
     surface: Option<wgpu::Surface<'static>>,
     surface_config: Option<wgpu::SurfaceConfiguration>,
-    pipeline: Option<wgpu::RenderPipeline>,
-    pipeline_add: Option<wgpu::RenderPipeline>,
     /// TH06_AUTOSHOT=<dir>: dump an offscreen PNG every 60 ticks during live
     /// play so playtests can be reviewed after the fact.
     autoshot: Option<String>,
@@ -1196,15 +1394,7 @@ impl ApplicationHandler for App {
         };
         surface.configure(&self.engine.device, &config);
         self.surface_config = Some(config);
-        self.pipeline = Some(self.engine.make_pipeline(format));
-        self.pipeline_add = Some(self.engine.make_pipeline_mode(format, true));
-        self.bg_pipeline = Some(self.engine.make_bg_pipeline(format));
-        self.bg_pipeline_add = Some(self.engine.make_bg_pipeline_mode(format, true));
         self.surface_size = (size.width.max(1), size.height.max(1));
-        self.depth = Some(
-            self.engine
-                .depth_texture(self.surface_size.0, self.surface_size.1),
-        );
         self.surface = Some(surface);
         self.window = Some(window);
         self.last_tick = Instant::now();
@@ -1228,7 +1418,6 @@ impl ApplicationHandler for App {
                     config.width = size.width;
                     config.height = size.height;
                     surface.configure(&self.engine.device, config);
-                    self.depth = Some(self.engine.depth_texture(size.width, size.height));
                 }
             }
             WindowEvent::KeyboardInput {
@@ -1264,7 +1453,8 @@ impl ApplicationHandler for App {
             }
             WindowEvent::RedrawRequested => {
                 // Fixed-timestep logic: run 60 Hz ticks to catch up with
-                // wall time, render the latest state once.
+                // wall time. Preserve every draw chain in the logical buffer,
+                // then present its latest image once at the display refresh rate.
                 let now = Instant::now();
                 self.accumulator += now - self.last_tick;
                 self.last_tick = now;
@@ -1281,7 +1471,7 @@ impl ApplicationHandler for App {
                     self.accumulator = Duration::ZERO;
                     self.input = Input::default();
                 }
-                while self.accumulator >= TICK {
+                while self.accumulator >= TICK && self.engine.can_advance_frame() {
                     self.accumulator -= TICK;
                     let state = self.gamepad.sample();
                     let buttons = controls::map_state(&state);
@@ -1313,13 +1503,13 @@ impl ApplicationHandler for App {
                     self.cmds = frame.cmds;
                     self.bg = frame.bg;
                     self.tick_count += 1;
+                    let tex_refs: Vec<&Texture> = self.textures.iter().collect();
+                    self.engine
+                        .advance_frame(&self.cmds, &tex_refs, self.bg.as_ref());
                     if let Some(dir) = &self.autoshot
                         && self.tick_count.is_multiple_of(60)
                     {
-                        let tex_refs: Vec<&Texture> = self.textures.iter().collect();
-                        let pixels =
-                            self.engine
-                                .render_to_image(&self.cmds, &tex_refs, self.bg.as_ref());
+                        let pixels = self.engine.read_frame();
                         let path = format!("{dir}/shot_{:06}.png", self.tick_count);
                         let _ = image::save_buffer(
                             &path,
@@ -1331,22 +1521,7 @@ impl ApplicationHandler for App {
                     }
                 }
 
-                let (
-                    Some(surface),
-                    Some(pipeline),
-                    Some(pipeline_add),
-                    Some(bg_pipeline),
-                    Some(bg_pipeline_add),
-                    Some(depth),
-                ) = (
-                    &self.surface,
-                    &self.pipeline,
-                    &self.pipeline_add,
-                    &self.bg_pipeline,
-                    &self.bg_pipeline_add,
-                    &self.depth,
-                )
-                else {
+                let Some(surface) = &self.surface else {
                     return;
                 };
                 let frame = match surface.get_current_texture() {
@@ -1372,51 +1547,16 @@ impl ApplicationHandler for App {
                     }
                 };
                 let view = frame.texture.create_view(&Default::default());
-                let vbuf = self.engine.vertex_buffer(&self.cmds);
-                let tex_refs: Vec<&Texture> = self.textures.iter().collect();
                 let mut encoder = self
                     .engine
                     .device
                     .create_command_encoder(&Default::default());
-                if COLOR_16BIT.with(std::cell::Cell::get) {
-                    let mut renderer = self.engine.color565.borrow_mut();
-                    renderer
-                        .get_or_insert_with(|| color565::Renderer::new(&self.engine))
-                        .encode(
-                            &self.engine,
-                            &mut encoder,
-                            &view,
-                            self.surface_config.as_ref().unwrap().format,
-                            self.surface_size,
-                            &self.cmds,
-                            &tex_refs,
-                            self.bg.as_ref(),
-                        );
-                } else {
-                    if let Some(scene) = &self.bg {
-                        self.engine.encode_bg(
-                            &mut encoder,
-                            &view,
-                            depth,
-                            bg_pipeline,
-                            bg_pipeline_add,
-                            scene,
-                            &tex_refs,
-                            self.surface_size,
-                        );
-                    }
-                    self.engine.encode_pass(
-                        &mut encoder,
-                        &view,
-                        pipeline,
-                        pipeline_add,
-                        &vbuf,
-                        &self.cmds,
-                        &tex_refs,
-                        self.bg.is_some(),
-                        self.surface_size,
-                    );
-                }
+                self.engine.present_frame(
+                    &mut encoder,
+                    &view,
+                    self.surface_config.as_ref().unwrap().format,
+                    self.surface_size,
+                );
                 self.engine.queue.submit([encoder.finish()]);
                 frame.present();
                 if let Some(w) = &self.window {
@@ -1426,6 +1566,38 @@ impl ApplicationHandler for App {
             _ => {}
         }
     }
+}
+
+/// Honor original low-bit texture formats even on a 32-bit framebuffer.
+/// D3DX loads e.g. ascii.anm's A4R4G4B4 texture in both color modes.
+fn original_texture_rgba(rgba: &[u8], format: u32) -> std::borrow::Cow<'_, [u8]> {
+    let levels = match format {
+        2 => [31u32, 31, 31, 1],
+        3 => [31, 63, 31, 1],
+        4 => [255, 255, 255, 1],
+        5 => [15; 4],
+        _ => return std::borrow::Cow::Borrowed(rgba),
+    };
+    std::borrow::Cow::Owned(
+        rgba.chunks_exact(4)
+            .flat_map(|pixel| {
+                std::array::from_fn::<_, 4, _>(|channel| {
+                    if channel == 3 && matches!(format, 3 | 4) {
+                        return 255;
+                    }
+                    let shift = match levels[channel] {
+                        255 => 0,
+                        63 => 2,
+                        31 => 3,
+                        15 => 4,
+                        _ => 7,
+                    };
+                    let code = u32::from(pixel[channel] >> shift);
+                    ((code * 255 + levels[channel] / 2) / levels[channel]) as u8
+                })
+            })
+            .collect(),
+    )
 }
 
 /// Decode a color image (JPEG or PNG) and an optional grayscale alpha mask
@@ -1446,4 +1618,59 @@ pub fn compose_rgba(color: &[u8], alpha: Option<&[u8]>) -> (Vec<u8>, u32, u32) {
         }
     }
     (rgba, w, h)
+}
+
+#[cfg(test)]
+mod texture_format_tests {
+    use super::original_texture_rgba;
+
+    #[test]
+    fn original_low_bit_texture_formats_apply_in_32_bit_mode() {
+        // D3DFMT_A4R4G4B4 (ascii.anm format 5) keeps each upper nibble,
+        // independently of the framebuffer format.
+        assert_eq!(
+            &*original_texture_rgba(&[239, 32, 127, 159], 5),
+            &[238, 34, 119, 153]
+        );
+        assert_eq!(
+            &*original_texture_rgba(&[255, 255, 255, 127, 0, 0, 0, 128], 2),
+            &[255, 255, 255, 0, 0, 0, 0, 255]
+        );
+        assert_eq!(
+            &*original_texture_rgba(&[15, 31, 47, 0], 3),
+            &[8, 28, 41, 255]
+        );
+        let rgba = [239, 32, 127, 159];
+        assert!(matches!(
+            original_texture_rgba(&rgba, 1),
+            std::borrow::Cow::Borrowed(_)
+        ));
+    }
+}
+
+#[cfg(test)]
+mod sprite_clip_tests {
+    use super::sprite_scissor;
+
+    #[test]
+    fn logical_clips_scale_into_the_letterboxed_target_and_clamp_safely() {
+        assert_eq!(sprite_scissor(None, (640, 480)), Some([0, 0, 640, 480]));
+        assert_eq!(
+            sprite_scissor(Some([32, 16, 384, 448]), (1600, 960)),
+            Some([224, 32, 768, 896])
+        );
+        assert_eq!(
+            sprite_scissor(Some([600, 470, u32::MAX, u32::MAX]), (1280, 960)),
+            Some([1200, 940, 80, 20])
+        );
+        for clip in [
+            [0, 0, 0, 480],
+            [0, 0, 640, 0],
+            [640, 0, 1, 1],
+            [0, 480, 1, 1],
+        ] {
+            assert_eq!(sprite_scissor(Some(clip), (640, 480)), None);
+        }
+        assert_eq!(sprite_scissor(None, (0, 480)), None);
+    }
 }

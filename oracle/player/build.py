@@ -50,6 +50,9 @@ using i16=int16_t; using u16=uint16_t; using i32=int32_t; using u32=uint32_t; us
 #define NO_SOUND (-1)
 #define SOUND_SHOOT 0
 #define SOUND_TOTAL_BOSS_DEATH 20
+#define SOUND_2 2
+#define ITEM_RANDOM_ITEM (-1)
+#define ITEM_SPAWNS 3
 #define PARTICLE_EFFECT_UNK_3 3
 #define PARTICLE_EFFECT_UNK_5 5
 #define GAME_REGION_LEFT 0
@@ -81,8 +84,16 @@ struct ZunVec2 { float x=0,y=0; };
 struct Timer { i32 current=0; operator i32() const { return current; } void operator=(int v){current=v;} void operator++(int){current++;} void operator--(int){current--;} bool HasTicked() const{return true;} };
 struct Sprite { float widthPx=12,heightPx=12; };
 enum { AnmColorOp_Modulate,AnmColorOp_Add };
+enum { EnemyDeath_DespawnNoCallback,EnemyDeath_DisableInteraction,EnemyDeath_DropItemsOnly,EnemyDeath_SetHpTo1 };
 struct AnmVm { i32 anmFileIndex=0,pendingInterrupt=0; Vec3 pos; float scaleY=1; Sprite *sprite=nullptr; struct {int colorOp=0;} flags; };
-struct Enemy { i32 life=100; uint8_t unk_e41=0; AnmVm primaryVm; };
+struct Enemy { i32 life=100; uint8_t unk_e41=0; AnmVm primaryVm; int lifeCallbackThreshold=0,timerCallbackThreshold=0,score=123,itemDrop=-2,deathParticle1=0,deathParticle2=0; Vec3 position; struct {int deathMode=0;bool isDamageable=true,isInteractable=true,isSlotOccupied=true,isBoss=false;} flags; int resets=0; };
+void Enemy_ResetEffectArray(Enemy *e){e->resets++;}
+using ItemType=int;using ItemState=int;
+struct ItemManager {void SpawnItem(Vec3*,int,int){}} g_ItemManager;
+struct BulletManager {void DespawnBullets(int,bool){}} g_BulletManager;
+struct EnemyManager {int randomItemSpawnIndex=0,randomItemTableIndex=0;struct{bool isActive=false;} spellcardInfo;} g_EnemyManager;
+int g_RandomItems[32]{};
+struct Gui {bool bossPresent=true;} g_Gui;
 struct PlayerBullet { AnmVm sprite; Vec3 position,size; ZunVec2 velocity,motion; float speed=0,angle=0; Timer lifetime; i16 damage=0,bulletState=0,bulletType=0,bulletFrame=0,spawnPositionIdx=0; };
 struct CharacterPowerBulletData { i16 waitBetweenBullets,bulletFrame; ZunVec2 motion,size; f32 direction,velocity; u16 damage; uint8_t spawnPositionIdx,bulletType; i16 anmFileIdx,bulletSoundIdx; };
 struct CharacterPowerData { i32 numBullets,power; CharacterPowerBulletData *bullets; };
@@ -106,7 +117,7 @@ AnmManager *g_AnmManager=&anm;
 struct SoundPlayer { int last=-1; void PlaySoundByIdx(int idx){last=idx;} } g_SoundPlayer;
 using SoundIdx=int;
 struct EffectManager { std::vector<int> spawned; void SpawnParticles(int idx,Vec3*,int count,u32){for(int i=0;i<count;i++)spawned.push_back(idx);} } g_EffectManager;
-struct GameManager { i32 currentPower=0; Vec3 gameRegionSize{384,448,0},playerMovementAreaTopLeftPos{8,16,0},playerMovementAreaSize{368,416,0}; ZunBool IsInBounds(f32,f32,f32,f32); } g_GameManager;
+struct GameManager { i32 currentPower=0,score=0; void AddScore(int n){score+=n;} Vec3 gameRegionSize{384,448,0},playerMovementAreaTopLeftPos{8,16,0},playerMovementAreaSize{368,416,0}; ZunBool IsInBounds(f32,f32,f32,f32); } g_GameManager;
 struct Supervisor { float effectiveFramerateMultiplier=1; } g_Supervisor;
 u32 bits(float f){u32 result;memcpy(&result,&f,4);return result;}
 }
@@ -130,6 +141,9 @@ enemy_manager = (source/'EnemyManager.cpp').read_text()
 flash_start = enemy_manager.index('            if (curEnemy->unk_e41 != 0)')
 flash_end = enemy_manager.index('\n        }\n        UpdateEffects(curEnemy);', flash_start)
 ref += 'void EnemyDamageFeedback(Enemy *curEnemy,int enemyLifeBeforeDmg) {\n'+enemy_manager[flash_start:flash_end]+'}\n'
+death_start = enemy_manager.index('                curEnemy->lifeCallbackThreshold = -1;', enemy_manager.index('if (curEnemy->life <= 0'))
+death_end = enemy_manager.index('\n                if (curEnemy->deathCallbackSub >= 0)', death_start)
+ref += 'void EnemyDeathSwitch(Enemy *curEnemy) { EnemyManager manager;EnemyManager *mgr=&manager;bool hitByBomb=false;int enemyIdx=0;\n'+enemy_manager[death_start:death_end]+'}\n'
 ref += '}\n'
 main = r'''
 using namespace th06;
@@ -140,6 +154,20 @@ int main(int argc,char**argv) {
         for(int c=0;c<4;c++) for(int r=0;r<9;r++) for(int i=0;i<characters[c][r].numBullets;i++) {
             auto &b=characters[c][r].bullets[i];
             printf("%d %d %d %d %d %u %u %u %u %u %u %d %d %d %d %d\n",c,r,i,b.waitBetweenBullets,b.bulletFrame,bits(b.motion.x),bits(b.motion.y),bits(b.size.x),bits(b.size.y),bits(b.direction),bits(b.velocity),b.damage,b.spawnPositionIdx,b.bulletType,b.anmFileIdx,b.bulletSoundIdx>=0);
+        }
+    } else if(mode=="death") {
+        for(int mode=0;mode<4;mode++)for(int boss=0;boss<2;boss++) {
+            Enemy e;e.life=-9;e.flags.deathMode=mode;e.flags.isBoss=boss;g_Gui.bossPresent=true;
+            EnemyDeathSwitch(&e);
+            printf("%d %d %d %d %d %d %d %d %d\n",mode,boss,e.life,e.flags.deathMode,e.flags.isDamageable,e.flags.isInteractable,e.flags.isSlotOccupied,g_Gui.bossPresent,e.resets);
+        }
+    } else if(mode=="deathfx") {
+        for(int mode=0;mode<4;mode++)for(int drop : {-2,0}) {
+            Enemy e;g_EffectManager.spawned.clear();e.itemDrop=drop;
+            for(int phase=0;phase<2;phase++) {
+                e.flags.deathMode=mode;EnemyDeathSwitch(&e);
+                printf("%d %d %d %zu\n",mode,drop,phase,g_EffectManager.spawned.size());
+            }
         }
     } else if(mode=="flash") {
         Enemy e;
@@ -223,7 +251,7 @@ manifest = {
     'generated_cpp_sha256': hashlib.sha256(output.read_bytes()).hexdigest(),
     'compiler': subprocess.run(['clang++', '--version'], capture_output=True, text=True, check=True).stdout.splitlines()[0],
     'float_contract': 'off',
-    'coverage': {'table_entries': 193, 'damage_states': 72, 'movement_states': 40, 'orb_states': 40, 'bounds_states': 12, 'input_states': 128, 'enemy_feedback_states': 26},
+    'coverage': {'table_entries': 193, 'damage_states': 72, 'movement_states': 40, 'orb_states': 40, 'bounds_states': 12, 'input_states': 128, 'enemy_feedback_states': 26, 'enemy_death_modes': 8, 'repeated_death_particles': 16},
 }
 (build/'manifest.json').write_text(json.dumps(manifest, indent=2)+'\n')
 print(build/'player_reference')

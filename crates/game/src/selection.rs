@@ -18,10 +18,14 @@ pub enum SelectionStep {
     Character,
     Shot,
     PracticeStage,
+    TitleUnload,
+    TitleStartup,
 }
 pub enum SelectionAction {
     None,
-    Back,
+    Back {
+        cursor: usize,
+    },
     Start {
         character: Character,
         difficulty: stage::Difficulty,
@@ -40,7 +44,7 @@ pub struct Selection {
     pub shot: usize,
     cursor: usize,
     timer: u16,
-    input: MenuInput,
+    pub(crate) input: MenuInput,
 }
 impl Selection {
     pub fn new(art: MenuArt, font: MenuFont) -> Self {
@@ -70,7 +74,9 @@ impl Selection {
         } else {
             self.difficulty
         };
-        self.timer = 0;
+        // Difficulty loading retains MainMenu's timer at 60, then the update
+        // increments it. Confirmation is available on the next calculation.
+        self.timer = 61;
         self.art.reset();
         self.art
             .interrupt_all(if mode == RunMode::Extra { 18 } else { 6 });
@@ -99,9 +105,32 @@ impl Selection {
         extra_unlocked: [bool; 4],
         practice_stages: usize,
     ) -> SelectionAction {
+        let action = self.update_inner(input, extra_unlocked, practice_stages);
         self.timer = self.timer.saturating_add(1);
+        action
+    }
+    fn update_inner(
+        &mut self,
+        input: &Input,
+        extra_unlocked: [bool; 4],
+        practice_stages: usize,
+    ) -> SelectionAction {
+        if self.step == SelectionStep::TitleStartup {
+            return SelectionAction::Back {
+                cursor: self.cursor,
+            };
+        }
         self.input.tick(input);
         self.art.tick();
+        if self.step == SelectionStep::TitleUnload {
+            // MainMenu::STATE_CHARACTER_LOAD runs through timer 36 before
+            // STATE_STARTUP reloads the title ANM on the following calc.
+            if self.timer == 36 {
+                self.step = SelectionStep::TitleStartup;
+                self.timer = 0;
+            }
+            return SelectionAction::None;
+        }
         // These three original states navigate during their entrance motion;
         // confirmation waits until frame 30. Character scrolling waits too.
         let up = self.input.pressed(input, Key::Up);
@@ -145,7 +174,15 @@ impl Selection {
             SelectionStep::Difficulty => {
                 if back {
                     self.art.sound("cancel00");
-                    return SelectionAction::Back;
+                    self.art.interrupt_all(4);
+                    self.step = SelectionStep::TitleUnload;
+                    self.cursor = match self.mode {
+                        RunMode::Story => 0,
+                        RunMode::Extra => 1,
+                        RunMode::Practice => 2,
+                    };
+                    self.timer = 0;
+                    return SelectionAction::None;
                 }
                 if confirm {
                     self.art.sound("ok00");
@@ -189,6 +226,7 @@ impl Selection {
                 }
                 if back {
                     self.begin(self.mode, self.difficulty);
+                    self.timer = 0;
                     self.art.sound("cancel00");
                 } else if confirm {
                     self.art.sound("ok00");
@@ -243,6 +281,7 @@ impl Selection {
                     return self.start(self.cursor);
                 }
             }
+            SelectionStep::TitleUnload | SelectionStep::TitleStartup => unreachable!(),
         }
         SelectionAction::None
     }
@@ -259,6 +298,17 @@ impl Selection {
             stage,
             mode: self.mode,
         }
+    }
+    pub fn reference_navigation(&self) -> (u8, usize, u16) {
+        let (state, cursor) = match self.step {
+            SelectionStep::Difficulty => (7, self.cursor),
+            SelectionStep::Character => (9, self.character),
+            SelectionStep::Shot => (11, self.shot),
+            SelectionStep::PracticeStage => (17, self.cursor),
+            SelectionStep::TitleUnload => (8, self.cursor),
+            SelectionStep::TitleStartup => (0, self.cursor),
+        };
+        (state, cursor, self.timer)
     }
     pub fn take_sounds(&mut self) -> Vec<&'static str> {
         self.art.take_sounds()

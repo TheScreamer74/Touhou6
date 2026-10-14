@@ -15,11 +15,12 @@ enum State {
     Files,
     Stages,
     Leaving,
+    TitleStartup,
 }
 pub struct ReplayMenu {
     art: MenuArt,
     font: MenuFont,
-    input: MenuInput,
+    pub(crate) input: MenuInput,
     state: State,
     timer: u16,
     cursor: usize,
@@ -51,11 +52,18 @@ impl ReplayMenu {
         self.art.reset();
         self.art.interrupt_all(15);
         self.state = State::Files;
-        self.timer = 0;
+        // STATE_REPLAY_LOAD retains its 60-tick title fade timer. Unlike
+        // Files <- Stages, the initial load does not impose another delay.
+        self.timer = 61;
         self.cursor = 0;
         self.chosen = 0;
     }
     pub fn update(&mut self, input: &Input, slots: &[Option<Replay>]) -> ReplayAction {
+        if self.state == State::TitleStartup {
+            // STATE_STARTUP executes Title's callback this calculation,
+            // including its single Supervisor input-repeat tick.
+            return ReplayAction::Back;
+        }
         self.input.tick(input);
         let valid: Vec<usize> = slots
             .iter()
@@ -64,15 +72,17 @@ impl ReplayMenu {
             .collect();
         let mut action = ReplayAction::None;
         match self.state {
-            State::Leaving if self.timer >= 36 => action = ReplayAction::Back,
+            State::Leaving if self.timer == 36 => {
+                self.state = State::TitleStartup;
+                self.timer = 0;
+            }
             State::Files if self.timer >= 40 => {
                 if !valid.is_empty() {
                     self.cursor = self.cursor.min(valid.len() - 1);
                     if self.input.pressed(input, Key::Up) {
                         self.art.sound("select00");
                         self.cursor = (self.cursor + valid.len() - 1) % valid.len();
-                    }
-                    if self.input.pressed(input, Key::Down) {
+                    } else if self.input.pressed(input, Key::Down) {
                         self.art.sound("select00");
                         self.cursor = (self.cursor + 1) % valid.len();
                     }
@@ -98,6 +108,7 @@ impl ReplayMenu {
                     self.art.sound("cancel00");
                     self.state = State::Leaving;
                     self.timer = 0;
+                    self.cursor = 0;
                     self.art.interrupt_all(4);
                 }
             }
@@ -137,6 +148,15 @@ impl ReplayMenu {
         self.art.tick();
         self.timer = self.timer.saturating_add(1);
         action
+    }
+    pub fn reference_navigation(&self) -> (u8, usize, u16) {
+        let state = match self.state {
+            State::Files => 13,
+            State::Stages => 15,
+            State::Leaving => 14,
+            State::TitleStartup => 0,
+        };
+        (state, self.cursor, self.timer)
     }
     pub fn draw(&self, slots: &[Option<Replay>]) -> Vec<DrawCmd> {
         let mut cmds = self.art.draw(|idx| {

@@ -5,3 +5,5 @@ web/pkg/
 *.zip
 *.ZIP
 oracle/*/build/
+__pycache__/
+*.pyc

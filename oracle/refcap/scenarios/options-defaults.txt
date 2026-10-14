@@ -1,0 +1,12 @@
+# Original starts in PRE_INPUT; Q releases it without selecting an item.
+key 180 184 Q
+key 240 244 UP
+key 270 274 UP
+key 330 334 Z
+key 410 414 DOWN
+key 440 444 DOWN
+key 470 474 DOWN
+key 500 504 DOWN
+key 530 534 DOWN
+key 560 564 DOWN
+key 620 624 Z

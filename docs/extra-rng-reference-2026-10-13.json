@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "kind": "original-executable aggregate diagnostic",
+  "scenario": "MarisaA / Extra / stage7",
+  "validation_scope": "Cause confirmed using original effect aggregates and focused source-backed regression tests. This diagnostic claims no corrected whole-stage or96-case campaign pass.",
+  "original": {
+    "returncode": 0,
+    "exe_sha256": "7f38496b31b8625196900a69cd1bfed243cab1f9612073e7881dc354b876fd39",
+    "input_sha256": "122649c09966f213785c3a686f062c138c392390af2636c24f164570c3c8e961",
+    "proxy_sha256": "0738181a536240cd8b95db326a8ab5fee478ddd2b4d286219bc9423a07cb993b",
+    "config_sha256": "9e7069e9a812f607206bde564bbcda52724e127aea97640abb5a58d56c392a3d",
+    "summary_sha256": "63f1f70c46ccc9f8bb9af213cd11948d21a719fa5c0d4c42028c70b991eab9fb",
+    "complete_scalar_prefix_to25012": {
+      "observations": 24987,
+      "canonical_csv_rows_sha256": "8ba59660f6e581a5b1b78fbcae162bef012e0f2c5ded0177e709dbfa18091841"
+    }
+  },
+  "collection": {
+    "raw_original_object_traces_transferred": false,
+    "raw_original_images_transferred": false,
+    "exported_evidence": "Aggregate occupied-effect counts, callback/age histograms, slot hashes and a scalar-prefix checksum. Raw captures remain on the private reference host."
+  },
+  "effect_lifetime": {
+    "first_effect_difference_frame": 11964,
+    "matched_occupied_effect_snapshots_before_difference": 9373,
+    "prematurely_deleted_bubbles": 5,
+    "first_scalar_rng_difference_frame": 25012,
+    "original_u16_draws": 18,
+    "previous_port_u16_draws": 29,
+    "explained_extra_draws": {
+      "two_extra_RandomSplash_effects_including_sprite": 10,
+      "one_extra_Still_effect_random_sprite": 1
+    },
+    "correction": "SPELLCARD_START/END preserve effectArray; actual Enemy::Despawn resets it, including non-boss enemies.",
+    "regression_test": "spell_start_and_end_preserve_bubbles_until_enemy_despawns:PASS"
+  },
+  "ex15_precision": {
+    "first_previous_projectile_difference_frame": 20340,
+    "correction": "Keep coordinate differencesf32, evaluate both atan2 calls in f64 and round each angle tof32.",
+    "locked_reflection_angle_bits": "0x40212067",
+    "regression_test": "extra_reflection_keeps_original_atan2_rounding:PASS",
+    "isolated_rerun_first_remaining_difference_frame": 25012,
+    "isolated_rerun_passed": false,
+    "isolated_rerun_comparison_sha256": "8907a16bc97344baa127a255585f9690c24971eaacc34dae1f18f2c8055f5705",
+    "isolated_rerun_execution_sha256": "e763fe2feb9c5da1f3fc50316650d82bd831fb870a51995b0cbf04566adc02aa"
+  },
+  "native_diagnostic_binary_sha256": "b0538278d802901b956953859973b0d724127e04a70e2a93626cc13fbfd73b0c",
+  "source_sha256": {
+    "EclManager.cpp": "4c4d18a8077c949fd754852646dc37aec100b70bb3476f9ef3c43e3645975016",
+    "EnemyManager.cpp": "aacdce62abc0896c3e21efaecbe9ebb24ad489594fc39167d8e71b542192e5f9",
+    "EffectManager.cpp": "b2c76b4f150befa2b1202926dfe5a582ee75fbca704cefd61f47651725591c0e",
+    "EnemyEclInstr.cpp": "433d2784083b09811908719c1555aa0c9fb684b98eea41eebcba28110a816bda"
+  },
+  "actual_effect_anm_sha256": "edf59b5ddab4b19026938a3831185b1e16fb6ff905cfa62340ffeca471687b04",
+  "aggregate_evidence_sha256": {
+    "effect-summary.jsonl": "b1c67cb6b9f355946bae93f0c0b6ee598bfc9422006da43b008d89bb8f17bb1d",
+    "original-effect-summary.jsonl": "63f1f70c46ccc9f8bb9af213cd11948d21a719fa5c0d4c42028c70b991eab9fb",
+    "original-aggregate-provenance.json": "2535c1509cca567b56a2b83500d4f06bfdbc2c0e274128e8ec3cc7075397841b"
+  },
+  "full_local_diagnostic_receipt_sha256": "1891317410d013c13312d42286855bd43b92e1662d0b09eceeb8e0004377e606"
+}

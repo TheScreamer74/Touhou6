@@ -1,8 +1,53 @@
-# Reference analysis and validation — 2026-10-12
+# Reference analysis and validation — 2026-10-12–14
 
 The port uses the original game data and matching decompilation as its source
 of behavior. Focused binary observations, reference comparisons and runtime
 checks have different scopes; none is a whole-game equivalence proof.
+
+## Predefined original-reference campaign
+
+The coverage contract is [fidelity-scenarios.json](fidelity-scenarios.json):
+96 legal shot/difficulty/stage cases, twelve transition families, six endings
+and seventeen music tracks. Required coverage is distinct from a passing
+receipt. Each original case runs the supplied `102h.exe` through natural replay
+menu navigation in private Wine/config/score storage. The same immutable T6RP
+drives the port. Whole-stage invulnerability is explicitly declared on both
+sides; separate unmodified death, deathbomb and Continue cases test failure
+paths. A partial stage, missing terminal or stale output cannot pass.
+
+Simulation compares every original observed replay tick and the occupied
+enemy/shot/bullet/laser/item pools at predeclared checkpoints. Integers, RNG,
+score and counts are exact; positions use a 0.0002-pixel tolerance. This tests
+executed VM behavior, rather than requiring the port's compiled machine code
+to match the Windows executable. Screenshots retain the whole frame and
+separate playfield/HUD/text metrics, with no alignment or font mask. Ordered
+music/SFX requests, MIDI messages and rendered loop PCM are separate checks.
+The original draw precedes calculation; its subsequent Present labels the
+post-calculation state, potentially after three replay ticks. The harness
+records these clocks separately instead of shifting images until they match.
+
+The complete rendering campaign is tied to immutable native binary
+`4e84e9e14d5bfc3c429aec93fe6f35a99da8e5e935a98abc6a27fa0686c69096`
+and its source manifest. Its simulation, image and ordered-audio results are
+reported separately; completing captures does not establish image parity.
+Later score-popup geometry/depth and WebGL submission changes belong to a newer
+build and retain their own focused validation. Those checks do not replace the
+older campaign's recorded pixels or certify unexecuted input branches.
+
+The campaign has exposed and corrected ECL float-copy behavior, callback and
+item-slot ordering, the aliased Stage4 rotation, initial enemy animation bounds,
+Stage5 redirection/culling, Extra raw-angle acceleration, deathbomb timers,
+pause/Continue timing, Options input order, title pre-input, persistent rendering,
+spellcard backgrounds and stage loading overlays. The current diagnostic
+menu/result receipt covers 1,439 original observations, including all 40 CLRD
+progress bytes after the Extra unlock sequence.
+[Menu receipt](menu-reference-2026-10-12.json).
+
+Captures run sequentially by default. Native rendering waits for each GPU
+submission; the browser permits at most two frames in flight. A 6,000-frame
+stress check retained stable memory in both color modes; see
+[presentation fidelity](PRESENTATION_FIDELITY.md). Object-pool comparisons and
+file hashing stream from disk and retain bounded diagnostic examples.
 
 ## REA and original executable
 
@@ -30,6 +75,15 @@ The invocation is reproducible with the prepared CLI:
 ```sh
 rea function "/path/to/102h.exe" 0x40f7c0 --provider ghidra --format json --full-output
 ```
+
+Further binary observations corroborated Options at `0x439137`
+(`ev_6d335a15d051c5a5be8d7ce5fde19144f70031c093f2b18323a1aa6af15dfc34`),
+laser cancellation at `0x414360`
+(`ev_4a1f8f7b1495aaba7da1cdeae84ecba488fe67c43c65c364a99a3703fe9501af`),
+and `utils::Rotate` at `0x41e8d0`
+(`ev_8ece2e6ed5a5bd476a8763caf532e8ec330bd47722b4ba7f94cf2f64e8caef1d`).
+The last function writes x before reading it again for y when input and output
+alias; replacing it with an equivalent rotation formula changes Stage4 EX12.
 
 Related source-map addresses for v1.02h:
 
@@ -80,7 +134,7 @@ All 17 hosted Vorbis files retain the corresponding original WAV's frame count
 and source rate; every `.pos` range is inside its track. Thirty-four browser
 render checks (17 tracks at 44.1 and 48 kHz) straddled the loop boundary and
 matched the expected decoded PCM alignment within 0.49 output samples. Six
-focused audio tests and all 60 workspace unit checks pass. This checks loop
+focused audio tests and that run's 60 workspace unit checks passed. This checks loop
 timing and rendered output, without claiming subjective listening results or
 lossless Vorbis equivalence. [Browser receipt](audio-loop-2026-10-12.json).
 The actual corrected engine was also observed using a 48 kHz context and buffer
@@ -102,6 +156,15 @@ resources, follows all six endings into `staff00.end`, observes `th06_16` then
 y = 0. Metal screenshots were inspected for artwork, positions and overflow.
 The existing Noto text renderer remains a visible difference from GDI.
 
+The actual original END interpreter was subsequently compared across all six
+endings, with both unseen/plain input and seen/Ctrl input: twelve cases,
+197,924 state observations and matching music/fade requests, plus 336 image
+pairs. The fixture explicitly enters END once; it does not patch its code,
+script counter, timers, resources or subsequent keys. This proves that
+interpreter's declared entry cases, while natural story completion and score
+screens remain separate scenarios. Image metrics preserve the GDI/JPEG
+differences. [Original END receipt](ending-reference-2026-10-12.json).
+
 ## Locked C++ oracle reference
 
 The native harnesses target
@@ -111,8 +174,9 @@ The downloaded source archive SHA256 is
 `f09629ea2d227bbc9430c03dc51f87e2cc408e6cf6337797f449fcfde225e3cf`.
 Source copying, existing rendering stubs and 64-bit pointer adaptations are
 local to generated build directories. Interpreter formulas and comparison
-tolerances were not rewritten. The harness-only `utils::Rotate` stub was corrected
-to the original function's handedness before the projectile comparisons. `Catk.characterShotType` in the engine stub was
+tolerances were not rewritten. The harness now copies the original
+`utils::Rotate` function verbatim into its generated build, preserving its
+handedness and input/output aliasing. `Catk.characterShotType` in the engine stub was
 corrected to the five-entry array declared by the reference.
 
 The standalone bullet battery compares 139 emitted projectiles over all nine
@@ -144,12 +208,13 @@ source manifest whose before/after hashes matched during execution.
 
 ## Original executable replay comparison
 
-The supplied, unmodified v1.02h executable runs in an isolated Wine 11.0 WoW64 /
-Xvfb environment on Ubuntu 22.04 x86_64. The Direct3D8 capture proxy reads manager
-state at Present; the reference uses deterministic timing and keyboard hooks,
-with god mode, practice unlocks and forced-stage patches disabled. Audio is
-disabled only in this reference copy's configuration. Original game assets and
-executables stay outside Git and outside the public release.
+The initial bundled-demo comparison below used the supplied v1.02h executable
+in an isolated Wine 11.0 WoW64 / Xvfb environment on Ubuntu 22.04 x86_64.
+Its Direct3D8 capture proxy reads manager state at Present with deterministic
+timing and keyboard hooks. This historical demo capture disabled god mode,
+practice unlocks, forced-stage patches and audio. The later predefined
+campaign declares invulnerability and enabled sound separately. Original game
+assets and executables stay outside Git and outside the public release.
 
 All 3,720 observations of the original title's bundled Reimu A / Lunatic /
 stage-4 demo match the port: position (0.0002 px tolerance), score, stocks, power,
@@ -181,7 +246,27 @@ original-asset spawn/fade combinations also pass. Graze popups, effect sprite RN
 and screen-shake viewport dependencies are covered separately. See
 [the projectile harness](../oracle/projectiles/README.md).
 
-## Complete route regression
+### Extra precision and persistent bubbles — 2026-10-13
+
+Marisa A / Extra exposed two independent differences. EX15's reflection now
+evaluates both polar angles with double `atan2`, then rounds each result to
+float, preserving float coordinate subtraction. The regression locks the
+original angle bits `0x40212067`; the next original-reference replay removes
+the first projectile drift at frame 20340 without increasing tolerance.
+
+Original effect aggregates then identified five spell bubbles deleted by the
+port at frame 11964, although the original kept them. Starting or ending a spell
+does not reset the enemy's effect array; actual despawn performs that cleanup.
+At frame 25012 these five occupied slots prevent two splash particles and one
+wing particle, explaining exactly eleven extra RNG draws in the previous port.
+The comparison matched 9,373 occupied-effect snapshots before the first effect
+difference, and the probe's 24,987 scalar observations through frame 25012 match
+the preserved reference prefix. Only aggregate counts, callback/age histograms
+and slot hashes were collected from the reference host. Targeted tests pass;
+this diagnostic does not itself certify the corrected whole-stage or 96-case
+campaign. [Diagnostic receipt](extra-rng-reference-2026-10-13.json).
+
+## Internal complete-route regression
 
 The original-asset battery exercises all 96 legal stage/difficulty/shot
 combinations: stages 1–5 in Easy/Normal/Hard/Lunatic, stage 6 in Normal/Hard/Lunatic,
@@ -203,7 +288,7 @@ TH06_GOD=1 TH06_REFERENCE_DIR=/path/to/extracted-reference \
 
 | Area | Scope and remaining limit |
 |---|---|
-| Replay equivalence | Internal recording/playback is checked on all 96 routes; original executable observations cover the bundled stage-4 replay only |
+| Replay equivalence | Internal recording/playback covers 96 routes; the predefined campaign compares actual original stage inputs and terminals separately, without inferring unexecuted branch equivalence |
 | Japanese font | MS Gothic can be supplied separately; the hosted fallback is Noto Sans JP, and rasterization differs from Windows GDI |
 | MIDI timbre | Original MIDI messages and loop timing are supported; the hosted free TimGM6mb bank differs from proprietary Windows MIDI banks |
 | GPU output | Original 16-bit texture/back-buffer precision is implemented; driver-specific edge and conversion rounding can differ on Metal/WebGL2 |
@@ -220,6 +305,6 @@ real reload. The preceding build additionally checked replay import and durable
 score/replay storage. This checks startup and those flows;
 it is not a browser playthrough of every stage/character/difficulty.
 
-These checks do not compare every rendering effect, complete GUI behavior,
-all difficulty/character combinations, or Windows audio/font behavior. See
+These checks do not establish pixel identity for every effect, unexecuted GUI
+branch equivalence, or Windows audio/font identity. See
 [oracle/README.md](../oracle/README.md) for reproducible commands and inputs.

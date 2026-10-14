@@ -4,7 +4,7 @@
 //! original laser warmup/despawn midpoint hitbox bug and switch fallthrough.
 
 use crate::anm_vm::AnmRunner;
-use crate::ecl_vm::{Bullet, Laser, normalize_angle};
+use crate::ecl_vm::{Bullet, Laser, normalize_angle, player_angle_from, sincos_mul};
 use th06_formats::anm0::Entry;
 
 pub const SPAWN_COLORS_16: [u32; 16] = [0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 4, 4, 4, 0];
@@ -194,7 +194,7 @@ impl Bullet {
                 } else if flag == 0x100 {
                     self.ex_f[0]
                 } else {
-                    (player[1] - self.pos[1]).atan2(player[0] - self.pos[0]) + self.ex_f[0]
+                    player_angle_from(player, self.pos) + self.ex_f[0]
                 };
                 self.speed = self.ex_f[1];
                 self.speed
@@ -249,7 +249,7 @@ impl Bullet {
     }
 
     fn set_velocity(&mut self, speed: f32) {
-        self.velocity = [self.angle.cos() * speed, self.angle.sin() * speed];
+        self.velocity = sincos_mul(self.angle, speed);
     }
 
     fn in_bounds(&self, region: [f32; 2]) -> bool {

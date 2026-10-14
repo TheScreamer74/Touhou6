@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 use th06::{Character, Difficulty, GameFiles, RecordPhase, build_game};
 use th06_engine::{Engine, Frame, Input, Key};
+mod capture;
 
 /// All files from one PBG3 archive, keyed by entry name.
 fn load_archive(path: &Path) -> HashMap<String, Vec<u8>> {
@@ -268,11 +269,21 @@ fn main() {
     let mut replay_dump: Option<String> = None;
     let mut replay_details: Option<String> = None;
     let mut replay_effects: Option<String> = None;
+    let mut replay_pools: Option<String> = None;
     let mut god = false;
     let mut autoplay = false;
     let mut probe_run = false;
     let mut ecl_dump = false;
-    let mut color_16bit = false;
+    let mut color_mode: Option<bool> = None;
+    let mut hardware_texture_blending: Option<bool> = None;
+    let mut capture_seed: Option<u16> = None;
+    let mut score_fixture: Option<(u64, i64)> = None;
+    let mut capture_dir: Option<String> = None;
+    let mut capture_frames = std::collections::BTreeSet::new();
+    let mut capture_pool_frames = std::collections::BTreeSet::new();
+    let mut complete_reference = false;
+    let mut capture_clock: Option<String> = None;
+    let mut input_script: Option<String> = None;
     let mut warp: Option<bool> = None; // Some(false) = midboss, Some(true) = boss
     let mut game_dir = String::from("../TH06 ~ The Embodiment of Scarlet Devil/kouma");
     while let Some(arg) = args.next() {
@@ -312,6 +323,14 @@ fn main() {
             "--score" => {
                 debug_score = Some(args.next().expect("--score <n>").parse().expect("score"))
             }
+            "--score-fixture" => {
+                let value = args.next().expect("--score-fixture <present>:<score>");
+                let (present, score) = value.split_once(':').expect("score fixture present:score");
+                score_fixture = Some((
+                    present.parse().expect("fixture present"),
+                    score.parse().expect("fixture score"),
+                ));
+            }
             "--difficulty" => {
                 let value = args
                     .next()
@@ -333,11 +352,40 @@ fn main() {
             "--replay-effects" => {
                 replay_effects = Some(args.next().expect("--replay-effects <effects.csv>"))
             }
+            "--replay-pools" => {
+                replay_pools = Some(args.next().expect("--replay-pools <out.jsonl>"))
+            }
             "--god" => god = true,
             "--autoplay" => autoplay = true,
             "--probe-run" => probe_run = true,
             "--ecl-dump" => ecl_dump = true,
-            "--color-16bit" => color_16bit = true,
+            "--color-16bit" => color_mode = Some(true),
+            "--color-32bit" => color_mode = Some(false),
+            "--hardware-texture-blending" => hardware_texture_blending = Some(true),
+            "--software-texture-blending" => hardware_texture_blending = Some(false),
+            "--seed" => {
+                let value = args.next().expect("--seed <u16|0xhex>");
+                capture_seed = Some(if let Some(hex) = value.strip_prefix("0x") {
+                    u16::from_str_radix(hex, 16).expect("seed")
+                } else {
+                    value.parse().expect("seed")
+                });
+            }
+            "--capture-dir" => capture_dir = Some(args.next().expect("--capture-dir <directory>")),
+            "--capture-frames" => {
+                capture_frames = capture::frames(&args.next().expect("--capture-frames <1,60,...>"))
+                    .expect("capture frames")
+            }
+            "--capture-pool-frames" => {
+                capture_pool_frames =
+                    capture::frames(&args.next().expect("--capture-pool-frames <1,60,...>"))
+                        .expect("pool frames")
+            }
+            "--complete-reference" => complete_reference = true,
+            "--capture-clock" => {
+                capture_clock = Some(args.next().expect("--capture-clock <replay|update>"))
+            }
+            "--input-script" => input_script = Some(args.next().expect("--input-script <path>")),
             "--midboss" => warp = Some(false),
             "--boss" => warp = Some(true),
             "--game-dir" => game_dir = args.next().expect("--game-dir <path>"),
@@ -418,6 +466,8 @@ fn main() {
         && demo.is_none()
         && !probe_run
         && replay_dump.is_none()
+        && replay_pools.is_none()
+        && capture_dir.is_none()
         && !ecl_dump;
     let (textures, mut game) = build_game(&engine, &files, with_audio);
 
@@ -429,11 +479,28 @@ fn main() {
     game.set_scores(load_scores(&scores_path));
     game.set_scores_path(scores_path);
     game.configure_storage(&game_dir.to_string_lossy());
-    if color_16bit {
-        game.options.color_16bit = true;
-        th06_engine::set_color_16bit(true);
+    if let Some(value) = hardware_texture_blending {
+        game.options.hardware_texture_blending = value;
+    }
+    if let Some(color_16bit) = color_mode {
+        game.options.color_16bit = color_16bit;
+        game.set_diagnostic_color_mode(color_16bit);
     }
     game.set_difficulty(difficulty);
+    if let Some(seed) = capture_seed {
+        game.debug_set_stage_seed(seed);
+    }
+    if let Some((present, score)) = score_fixture {
+        game.debug_set_score_fixture(present, score);
+    }
+    // `--god` makes the player invulnerable (the collide() check reads this).
+    // Safe: still single-threaded here, before the game/run loop starts.
+    // `--autoplay` implies god (the windowed demo shouldn't die); the dodging
+    // auto-player's no-god survival is exercised via `--probe-run`.
+    if god || autoplay {
+        unsafe { std::env::set_var("TH06_GOD", "1") };
+    }
+
     if let Some(path) = replay_file {
         let bytes = std::fs::read(path).expect("read replay");
         let replay = th06_formats::replay::Replay::parse(&bytes).expect("parse replay");
@@ -447,6 +514,23 @@ fn main() {
 
     if let Some(path) = replay_dump {
         use std::io::Write;
+        let mut script = input_script
+            .map(|path| {
+                capture::Script::parse(&std::fs::read_to_string(path).expect("read input script"))
+                    .expect("parse input script")
+            })
+            .unwrap_or_default();
+        let mut terminal_out = std::io::BufWriter::new(
+            std::fs::File::create(format!("{path}.terminal.jsonl")).expect("create terminal dump"),
+        );
+        let mut lifecycle = std::io::BufWriter::new(
+            std::fs::File::create(format!("{path}.lifecycle.csv")).expect("create lifecycle dump"),
+        );
+        writeln!(
+            lifecycle,
+            "update,frame,stage,player_state,respawn,grace,invuln,bomb,bomb_timer,retry,game_menu"
+        )
+        .unwrap();
         let mut out =
             std::io::BufWriter::new(std::fs::File::create(path).expect("create replay dump"));
         let mut details = replay_details.map(|path| {
@@ -461,13 +545,45 @@ fn main() {
             writeln!(file, "frame,slot,timer,callback,sprite,x,y,z").unwrap();
             file
         });
+        let mut pools = replay_pools.map(|path| {
+            std::io::BufWriter::new(std::fs::File::create(path).expect("create pools dump"))
+        });
         writeln!(out, "frame,stage,x,y,lives,bombs,power,score,graze_stage,graze_total,rank,subrank,rng,bullets,lasers,items,particle_timer").unwrap();
-        for _ in 0..frames {
-            game.update(&Input::default());
-            let Some(state) = game.replay_reference_state() else {
+        for update in 0..frames {
+            game.update(&script.input(update));
+            let terminal = game.take_replay_reference_terminal();
+            if let Some(terminal) = &terminal {
+                writeln!(terminal_out, "{}", terminal.json_line().trim_end()).unwrap();
+            }
+            let Some(state) = game
+                .replay_reference_state()
+                .or_else(|| terminal.as_ref().map(|end| end.state.clone()))
+            else {
                 break;
             };
             writeln!(out, "{state}").unwrap();
+            if let Some(state) = game.diagnostic_lifecycle() {
+                writeln!(lifecycle, "{update},{state}").unwrap();
+            } else if let Some(end) = &terminal {
+                writeln!(
+                    lifecycle,
+                    "{update},{},{},{}",
+                    end.frame, end.stage, end.lifecycle
+                )
+                .unwrap();
+            }
+            let checkpoint: u32 = state.split(',').next().unwrap().parse().unwrap();
+            if (terminal.is_some()
+                || capture_frames.is_empty()
+                || capture_frames.contains(&checkpoint))
+                && let Some(file) = &mut pools
+                && let Some(snapshot) = terminal
+                    .as_ref()
+                    .map(|end| end.pools.clone())
+                    .or_else(|| game.replay_reference_pools())
+            {
+                writeln!(file, "{}", snapshot.trim_end()).unwrap();
+            }
             if let Some(file) = &mut details
                 && let Some(bullets) = game.replay_reference_bullets()
             {
@@ -480,14 +596,6 @@ fn main() {
             }
         }
         return;
-    }
-
-    // `--god` makes the player invulnerable (the collide() check reads this).
-    // Safe: still single-threaded here, before the game/run loop starts.
-    // `--autoplay` implies god (the windowed demo shouldn't die); the dodging
-    // auto-player's no-god survival is exercised via `--probe-run`.
-    if god || autoplay {
-        unsafe { std::env::set_var("TH06_GOD", "1") };
     }
 
     // Full-VM oracle: run a stage's ECL from frame 0 with NO input (player fixed
@@ -583,6 +691,9 @@ fn main() {
             debug_power,
             debug_score,
         );
+        if let Some(seed) = capture_seed {
+            game.debug_set_stage_seed(seed);
+        }
         // `--midboss` / `--boss`: fast-forward straight to that fight. The warp
         // must be invulnerable; restore the chosen god state afterwards.
         if let Some(to_boss) = warp {
@@ -595,6 +706,266 @@ fn main() {
                 unsafe { std::env::remove_var("TH06_GOD") };
             }
         }
+    }
+
+    if capture_dir.is_some() || replay_pools.is_some() {
+        use std::io::Write;
+        assert!(
+            !complete_reference || capture_dir.is_some(),
+            "--complete-reference requires --capture-dir"
+        );
+        assert!(
+            capture_dir.is_none() || !capture_frames.is_empty(),
+            "--capture-dir requires --capture-frames"
+        );
+        let replay_clock = match capture_clock.as_deref() {
+            None => game.replay_reference_state().is_some(),
+            Some("replay") => true,
+            Some("update") => false,
+            Some(other) => panic!("unknown capture clock: {other}"),
+        };
+        let mut script = input_script
+            .map(|path| {
+                capture::Script::parse(&std::fs::read_to_string(path).expect("read input script"))
+                    .expect("parse input script")
+            })
+            .unwrap_or_default();
+        let directory = capture_dir.map(PathBuf::from);
+        let mut report = directory.as_ref().map(|directory| {
+            std::fs::create_dir_all(directory).expect("create capture directory");
+            let mut file = std::io::BufWriter::new(
+                std::fs::File::create(directory.join("checkpoints.csv")).expect("capture report"),
+            );
+            writeln!(file, "update,clock,checkpoint,scene,color_bits,image,draw_frame,draw_stage,draw_scene,state").unwrap();
+            file
+        });
+        let mut options = directory.as_ref().map(|directory| {
+            let mut file = std::io::BufWriter::new(
+                std::fs::File::create(directory.join("options.csv")).expect("options trace"),
+            );
+            writeln!(file, "update,scene,life_count,bomb_count,color_16bit,music_mode,play_sounds,default_difficulty,windowed").unwrap();
+            file
+        });
+        let mut stages = directory.as_ref().map(|directory| {
+            let mut file = std::io::BufWriter::new(
+                std::fs::File::create(directory.join("stages.csv")).expect("stage trace"),
+            );
+            writeln!(file, "update,active_calc,stage,x,y,lives,bombs,power,score,graze_stage,graze_total,rank,subrank,rng,bullets,lasers,items,particle_timer").unwrap();
+            file
+        });
+        let mut transitions = directory.as_ref().map(|directory| {
+            let mut file = std::io::BufWriter::new(
+                std::fs::File::create(directory.join("transitions.csv")).expect("transition trace"),
+            );
+            writeln!(file, "update,scene,frame,stage,pause_state,pause_timer,retry_state,retry_timer,game_menu,retry").unwrap();
+            file
+        });
+        let mut navigation = directory.as_ref().map(|directory| {
+            let mut file = std::io::BufWriter::new(
+                std::fs::File::create(directory.join("navigation.csv")).expect("navigation trace"),
+            );
+            writeln!(file, "update,menu_state,cursor,timer").unwrap();
+            file
+        });
+        let mut results = directory.as_ref().map(|directory| {
+            let mut file = std::io::BufWriter::new(
+                std::fs::File::create(directory.join("results.csv")).expect("results trace"),
+            );
+            writeln!(file, "update,state,timer,cursor,cheat_step,progress").unwrap();
+            file
+        });
+        let mut boss_ui = directory.as_ref().map(|directory| {
+            let mut file = std::io::BufWriter::new(
+                std::fs::File::create(directory.join("boss-ui.csv")).expect("boss UI trace"),
+            );
+            writeln!(file, "update,frame,stage,boss_present,health_bar_state,bar_target,bar_display,opacity,lives,seconds,last_draw_seconds,dialogue").unwrap();
+            file
+        });
+        let mut lifecycle = directory.as_ref().map(|directory| {
+            let mut file = std::io::BufWriter::new(
+                std::fs::File::create(directory.join("lifecycle.csv")).expect("lifecycle trace"),
+            );
+            writeln!(file, "update,frame,stage,player_state,respawn,grace,invuln,bomb,bomb_timer,retry,game_menu").unwrap();
+            file
+        });
+        let mut pools = replay_pools.map(|path| {
+            std::io::BufWriter::new(std::fs::File::create(path).expect("create pools dump"))
+        });
+        let terminal_path = directory
+            .as_ref()
+            .map(|directory| directory.join("terminal.jsonl"));
+        let mut terminal_out = terminal_path.map(|path| {
+            std::io::BufWriter::new(std::fs::File::create(path).expect("create terminal dump"))
+        });
+        // Record simulation and rendering from the same execution. Pool
+        // selection is independent of PNG selection, so a complete comparison
+        // does not require an image for every simulation checkpoint.
+        let mut reference_out = directory.as_ref().filter(|_| complete_reference).map(|directory| {
+            let mut file = std::io::BufWriter::new(
+                std::fs::File::create(directory.join("replay-state.csv"))
+                    .expect("create complete replay dump"),
+            );
+            writeln!(file, "frame,stage,x,y,lives,bombs,power,score,graze_stage,graze_total,rank,subrank,rng,bullets,lasers,items,particle_timer").unwrap();
+            file
+        });
+        let mut reference_terminal =
+            directory
+                .as_ref()
+                .filter(|_| complete_reference)
+                .map(|directory| {
+                    std::io::BufWriter::new(
+                        std::fs::File::create(directory.join("replay-state.csv.terminal.jsonl"))
+                            .expect("create complete terminal dump"),
+                    )
+                });
+        let all_pool_frames = pools.is_some() && capture_frames.is_empty();
+        let textures_ref: Vec<&th06_engine::Texture> = textures.iter().collect();
+        let mut pending = capture_frames;
+        let mut pending_pools = capture_pool_frames;
+        for update in 1..=frames {
+            // Like refcap's synthetic timeGetTime hook, this clock describes
+            // presentation cadence only. Gameplay still consumes replay ticks.
+            game.set_diagnostic_draw_millis(((u64::from(update) - 1) * 1000 / 60) as u32);
+            // Original Present observes the post-calc replay frame, but its
+            // backbuffer was drawn from the state preceding those 1–3 ticks.
+            let draw_scene = game.diagnostic_scene();
+            let draw_key = game.replay_reference_state().map(|state| {
+                let mut fields = state.split(',');
+                (
+                    fields.next().unwrap().to_owned(),
+                    fields.next().unwrap().to_owned(),
+                )
+            });
+            let frame = game.update(&script.input(update - 1));
+            if directory.is_some() {
+                // The original retains color between Presents. Every draw
+                // chain contributes, even when no PNG checkpoint is requested.
+                engine.advance_frame(&frame.cmds, &textures_ref, frame.bg.as_ref());
+            }
+            if let (Some(file), Some(state)) = (&mut stages, game.diagnostic_stage_state()) {
+                writeln!(file, "{update},{state}").unwrap();
+            }
+            if let Some(file) = &mut options {
+                let options = &game.options;
+                writeln!(
+                    file,
+                    "{update},{},{},{},{},{},{},{},{}",
+                    game.diagnostic_scene(),
+                    options.life_count,
+                    options.bomb_count,
+                    options.color_16bit as u8,
+                    options.music_mode,
+                    options.play_sounds as u8,
+                    options.default_difficulty,
+                    options.windowed as u8
+                )
+                .unwrap();
+            }
+            let terminal = game.take_replay_reference_terminal();
+            if let Some(file) = &mut transitions {
+                writeln!(file, "{},{}", update, game.diagnostic_transition()).unwrap();
+            }
+            if let (Some(file), Some(state)) = (&mut navigation, game.diagnostic_navigation()) {
+                writeln!(file, "{update},{state}").unwrap();
+            }
+            if let (Some(file), Some(state)) = (&mut results, game.diagnostic_results()) {
+                writeln!(file, "{update},{state}").unwrap();
+            }
+            if let (Some(file), Some(state)) = (&mut boss_ui, game.diagnostic_boss_ui()) {
+                writeln!(file, "{update},{state}").unwrap();
+            }
+            if let Some(file) = &mut lifecycle {
+                if let Some(state) = game.diagnostic_lifecycle() {
+                    writeln!(file, "{update},{state}").unwrap();
+                } else if let Some(end) = &terminal {
+                    writeln!(
+                        file,
+                        "{update},{},{},{}",
+                        end.frame, end.stage, end.lifecycle
+                    )
+                    .unwrap();
+                }
+            }
+            if let (Some(terminal), Some(file)) = (&terminal, &mut terminal_out) {
+                writeln!(file, "{}", terminal.json_line().trim_end()).unwrap();
+            }
+            if let (Some(terminal), Some(file)) = (&terminal, &mut reference_terminal) {
+                writeln!(file, "{}", terminal.json_line().trim_end()).unwrap();
+            }
+            let state = game
+                .replay_reference_state()
+                .or_else(|| terminal.as_ref().map(|end| end.state.clone()));
+            if let (Some(file), Some(state)) = (&mut reference_out, &state) {
+                writeln!(file, "{state}").unwrap();
+            }
+            let replay_key = state.as_ref().map(|state| {
+                let mut fields = state.split(',');
+                (
+                    fields.next().unwrap().parse::<u32>().expect("replay frame"),
+                    fields.next().unwrap().parse::<u32>().expect("replay stage"),
+                )
+            });
+            let Some((checkpoint, stage)) = (if replay_clock {
+                replay_key
+            } else {
+                Some((update, 0))
+            }) else {
+                continue;
+            };
+            let selected = pending.remove(&checkpoint);
+            let pool_selected = pending_pools.remove(&checkpoint);
+            if (terminal.is_some() || all_pool_frames || selected || pool_selected)
+                && let Some(file) = &mut pools
+                && let Some(snapshot) = terminal
+                    .as_ref()
+                    .map(|end| end.pools.clone())
+                    .or_else(|| game.replay_reference_pools())
+            {
+                writeln!(file, "{}", snapshot.trim_end()).unwrap();
+            }
+            if !selected {
+                continue;
+            }
+            if let (Some(directory), Some(report)) = (&directory, &mut report) {
+                let image = if replay_clock {
+                    format!("replay_stage{stage:02}_frame{checkpoint:06}.png")
+                } else {
+                    format!("update_frame{checkpoint:06}.png")
+                };
+                let pixels = engine.read_frame();
+                image::save_buffer(
+                    directory.join(&image),
+                    &pixels,
+                    th06_engine::SCREEN_W,
+                    th06_engine::SCREEN_H,
+                    image::ColorType::Rgba8,
+                )
+                .expect("save checkpoint");
+                writeln!(
+                    report,
+                    "{update},{},{checkpoint},{},{},{image},{},{},{draw_scene},\"{}\"",
+                    if replay_clock { "replay" } else { "update" },
+                    game.diagnostic_scene(),
+                    if game.effective_color_16bit() { 16 } else { 32 },
+                    draw_key.as_ref().map_or("", |key| key.0.as_str()),
+                    draw_key.as_ref().map_or("", |key| key.1.as_str()),
+                    state.unwrap_or_default()
+                )
+                .unwrap();
+            }
+            if pending.is_empty() && pending_pools.is_empty() && !all_pool_frames {
+                break;
+            }
+        }
+        assert!(
+            pending.is_empty(),
+            "capture checkpoints were not reached/rendered: {pending:?}"
+        );
+        assert!(
+            pending_pools.is_empty(),
+            "pool checkpoints were not reached: {pending_pools:?}"
+        );
+        return;
     }
 
     // Full god-mode run from the title, recorded to one mp4 per phase
@@ -642,7 +1013,8 @@ fn main() {
                 frames_dir = out_root.join(format!("_f_{label}"));
                 std::fs::create_dir_all(&frames_dir).unwrap();
             }
-            let pixels = engine.render_to_image(&frame.cmds, &textures_ref, frame.bg.as_ref());
+            engine.advance_frame(&frame.cmds, &textures_ref, frame.bg.as_ref());
+            let pixels = engine.read_frame();
             image::save_buffer(
                 frames_dir.join(format!("f_{seg_frame:06}.png")),
                 &pixels,
@@ -699,7 +1071,8 @@ fn main() {
                 &[]
             };
             let frame = game.update(&Input::synthetic(&held, pressed));
-            let pixels = engine.render_to_image(&frame.cmds, &textures_ref, frame.bg.as_ref());
+            engine.advance_frame(&frame.cmds, &textures_ref, frame.bg.as_ref());
+            let pixels = engine.read_frame();
             let path = format!("{dir}/frame_{f:06}.png");
             image::save_buffer(
                 &path,
@@ -749,7 +1122,8 @@ fn main() {
             };
             frame = game.update(&input);
             if f % demo_interval == 0 {
-                let pixels = engine.render_to_image(&frame.cmds, &textures_ref, frame.bg.as_ref());
+                engine.advance_frame(&frame.cmds, &textures_ref, frame.bg.as_ref());
+                let pixels = engine.read_frame();
                 let path = format!("{dir}/frame_{f:05}.png");
                 image::save_buffer(
                     &path,
@@ -766,16 +1140,12 @@ fn main() {
     } else if let Some(out) = screenshot {
         // Auto-play: hold Shoot, steer under the boss/nearest enemy, and pulse
         // Shoot to advance dialogue — so headless runs actually fight.
-        let mut frame = Frame {
-            cmds: Vec::new(),
-            bg: None,
-            quit: false,
-        };
         // TH06_NOSHOOT: steer but never fire — lets a midboss/boss reach its
         // timeout so leave-without-kill and time-out-only spellcards (the ones
         // that use ex-instructions) are exercised. Dialogue is advanced with
         // Enter (which doesn't fire shots) so the fight actually starts.
         let no_shoot = std::env::var_os("TH06_NOSHOOT").is_some();
+        let textures_ref: Vec<&th06_engine::Texture> = textures.iter().collect();
         for f in 0..frames {
             let mut held = if no_shoot {
                 Vec::new()
@@ -798,10 +1168,10 @@ fn main() {
             } else {
                 &[]
             };
-            frame = game.update(&Input::synthetic(&held, pressed));
+            let frame = game.update(&Input::synthetic(&held, pressed));
+            engine.advance_frame(&frame.cmds, &textures_ref, frame.bg.as_ref());
         }
-        let textures_ref: Vec<&th06_engine::Texture> = textures.iter().collect();
-        let pixels = engine.render_to_image(&frame.cmds, &textures_ref, frame.bg.as_ref());
+        let pixels = engine.read_frame();
         image::save_buffer(
             &out,
             &pixels,

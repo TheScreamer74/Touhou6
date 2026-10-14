@@ -27,8 +27,10 @@
  *                             names: Z X Q S SHIFT CTRL ESC RETURN UP DOWN
  *                             LEFT RIGHT HOME, or a raw 0xNN VK code
  *
- * Frame indexing: the game runs one logic tick per Present, so the input
- * frame counter == the capture frame index == Present count.
+ * Input ranges and generic captures use the Present count. Original rendering
+ * draws the pre-calculation state, executes 1–3 replay calculation ticks, then
+ * Presents. A replay checkpoint records the post-calculation frame separately;
+ * it must not be confused with the frame which produced the visible pixels.
  */
 #define CINTERFACE
 #define COBJMACROS
@@ -37,6 +39,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "menu_trace.h"
+#include "pool_trace.h"
+#include "vm_trace.h"
+#include "gui_trace.h"
+#include "transition_trace.h"
+#include "bullet_trace.h"
+#include "ending_trace.h"
 
 /* ---- state ---- */
 
@@ -58,7 +67,11 @@ static int g_timing;                /* log per-Present timing (env TH06CAP_TIMIN
 static int g_god;                   /* no-op Player::Die (reach later stages) */
 static int g_practice;              /* force all stages unlocked for Practice */
 static int g_forcestage;            /* if >0, force currentStage = g_forcestage-1 */
-static volatile LONG g_frame;       /* Present count == logic frame */
+static unsigned g_score_fixture_frame = 0xffffffffu;
+static unsigned g_score_fixture_value;
+static int g_score_fixture_applied;
+static volatile LONG g_frame;       /* Present/input clock; not replay calc count */
+#include "audio_trace.h"
 static FILE *g_log;
 static FILE *g_state;
 static unsigned g_stopafter;
@@ -66,15 +79,38 @@ static FILE *g_detail;
 static FILE *g_effects;
 static unsigned g_detailstart;
 static unsigned g_detailend = 0xffffffffu;
+static FILE *g_scenes;
+static int g_stopstageend;
+static int g_stopgameover;
+static unsigned g_postterminal;
+static unsigned g_terminal_present;
+static int g_terminal_seen;
+static FILE *g_lifecycle;
+static int g_prev_player_state = -1, g_prev_bomb_state = -1;
+static unsigned g_lifecycle_capture_until;
+static int g_started_stage;
+static int g_last_replay_frame;
+typedef struct ReplayCapture { unsigned stage, frame; } ReplayCapture;
+static ReplayCapture g_replay_captures[256];
+static unsigned g_nreplay_captures;
+static int g_capture_replay_stage;
 
 /* 1.02h globals/layout from globals.csv and the size-checked decomp headers.
  * Read only: logging must not change the replay, RNG, collision or score. */
+static void logf_(const char *fmt, ...);
+
 static void log_replay_state(unsigned present)
 {
     unsigned char *gm = (unsigned char *)0x69bca0;
     unsigned char *player = (unsigned char *)0x6ca628;
     unsigned char *manager = *(unsigned char **)0x6d3f18;
-    if (!g_state || !manager || !gm[0x1821]) return;
+    int scene = *(const int *)(0x6c6d18 + 0x18c);
+    if (!g_state || !manager || !gm[0x1821] ||
+        (scene != 2 && scene != 3 && scene != 7 && scene != 8)) return;
+    if (*(int *)manager == 239 || *(int *)manager == 240)
+        logf_("player_vm frame=%d color=%08x flags=%08x opts=%08x\n", *(int *)manager,
+            *(unsigned *)(player+0x7c), *(unsigned *)(player+0x80),
+            *(unsigned *)(0x6c6d18+0x114+0x34));
     unsigned bullets = 0, lasers = 0, items = 0;
     unsigned char *bm = (unsigned char *)0x5a5ff8;
     for (unsigned i = 0; i < 640; i++) {
@@ -181,7 +217,24 @@ static void load_config(void)
         unsigned s, e;
         if (line[0] == '#' || line[0] == '\n')
             continue;
-        if (sscanf(line, "capdir %63s", a) == 1) {
+        if (refcap_menu_config(line) || refcap_pool_config(line) || refcap_vm_config(line) || refcap_gui_config(line) || refcap_ending_config(line)) {
+            continue;
+        } else if (sscanf(line, "capreplay %u %u", &s, &e) == 2) {
+            if (g_nreplay_captures < 256)
+                g_replay_captures[g_nreplay_captures++] = (ReplayCapture){s,e};
+        } else if (sscanf(line, "stopstageend %u", &s) == 1) {
+            g_stopstageend = (int)s;
+        } else if (sscanf(line, "postterminal %u", &s) == 1) {
+            g_postterminal = s;
+        } else if (sscanf(line, "stopgameover %u", &s) == 1) {
+            g_stopgameover = (int)s;
+        } else if (sscanf(line, "lifecyclefile %63s", a) == 1) {
+            g_lifecycle = fopen(a, "w");
+            if (g_lifecycle) fputs("present,frame,stage,player_state,respawn,grace,invuln,bomb,bomb_timer,retry,game_menu\n", g_lifecycle);
+        } else if (sscanf(line, "scenefile %63s", a) == 1) {
+            g_scenes = fopen(a, "w");
+            if (g_scenes) fprintf(g_scenes, "present,supervisor_state,frame,stage,is_replay,is_active,retry,game_menu,finished_stage,msg_idx,msg_time\n");
+        } else if (sscanf(line, "capdir %63s", a) == 1) {
             strncpy(g_capdir, a, sizeof(g_capdir) - 1);
         } else if (sscanf(line, "capstart %u", &s) == 1) {
             g_capstart = s;
@@ -212,6 +265,9 @@ static void load_config(void)
             g_practice = (int)s;
         } else if (sscanf(line, "forcestage %u", &s) == 1) {
             g_forcestage = (int)s;
+        } else if (sscanf(line, "scorefixture %u %u", &s, &e) == 2) {
+            g_score_fixture_frame = s;
+            g_score_fixture_value = e;
         } else if (sscanf(line, "key %u %u %63s", &s, &e, b) == 3) {
             if (g_nkeys < (int)(sizeof(g_keys) / sizeof(g_keys[0]))) {
                 g_keys[g_nkeys].start = s;
@@ -318,6 +374,17 @@ static DWORD WINAPI my_timeGetTime(void)
 static BOOL WINAPI my_GetKeyboardState(PBYTE state)
 {
     unsigned f = (unsigned)g_frame;
+    if (!g_score_fixture_applied && f == g_score_fixture_frame) {
+        /* Explicit fixture: preserve lives, RNG, clocks and rolling GUI score. */
+        *(unsigned *)(0x69bca0 + 4) = g_score_fixture_value;
+        g_score_fixture_applied = 1;
+        logf_("scorefixture present=%u score=%u\n", f, g_score_fixture_value);
+    }
+    if (f == 600) {
+        unsigned short control;
+        __asm__ volatile ("fnstcw %0" : "=m"(control));
+        logf_("gameplay_fpu keyboard present=%u control=%04x\n", f, control);
+    }
     memset(state, 0, 256);
     for (int i = 0; i < g_nkeys; i++)
         if (f >= g_keys[i].start && f < g_keys[i].end)
@@ -396,7 +463,10 @@ static void write_bmp(unsigned frame, const BYTE *px, UINT w, UINT h,
         }
     }
     char path[MAX_PATH];
-    snprintf(path, sizeof(path), "%s\\frame_%06u.bmp", g_capdir, frame);
+    if (g_capture_replay_stage)
+        snprintf(path, sizeof(path), "%s\\replay_stage%02d_frame%06u.bmp", g_capdir, g_capture_replay_stage, frame);
+    else
+        snprintf(path, sizeof(path), "%s\\frame_%06u.bmp", g_capdir, frame);
     FILE *f = fopen(path, "wb");
     if (!f)
         return;
@@ -480,7 +550,100 @@ static HRESULT STDMETHODCALLTYPE my_Present(IDirect3DDevice8 *dev,
                                             HWND wnd, CONST RGNDATA *dirty)
 {
     unsigned f = (unsigned)g_frame;
+    const unsigned char *gm = (const unsigned char *)0x69bca0;
+    if (f == 600) {
+        unsigned short control;
+        __asm__ volatile ("fnstcw %0" : "=m"(control));
+        logf_("gameplay_fpu present=%u control=%04x\n", f, control);
+    }
+    if (!f) logf_("runtime_cfg colorMode16bit=%u windowed=%u opts=%08x\n",
+        *(unsigned char *)(0x6c6d18+0x114+26),
+        *(unsigned char *)(0x6c6d18+0x114+30),
+        *(unsigned *)(0x6c6d18+0x114+52));
+    refcap_ending_present(f);
+    int scene = *(const int *)(0x6c6d18 + 0x18c);
+    /* CutChain may free these objects on Ending entry. Stage transition
+     * scenes retain them for their final calculation observation. */
+    int stage_scene = scene == 2 || scene == 3 || scene == 7 || scene == 8;
+    const unsigned char *manager = stage_scene ? *(const unsigned char **)0x6d3f18 : NULL;
+    const unsigned char *gui = stage_scene ? *(const unsigned char **)(0x69bc30 + 4) : NULL;
+    int replay_frame = manager ? *(const int *)manager : -1;
+    int stage = *(const int *)(gm + 0x1a34);
+    refcap_gui_log(f, stage, replay_frame, stage_scene);
+    refcap_menu_log(f);
+    transition_trace_log(f);
+    refcap_bullet_log(f, scene, replay_frame);
+    audio_trace_present();
+    if (g_scenes) {
+        fprintf(g_scenes, "%u,%d,%d,%d,%d,%u,%u,%u,%d,%d,%d\n", f, scene,
+            replay_frame, stage, *(const int *)(gm + 0x1c), gm[0x1821],
+            gm[0x1820], gm[0x181f], gui ? *(const int *)(gui + 0x2bdc) : -1,
+            gui ? *(const int *)(gui + 0x253c) : -1,
+            gui ? *(const int *)(gui + 0x2548) : -1);
+        fflush(g_scenes);
+    }
     log_replay_state(f);
+    if (manager && gm[0x1821] && scene == 2) {
+        refcap_pool_log((unsigned)stage, (unsigned)replay_frame);
+        refcap_vm_log((unsigned)stage, (unsigned)replay_frame);
+        if (g_lifecycle) {
+            const unsigned char *player = (const unsigned char *)0x6ca628;
+            int state = (signed char)player[0x9e0];
+            int bomb = *(const int *)(player + 0x75c8);
+            fprintf(g_lifecycle, "%u,%d,%d,%d,%d,%d,%d,%d,%d,%u,%u\n", f,
+                replay_frame, stage, state, *(const int *)(player+0x9d8),
+                *(const int *)(player+0x9dc), *(const int *)(player+0x75bc),
+                bomb, *(const int *)(player+0x75d8), gm[0x1820], gm[0x181f]);
+            fflush(g_lifecycle);
+            if (state != g_prev_player_state || bomb != g_prev_bomb_state)
+                g_lifecycle_capture_until = f + 2;
+            if (f <= g_lifecycle_capture_until) {
+                g_capture_replay_stage = stage;
+                capture_backbuffer(dev, (unsigned)replay_frame);
+                g_capture_replay_stage = 0;
+            }
+            g_prev_player_state = state;
+            g_prev_bomb_state = bomb;
+        }
+        g_started_stage = stage;
+        g_last_replay_frame = replay_frame;
+        for (unsigned i = 0; i < g_nreplay_captures; i++) {
+            if (g_replay_captures[i].stage == (unsigned)stage &&
+                g_replay_captures[i].frame == (unsigned)replay_frame) {
+                g_capture_replay_stage = stage;
+                capture_backbuffer(dev, (unsigned)replay_frame);
+                g_capture_replay_stage = 0;
+                g_replay_captures[i].stage = 0; /* once per scenario */
+            }
+        }
+    }
+    if (g_stopgameover && g_started_stage && scene == 2 && gm[0x1820]) {
+        FILE *terminal = fopen("terminal.json", "w");
+        if (terminal) {
+            fprintf(terminal, "{\"event\":\"game-over\",\"stage\":%d,\"frame\":%d,\"present\":%u,\"supervisor_state\":%d,\"is_replay\":%d}\n",
+                stage, replay_frame, f, scene, *(const int *)(gm + 0x1c));
+            fclose(terminal);
+        }
+        ExitProcess(0);
+    }
+    if (g_stopstageend && !g_terminal_seen && g_started_stage && (scene == 3 || scene == 7 || scene == 8 || scene == 10)) {
+        FILE *terminal = fopen("terminal.json", "w");
+        if (terminal) {
+            fprintf(terminal, "{\"stage\":%d,\"frame\":%d,\"present\":%u,\"supervisor_state\":%d,\"finished_stage\":%d,\"is_replay\":%d}\n",
+                g_started_stage, replay_frame >= 0 ? replay_frame : g_last_replay_frame, f, scene,
+                gui ? *(const int *)(gui + 0x2bdc) : -1, *(const int *)(gm + 0x1c));
+            fclose(terminal);
+        }
+        g_capture_replay_stage = g_started_stage;
+        capture_backbuffer(dev, (unsigned)(replay_frame >= 0 ? replay_frame : g_last_replay_frame));
+        g_capture_replay_stage = 0;
+        g_terminal_seen = 1;
+        g_terminal_present = f;
+    }
+    if (g_terminal_seen) {
+        capture_backbuffer(dev, f);
+        if (f >= g_terminal_present + g_postterminal) ExitProcess(0);
+    }
     if (g_stopafter && f >= g_stopafter) ExitProcess(0);
     if (g_practice)
         force_practice_unlock();
@@ -545,6 +708,7 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
         g_log = fopen("th06cap.log", "w");
         logf_("refcap proxy attached\n");
         load_config();
+        audio_trace_install();
         CreateDirectoryA(g_capdir, NULL);
         patch_iat("WINMM.dll", "timeGetTime", (void *)my_timeGetTime);
         patch_iat("USER32.dll", "GetKeyboardState", (void *)my_GetKeyboardState);

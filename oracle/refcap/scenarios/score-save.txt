@@ -1,0 +1,26 @@
+statefile state.csv
+scenefile scenes.csv
+menufile menus.csv
+resultfile results.csv
+lifecyclefile lifecycle.csv
+capdir capture
+capstart 2060
+capend 2840
+capstride 20
+stopafter 3000
+scorefixture 1200 5000000
+key 180 184 Q
+key 240 244 Z
+tap 350 60 4 Z
+key 2040 2044 Z
+key 2140 2144 Z
+key 2160 2164 RIGHT
+key 2180 2184 Z
+key 2200 2204 X
+key 2220 2224 Z
+key 2240 2244 ESC
+key 2340 2344 Z
+key 2420 2424 Z
+key 2500 2504 Z
+tap 2580 20 8 Z
+key 2760 2764 Z

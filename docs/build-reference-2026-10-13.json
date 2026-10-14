@@ -1,0 +1,14 @@
+{
+  "wasm_sha256": "73aaedccfdb9872cb817461dbe6f734e7ce870a19ac3360d626427020b286d97",
+  "wasm_bytes": 9644560,
+  "source_sha256": "fa23b155644b5ff7c79afd6de7cdf5adc7d12528f79edd202400b7b45f04d5d6",
+  "native_binary_sha256": "cde5e13541b57ed313a756e6a33358341171675ffb3fd6aa6e4bda5d0c3ef8ed",
+  "runtime_source_frozen_before_and_after_build": true,
+  "tests": {
+    "workspace_passed": 130,
+    "workspace_ignored": 29,
+    "python_passed": 76,
+    "gpu_clip_both_modes_passed": true,
+    "clippy_and_format_passed": true
+  }
+}

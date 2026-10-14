@@ -1,0 +1,1405 @@
+{
+  "date": "2026-10-12",
+  "kind": "real-original END entry fixtures, six endings twice (unseen/plain and seen/Ctrl)",
+  "state_and_end_music_passed": true,
+  "state_observations": 197924,
+  "image_checkpoints": 336,
+  "cases": [
+    {
+      "id": "c0-d0-r0-seen0-plain",
+      "reference": {
+        "exe_sha256": "7f38496b31b8625196900a69cd1bfed243cab1f9612073e7881dc354b876fd39",
+        "proxy_sha256": "efd64605f034d4d07535329888509fcf1137353cd3867006a4859513ea017480",
+        "config_sha256": "82d5473742796002d0904222b791835c93a4b391aa16b49368507c59ab441e85",
+        "cfg_sha256": "ea6e07dd096844e3a72a4f5b451cacf53a19b93cf331cc84707080ef4d68f758",
+        "fixture": "one-time entry from an active Replay, not a story clear",
+        "profile": {
+          "backbuffer_bits": 32,
+          "windowed": true,
+          "opts": 1
+        }
+      },
+      "port_binary_sha256": "733f00ec324be86d9a22d2aa73168c74d76f0029f17f92d4cb8c66e050498ece",
+      "terminal_tick": 15035,
+      "state": {
+        "reference_sha256": "f967c6fcf5eb6bb2c0171a1fc00303eebfe92ee010c841f952cc315e777a7f5d",
+        "port_sha256": "6e2bf65f9032125e1913d2c4f8b69384e1da0dbdb94e2c95e1ed4a6483889993",
+        "reference_terminal_tick": 15035,
+        "port_terminal_tick": 15035,
+        "required_observations": 15034,
+        "compared_observations": 15034,
+        "fields": [
+          "file_prefix_fnv",
+          "pc",
+          "has_seen",
+          "script_time",
+          "pause",
+          "clear",
+          "minimum_pause",
+          "minimum_clear",
+          "long_delay",
+          "short_delay",
+          "text_line",
+          "text_color",
+          "background_y",
+          "scroll_speed",
+          "fade_kind",
+          "fade_timer",
+          "fade_duration"
+        ],
+        "float_absolute_tolerance": 0.0002,
+        "missing_ticks": [],
+        "extra_reference_ticks": [],
+        "extra_port_ticks": [],
+        "differences": {},
+        "passed": true,
+        "scope": "END interpreter and credits after declared direct entry; preceding story clear excluded.",
+        "audio": {
+          "reference_sha256": "fc6c484b968c7d6ff3cc21349d2de8965a8fb6efc37a40f6a7c2ae2bb03a2c7a",
+          "port_sha256": "f8bc09cf646adde915c0f1be7ce38abce9d143461d95be458333ea0a82eb03e5",
+          "reference_events": [
+            [
+              1,
+              "music",
+              "th06_16"
+            ],
+            [
+              6943,
+              "fade",
+              5.0
+            ],
+            [
+              7184,
+              "music",
+              "th06_17"
+            ],
+            [
+              14794,
+              "fade",
+              5.0
+            ]
+          ],
+          "port_events": [
+            [
+              1,
+              "music",
+              "th06_16"
+            ],
+            [
+              6943,
+              "fade",
+              5.0
+            ],
+            [
+              7184,
+              "music",
+              "th06_17"
+            ],
+            [
+              14794,
+              "fade",
+              5.0
+            ]
+          ],
+          "passed": true,
+          "scope": "END music requests, fade durations and order; stage deletion StopAudio is outside this direct-entry fixture, PCM/timbre compared separately."
+        }
+      },
+      "images": {
+        "checkpoints": 26,
+        "comparable_checkpoints": 25,
+        "full_frame_tolerance_passes": 14,
+        "full_frame_mae_range": [
+          0.0,
+          2.951843532986111
+        ],
+        "first_draw_boundary": "Metrics retained but direct END fixture excludes the preceding Stage draw.",
+        "limitations": [
+          "Bundled Noto Sans JP and ab_glyph differ from GDI font rasterization.",
+          "JPEG decoder pixels can differ from D3DX by small channel values."
+        ]
+      }
+    },
+    {
+      "id": "c0-d0-r0-seen1-ctrl",
+      "reference": {
+        "exe_sha256": "7f38496b31b8625196900a69cd1bfed243cab1f9612073e7881dc354b876fd39",
+        "proxy_sha256": "efd64605f034d4d07535329888509fcf1137353cd3867006a4859513ea017480",
+        "config_sha256": "48667243367398d55de02dd72187199ca1b0dcf2556768c2819371448f4c8af7",
+        "cfg_sha256": "ea6e07dd096844e3a72a4f5b451cacf53a19b93cf331cc84707080ef4d68f758",
+        "fixture": "one-time entry from an active Replay, not a story clear",
+        "profile": {
+          "backbuffer_bits": 32,
+          "windowed": true,
+          "opts": 1
+        }
+      },
+      "port_binary_sha256": "733f00ec324be86d9a22d2aa73168c74d76f0029f17f92d4cb8c66e050498ece",
+      "terminal_tick": 1470,
+      "state": {
+        "reference_sha256": "ff7e2db99cfaa664b9a0047d3a60baf4010cdb7eb3b20a31c4c3160c0c662c7e",
+        "port_sha256": "7436f8cea51fa856f8a023715eea6409a17de7a6ac07351c1adc9653b98c5d27",
+        "reference_terminal_tick": 1470,
+        "port_terminal_tick": 1470,
+        "required_observations": 1469,
+        "compared_observations": 1469,
+        "fields": [
+          "file_prefix_fnv",
+          "pc",
+          "has_seen",
+          "script_time",
+          "pause",
+          "clear",
+          "minimum_pause",
+          "minimum_clear",
+          "long_delay",
+          "short_delay",
+          "text_line",
+          "text_color",
+          "background_y",
+          "scroll_speed",
+          "fade_kind",
+          "fade_timer",
+          "fade_duration"
+        ],
+        "float_absolute_tolerance": 0.0002,
+        "missing_ticks": [],
+        "extra_reference_ticks": [],
+        "extra_port_ticks": [],
+        "differences": {},
+        "passed": true,
+        "scope": "END interpreter and credits after declared direct entry; preceding story clear excluded.",
+        "audio": {
+          "reference_sha256": "264e93b0c3fecf31f16c52b3ee1fe2b62209499736d2cc31035055d6d67c20a1",
+          "port_sha256": "c402d2fa8fad01f6e46b4b1f071cc3216098a6869b0eb97da5dfa0c76c6a0872",
+          "reference_events": [
+            [
+              1,
+              "music",
+              "th06_16"
+            ],
+            [
+              90,
+              "fade",
+              5.0
+            ],
+            [
+              139,
+              "music",
+              "th06_17"
+            ],
+            [
+              1422,
+              "fade",
+              5.0
+            ]
+          ],
+          "port_events": [
+            [
+              1,
+              "music",
+              "th06_16"
+            ],
+            [
+              90,
+              "fade",
+              5.0
+            ],
+            [
+              139,
+              "music",
+              "th06_17"
+            ],
+            [
+              1422,
+              "fade",
+              5.0
+            ]
+          ],
+          "passed": true,
+          "scope": "END music requests, fade durations and order; stage deletion StopAudio is outside this direct-entry fixture, PCM/timbre compared separately."
+        }
+      },
+      "images": {
+        "checkpoints": 3,
+        "comparable_checkpoints": 2,
+        "full_frame_tolerance_passes": 2,
+        "full_frame_mae_range": [
+          0.5599348958333333,
+          0.6122406684027778
+        ],
+        "first_draw_boundary": "Metrics retained but direct END fixture excludes the preceding Stage draw.",
+        "limitations": [
+          "Bundled Noto Sans JP and ab_glyph differ from GDI font rasterization.",
+          "JPEG decoder pixels can differ from D3DX by small channel values."
+        ]
+      }
+    },
+    {
+      "id": "c0-d1-r0-seen0-plain",
+      "reference": {
+        "exe_sha256": "7f38496b31b8625196900a69cd1bfed243cab1f9612073e7881dc354b876fd39",
+        "proxy_sha256": "efd64605f034d4d07535329888509fcf1137353cd3867006a4859513ea017480",
+        "config_sha256": "bd3a6838aa1954ebc858cd6896d6f2b993377d29623997859161da5196d48f49",
+        "cfg_sha256": "ea6e07dd096844e3a72a4f5b451cacf53a19b93cf331cc84707080ef4d68f758",
+        "fixture": "one-time entry from an active Replay, not a story clear",
+        "profile": {
+          "backbuffer_bits": 32,
+          "windowed": true,
+          "opts": 1
+        }
+      },
+      "port_binary_sha256": "733f00ec324be86d9a22d2aa73168c74d76f0029f17f92d4cb8c66e050498ece",
+      "terminal_tick": 33477,
+      "state": {
+        "reference_sha256": "923abfd374d8ad2c9c8f6c57fbe5e57bd0a3f5731e321b85577681fa2cf6819f",
+        "port_sha256": "33db42813a75f7a41d9c1bf86e6c04ecd78baea0a9fea22fd5b7e67ebce7e03e",
+        "reference_terminal_tick": 33477,
+        "port_terminal_tick": 33477,
+        "required_observations": 33476,
+        "compared_observations": 33476,
+        "fields": [
+          "file_prefix_fnv",
+          "pc",
+          "has_seen",
+          "script_time",
+          "pause",
+          "clear",
+          "minimum_pause",
+          "minimum_clear",
+          "long_delay",
+          "short_delay",
+          "text_line",
+          "text_color",
+          "background_y",
+          "scroll_speed",
+          "fade_kind",
+          "fade_timer",
+          "fade_duration"
+        ],
+        "float_absolute_tolerance": 0.0002,
+        "missing_ticks": [],
+        "extra_reference_ticks": [],
+        "extra_port_ticks": [],
+        "differences": {},
+        "passed": true,
+        "scope": "END interpreter and credits after declared direct entry; preceding story clear excluded.",
+        "audio": {
+          "reference_sha256": "b0ba63066a944e83a8c51772a2b176cfba2e2becb5ec36787dd446cdb1245201",
+          "port_sha256": "9a6138c2f8a4a6f24ca0f77079ec9e18faaf3e911221aacaa5cc44c9ac698895",
+          "reference_events": [
+            [
+              1,
+              "music",
+              "th06_16"
+            ],
+            [
+              25385,
+              "fade",
+              5.0
+            ],
+            [
+              25626,
+              "music",
+              "th06_17"
+            ],
+            [
+              33236,
+              "fade",
+              5.0
+            ]
+          ],
+          "port_events": [
+            [
+              1,
+              "music",
+              "th06_16"
+            ],
+            [
+              25385,
+              "fade",
+              5.0
+            ],
+            [
+              25626,
+              "music",
+              "th06_17"
+            ],
+            [
+              33236,
+              "fade",
+              5.0
+            ]
+          ],
+          "passed": true,
+          "scope": "END music requests, fade durations and order; stage deletion StopAudio is outside this direct-entry fixture, PCM/timbre compared separately."
+        }
+      },
+      "images": {
+        "checkpoints": 56,
+        "comparable_checkpoints": 55,
+        "full_frame_tolerance_passes": 13,
+        "full_frame_mae_range": [
+          0.16114583333333332,
+          3.000679253472222
+        ],
+        "first_draw_boundary": "Metrics retained but direct END fixture excludes the preceding Stage draw.",
+        "limitations": [
+          "Bundled Noto Sans JP and ab_glyph differ from GDI font rasterization.",
+          "JPEG decoder pixels can differ from D3DX by small channel values."
+        ]
+      }
+    },
+    {
+      "id": "c0-d1-r0-seen1-ctrl",
+      "reference": {
+        "exe_sha256": "7f38496b31b8625196900a69cd1bfed243cab1f9612073e7881dc354b876fd39",
+        "proxy_sha256": "efd64605f034d4d07535329888509fcf1137353cd3867006a4859513ea017480",
+        "config_sha256": "4de37b1d89664aa2a26f32ec5828c7fb8eb9516b47e5669087ff49b63a45ca27",
+        "cfg_sha256": "ea6e07dd096844e3a72a4f5b451cacf53a19b93cf331cc84707080ef4d68f758",
+        "fixture": "one-time entry from an active Replay, not a story clear",
+        "profile": {
+          "backbuffer_bits": 32,
+          "windowed": true,
+          "opts": 1
+        }
+      },
+      "port_binary_sha256": "733f00ec324be86d9a22d2aa73168c74d76f0029f17f92d4cb8c66e050498ece",
+      "terminal_tick": 1545,
+      "state": {
+        "reference_sha256": "b04df6605bbbc4a75ea40949de77aa3fc2971b7cfc5e1a69ef3b7870d258a3de",
+        "port_sha256": "819ae51122cd5155620e488821e125dc22d9f25be7621943b38ed53a5e4ecb91",
+        "reference_terminal_tick": 1545,
+        "port_terminal_tick": 1545,
+        "required_observations": 1544,
+        "compared_observations": 1544,
+        "fields": [
+          "file_prefix_fnv",
+          "pc",
+          "has_seen",
+          "script_time",
+          "pause",
+          "clear",
+          "minimum_pause",
+          "minimum_clear",
+          "long_delay",
+          "short_delay",
+          "text_line",
+          "text_color",
+          "background_y",
+          "scroll_speed",
+          "fade_kind",
+          "fade_timer",
+          "fade_duration"
+        ],
+        "float_absolute_tolerance": 0.0002,
+        "missing_ticks": [],
+        "extra_reference_ticks": [],
+        "extra_port_ticks": [],
+        "differences": {},
+        "passed": true,
+        "scope": "END interpreter and credits after declared direct entry; preceding story clear excluded.",
+        "audio": {
+          "reference_sha256": "7f74f238e08b71723356fb463c564c8d388baa3f105d9cba665d5706b5eca56f",
+          "port_sha256": "b4f12d5c55435be9e7f243e4fa20e41fb475c49a42332c2e9fe2e5fb88be1dd3",
+          "reference_events": [
+            [
+              1,
+              "music",
+              "th06_16"
+            ],
+            [
+              166,
+              "fade",
+              5.0
+            ],
+            [
+              214,
+              "music",
+              "th06_17"
+            ],
+            [
+              1497,
+              "fade",
+              5.0
+            ]
+          ],
+          "port_events": [
+            [
+              1,
+              "music",
+              "th06_16"
+            ],
+            [
+              166,
+              "fade",
+              5.0
+            ],
+            [
+              214,
+              "music",
+              "th06_17"
+            ],
+            [
+              1497,
+              "fade",
+              5.0
+            ]
+          ],
+          "passed": true,
+          "scope": "END music requests, fade durations and order; stage deletion StopAudio is outside this direct-entry fixture, PCM/timbre compared separately."
+        }
+      },
+      "images": {
+        "checkpoints": 3,
+        "comparable_checkpoints": 2,
+        "full_frame_tolerance_passes": 2,
+        "full_frame_mae_range": [
+          0.5552994791666667,
+          0.6104253472222222
+        ],
+        "first_draw_boundary": "Metrics retained but direct END fixture excludes the preceding Stage draw.",
+        "limitations": [
+          "Bundled Noto Sans JP and ab_glyph differ from GDI font rasterization.",
+          "JPEG decoder pixels can differ from D3DX by small channel values."
+        ]
+      }
+    },
+    {
+      "id": "c1-d1-r0-seen0-plain",
+      "reference": {
+        "exe_sha256": "7f38496b31b8625196900a69cd1bfed243cab1f9612073e7881dc354b876fd39",
+        "proxy_sha256": "efd64605f034d4d07535329888509fcf1137353cd3867006a4859513ea017480",
+        "config_sha256": "f11b1ee96d5b049e01d25e1bfd1ab7d9d4ccff8d5e43200a2c34f9fa4c5d4743",
+        "cfg_sha256": "ea6e07dd096844e3a72a4f5b451cacf53a19b93cf331cc84707080ef4d68f758",
+        "fixture": "one-time entry from an active Replay, not a story clear",
+        "profile": {
+          "backbuffer_bits": 32,
+          "windowed": true,
+          "opts": 1
+        }
+      },
+      "port_binary_sha256": "733f00ec324be86d9a22d2aa73168c74d76f0029f17f92d4cb8c66e050498ece",
+      "terminal_tick": 36937,
+      "state": {
+        "reference_sha256": "383766ce35cf39300df81067e8745cc713b599b478d8fe646272f4b302c53226",
+        "port_sha256": "edaab561e1ed4e41015b4c9f1da9d48b53979a3f7dab67c9964da68f86009fdc",
+        "reference_terminal_tick": 36937,
+        "port_terminal_tick": 36937,
+        "required_observations": 36936,
+        "compared_observations": 36936,
+        "fields": [
+          "file_prefix_fnv",
+          "pc",
+          "has_seen",
+          "script_time",
+          "pause",
+          "clear",
+          "minimum_pause",
+          "minimum_clear",
+          "long_delay",
+          "short_delay",
+          "text_line",
+          "text_color",
+          "background_y",
+          "scroll_speed",
+          "fade_kind",
+          "fade_timer",
+          "fade_duration"
+        ],
+        "float_absolute_tolerance": 0.0002,
+        "missing_ticks": [],
+        "extra_reference_ticks": [],
+        "extra_port_ticks": [],
+        "differences": {},
+        "passed": true,
+        "scope": "END interpreter and credits after declared direct entry; preceding story clear excluded.",
+        "audio": {
+          "reference_sha256": "a2b366f80d128f3267869647969003842465eb11ef3a04fb745858670af910ce",
+          "port_sha256": "9b27ca04b44326d005da9c50beb2c579e29a6c35e7fdb284b6a7d2f8205bd704",
+          "reference_events": [
+            [
+              1,
+              "music",
+              "th06_16"
+            ],
+            [
+              28845,
+              "fade",
+              5.0
+            ],
+            [
+              29086,
+              "music",
+              "th06_17"
+            ],
+            [
+              36696,
+              "fade",
+              5.0
+            ]
+          ],
+          "port_events": [
+            [
+              1,
+              "music",
+              "th06_16"
+            ],
+            [
+              28845,
+              "fade",
+              5.0
+            ],
+            [
+              29086,
+              "music",
+              "th06_17"
+            ],
+            [
+              36696,
+              "fade",
+              5.0
+            ]
+          ],
+          "passed": true,
+          "scope": "END music requests, fade durations and order; stage deletion StopAudio is outside this direct-entry fixture, PCM/timbre compared separately."
+        }
+      },
+      "images": {
+        "checkpoints": 62,
+        "comparable_checkpoints": 61,
+        "full_frame_tolerance_passes": 13,
+        "full_frame_mae_range": [
+          0.407548828125,
+          3.000679253472222
+        ],
+        "first_draw_boundary": "Metrics retained but direct END fixture excludes the preceding Stage draw.",
+        "limitations": [
+          "Bundled Noto Sans JP and ab_glyph differ from GDI font rasterization.",
+          "JPEG decoder pixels can differ from D3DX by small channel values."
+        ]
+      }
+    },
+    {
+      "id": "c1-d1-r0-seen1-ctrl",
+      "reference": {
+        "exe_sha256": "7f38496b31b8625196900a69cd1bfed243cab1f9612073e7881dc354b876fd39",
+        "proxy_sha256": "efd64605f034d4d07535329888509fcf1137353cd3867006a4859513ea017480",
+        "config_sha256": "fdc23beddd003d550f98f947d8936543fd6cee22851746c2259a06f635b2533c",
+        "cfg_sha256": "ea6e07dd096844e3a72a4f5b451cacf53a19b93cf331cc84707080ef4d68f758",
+        "fixture": "one-time entry from an active Replay, not a story clear",
+        "profile": {
+          "backbuffer_bits": 32,
+          "windowed": true,
+          "opts": 1
+        }
+      },
+      "port_binary_sha256": "733f00ec324be86d9a22d2aa73168c74d76f0029f17f92d4cb8c66e050498ece",
+      "terminal_tick": 1544,
+      "state": {
+        "reference_sha256": "e360678e69aff9e143641033e008a55e7f8c06fc1a711aebb639e0476b7943be",
+        "port_sha256": "9512736b4cba5249117fb52b307aefb1df642a5208a643a7bbe93c30c95eb89c",
+        "reference_terminal_tick": 1544,
+        "port_terminal_tick": 1544,
+        "required_observations": 1543,
+        "compared_observations": 1543,
+        "fields": [
+          "file_prefix_fnv",
+          "pc",
+          "has_seen",
+          "script_time",
+          "pause",
+          "clear",
+          "minimum_pause",
+          "minimum_clear",
+          "long_delay",
+          "short_delay",
+          "text_line",
+          "text_color",
+          "background_y",
+          "scroll_speed",
+          "fade_kind",
+          "fade_timer",
+          "fade_duration"
+        ],
+        "float_absolute_tolerance": 0.0002,
+        "missing_ticks": [],
+        "extra_reference_ticks": [],
+        "extra_port_ticks": [],
+        "differences": {},
+        "passed": true,
+        "scope": "END interpreter and credits after declared direct entry; preceding story clear excluded.",
+        "audio": {
+          "reference_sha256": "3941a76f886a0711af66fa48f78017b24050b99fbeaf95997cf45b68da43db7e",
+          "port_sha256": "32ae383194da02c12bebad63907164bbd6c9aae0a1088ff0942ea8f300414c18",
+          "reference_events": [
+            [
+              1,
+              "music",
+              "th06_16"
+            ],
+            [
+              164,
+              "fade",
+              5.0
+            ],
+            [
+              212,
+              "music",
+              "th06_17"
+            ],
+            [
+              1495,
+              "fade",
+              5.0
+            ]
+          ],
+          "port_events": [
+            [
+              1,
+              "music",
+              "th06_16"
+            ],
+            [
+              164,
+              "fade",
+              5.0
+            ],
+            [
+              212,
+              "music",
+              "th06_17"
+            ],
+            [
+              1495,
+              "fade",
+              5.0
+            ]
+          ],
+          "passed": true,
+          "scope": "END music requests, fade durations and order; stage deletion StopAudio is outside this direct-entry fixture, PCM/timbre compared separately."
+        }
+      },
+      "images": {
+        "checkpoints": 3,
+        "comparable_checkpoints": 2,
+        "full_frame_tolerance_passes": 2,
+        "full_frame_mae_range": [
+          0.5554372829861111,
+          0.6105457899305555
+        ],
+        "first_draw_boundary": "Metrics retained but direct END fixture excludes the preceding Stage draw.",
+        "limitations": [
+          "Bundled Noto Sans JP and ab_glyph differ from GDI font rasterization.",
+          "JPEG decoder pixels can differ from D3DX by small channel values."
+        ]
+      }
+    },
+    {
+      "id": "c2-d0-r0-seen0-plain",
+      "reference": {
+        "exe_sha256": "7f38496b31b8625196900a69cd1bfed243cab1f9612073e7881dc354b876fd39",
+        "proxy_sha256": "efd64605f034d4d07535329888509fcf1137353cd3867006a4859513ea017480",
+        "config_sha256": "97eb5c1f4d2f9e27a54970f5efae83af12b1f8f7fbb45ec16f87d4972f75818e",
+        "cfg_sha256": "ea6e07dd096844e3a72a4f5b451cacf53a19b93cf331cc84707080ef4d68f758",
+        "fixture": "one-time entry from an active Replay, not a story clear",
+        "profile": {
+          "backbuffer_bits": 32,
+          "windowed": true,
+          "opts": 1
+        }
+      },
+      "port_binary_sha256": "733f00ec324be86d9a22d2aa73168c74d76f0029f17f92d4cb8c66e050498ece",
+      "terminal_tick": 15035,
+      "state": {
+        "reference_sha256": "241175e6166deded7ada8de37fbaca4e55597bb34fcdc3e541fa5e8b707a8d11",
+        "port_sha256": "00b8a877b903c2ac59342d826213388cad03b95382bbc1a84efd1d2869a1fe30",
+        "reference_terminal_tick": 15035,
+        "port_terminal_tick": 15035,
+        "required_observations": 15034,
+        "compared_observations": 15034,
+        "fields": [
+          "file_prefix_fnv",
+          "pc",
+          "has_seen",
+          "script_time",
+          "pause",
+          "clear",
+          "minimum_pause",
+          "minimum_clear",
+          "long_delay",
+          "short_delay",
+          "text_line",
+          "text_color",
+          "background_y",
+          "scroll_speed",
+          "fade_kind",
+          "fade_timer",
+          "fade_duration"
+        ],
+        "float_absolute_tolerance": 0.0002,
+        "missing_ticks": [],
+        "extra_reference_ticks": [],
+        "extra_port_ticks": [],
+        "differences": {},
+        "passed": true,
+        "scope": "END interpreter and credits after declared direct entry; preceding story clear excluded.",
+        "audio": {
+          "reference_sha256": "fc6c484b968c7d6ff3cc21349d2de8965a8fb6efc37a40f6a7c2ae2bb03a2c7a",
+          "port_sha256": "f8bc09cf646adde915c0f1be7ce38abce9d143461d95be458333ea0a82eb03e5",
+          "reference_events": [
+            [
+              1,
+              "music",
+              "th06_16"
+            ],
+            [
+              6943,
+              "fade",
+              5.0
+            ],
+            [
+              7184,
+              "music",
+              "th06_17"
+            ],
+            [
+              14794,
+              "fade",
+              5.0
+            ]
+          ],
+          "port_events": [
+            [
+              1,
+              "music",
+              "th06_16"
+            ],
+            [
+              6943,
+              "fade",
+              5.0
+            ],
+            [
+              7184,
+              "music",
+              "th06_17"
+            ],
+            [
+              14794,
+              "fade",
+              5.0
+            ]
+          ],
+          "passed": true,
+          "scope": "END music requests, fade durations and order; stage deletion StopAudio is outside this direct-entry fixture, PCM/timbre compared separately."
+        }
+      },
+      "images": {
+        "checkpoints": 26,
+        "comparable_checkpoints": 25,
+        "full_frame_tolerance_passes": 14,
+        "full_frame_mae_range": [
+          0.0,
+          2.423356119791667
+        ],
+        "first_draw_boundary": "Metrics retained but direct END fixture excludes the preceding Stage draw.",
+        "limitations": [
+          "Bundled Noto Sans JP and ab_glyph differ from GDI font rasterization.",
+          "JPEG decoder pixels can differ from D3DX by small channel values."
+        ]
+      }
+    },
+    {
+      "id": "c2-d0-r0-seen1-ctrl",
+      "reference": {
+        "exe_sha256": "7f38496b31b8625196900a69cd1bfed243cab1f9612073e7881dc354b876fd39",
+        "proxy_sha256": "efd64605f034d4d07535329888509fcf1137353cd3867006a4859513ea017480",
+        "config_sha256": "1788103479818cd27306253315c84c89350ad810a392eae26345d01182dd1e83",
+        "cfg_sha256": "ea6e07dd096844e3a72a4f5b451cacf53a19b93cf331cc84707080ef4d68f758",
+        "fixture": "one-time entry from an active Replay, not a story clear",
+        "profile": {
+          "backbuffer_bits": 32,
+          "windowed": true,
+          "opts": 1
+        }
+      },
+      "port_binary_sha256": "733f00ec324be86d9a22d2aa73168c74d76f0029f17f92d4cb8c66e050498ece",
+      "terminal_tick": 1470,
+      "state": {
+        "reference_sha256": "c0bafb74650b5bcfd5637590f27a57f295e6e59f4d851ea55fd1ccc9f8813e39",
+        "port_sha256": "7a66edd9845f124ee5ae10ab364e914e4db5182c9a342b3e575d1ef1e9491233",
+        "reference_terminal_tick": 1470,
+        "port_terminal_tick": 1470,
+        "required_observations": 1469,
+        "compared_observations": 1469,
+        "fields": [
+          "file_prefix_fnv",
+          "pc",
+          "has_seen",
+          "script_time",
+          "pause",
+          "clear",
+          "minimum_pause",
+          "minimum_clear",
+          "long_delay",
+          "short_delay",
+          "text_line",
+          "text_color",
+          "background_y",
+          "scroll_speed",
+          "fade_kind",
+          "fade_timer",
+          "fade_duration"
+        ],
+        "float_absolute_tolerance": 0.0002,
+        "missing_ticks": [],
+        "extra_reference_ticks": [],
+        "extra_port_ticks": [],
+        "differences": {},
+        "passed": true,
+        "scope": "END interpreter and credits after declared direct entry; preceding story clear excluded.",
+        "audio": {
+          "reference_sha256": "264e93b0c3fecf31f16c52b3ee1fe2b62209499736d2cc31035055d6d67c20a1",
+          "port_sha256": "c402d2fa8fad01f6e46b4b1f071cc3216098a6869b0eb97da5dfa0c76c6a0872",
+          "reference_events": [
+            [
+              1,
+              "music",
+              "th06_16"
+            ],
+            [
+              90,
+              "fade",
+              5.0
+            ],
+            [
+              139,
+              "music",
+              "th06_17"
+            ],
+            [
+              1422,
+              "fade",
+              5.0
+            ]
+          ],
+          "port_events": [
+            [
+              1,
+              "music",
+              "th06_16"
+            ],
+            [
+              90,
+              "fade",
+              5.0
+            ],
+            [
+              139,
+              "music",
+              "th06_17"
+            ],
+            [
+              1422,
+              "fade",
+              5.0
+            ]
+          ],
+          "passed": true,
+          "scope": "END music requests, fade durations and order; stage deletion StopAudio is outside this direct-entry fixture, PCM/timbre compared separately."
+        }
+      },
+      "images": {
+        "checkpoints": 3,
+        "comparable_checkpoints": 2,
+        "full_frame_tolerance_passes": 2,
+        "full_frame_mae_range": [
+          0.5599348958333333,
+          0.6122406684027778
+        ],
+        "first_draw_boundary": "Metrics retained but direct END fixture excludes the preceding Stage draw.",
+        "limitations": [
+          "Bundled Noto Sans JP and ab_glyph differ from GDI font rasterization.",
+          "JPEG decoder pixels can differ from D3DX by small channel values."
+        ]
+      }
+    },
+    {
+      "id": "c2-d1-r0-seen0-plain",
+      "reference": {
+        "exe_sha256": "7f38496b31b8625196900a69cd1bfed243cab1f9612073e7881dc354b876fd39",
+        "proxy_sha256": "efd64605f034d4d07535329888509fcf1137353cd3867006a4859513ea017480",
+        "config_sha256": "a104758a78ac48555dda91c42b338f0de9e79dc54da5f2dad3ffeb90b3cec61d",
+        "cfg_sha256": "ea6e07dd096844e3a72a4f5b451cacf53a19b93cf331cc84707080ef4d68f758",
+        "fixture": "one-time entry from an active Replay, not a story clear",
+        "profile": {
+          "backbuffer_bits": 32,
+          "windowed": true,
+          "opts": 1
+        }
+      },
+      "port_binary_sha256": "733f00ec324be86d9a22d2aa73168c74d76f0029f17f92d4cb8c66e050498ece",
+      "terminal_tick": 43435,
+      "state": {
+        "reference_sha256": "ebe21a1c7730bfd00b336640ed94b8f3183e3841fbfe2e19e582f8ff79bb5063",
+        "port_sha256": "cfcc4abcd9a9958070bfe92b219a7cc01b434d876fb4ce8c84452f0d2474b987",
+        "reference_terminal_tick": 43435,
+        "port_terminal_tick": 43435,
+        "required_observations": 43434,
+        "compared_observations": 43434,
+        "fields": [
+          "file_prefix_fnv",
+          "pc",
+          "has_seen",
+          "script_time",
+          "pause",
+          "clear",
+          "minimum_pause",
+          "minimum_clear",
+          "long_delay",
+          "short_delay",
+          "text_line",
+          "text_color",
+          "background_y",
+          "scroll_speed",
+          "fade_kind",
+          "fade_timer",
+          "fade_duration"
+        ],
+        "float_absolute_tolerance": 0.0002,
+        "missing_ticks": [],
+        "extra_reference_ticks": [],
+        "extra_port_ticks": [],
+        "differences": {},
+        "passed": true,
+        "scope": "END interpreter and credits after declared direct entry; preceding story clear excluded.",
+        "audio": {
+          "reference_sha256": "b0ee5976323746a398b8dad94020d4ecbfe86635abb934c442672d12c018ad31",
+          "port_sha256": "1a0c4a3c0e62cb5c35826b4b36987dfd13e859550599caa3425ac350f3309d89",
+          "reference_events": [
+            [
+              1,
+              "music",
+              "th06_16"
+            ],
+            [
+              35343,
+              "fade",
+              5.0
+            ],
+            [
+              35584,
+              "music",
+              "th06_17"
+            ],
+            [
+              43194,
+              "fade",
+              5.0
+            ]
+          ],
+          "port_events": [
+            [
+              1,
+              "music",
+              "th06_16"
+            ],
+            [
+              35343,
+              "fade",
+              5.0
+            ],
+            [
+              35584,
+              "music",
+              "th06_17"
+            ],
+            [
+              43194,
+              "fade",
+              5.0
+            ]
+          ],
+          "passed": true,
+          "scope": "END music requests, fade durations and order; stage deletion StopAudio is outside this direct-entry fixture, PCM/timbre compared separately."
+        }
+      },
+      "images": {
+        "checkpoints": 73,
+        "comparable_checkpoints": 72,
+        "full_frame_tolerance_passes": 14,
+        "full_frame_mae_range": [
+          0.1478179253472222,
+          3.01244140625
+        ],
+        "first_draw_boundary": "Metrics retained but direct END fixture excludes the preceding Stage draw.",
+        "limitations": [
+          "Bundled Noto Sans JP and ab_glyph differ from GDI font rasterization.",
+          "JPEG decoder pixels can differ from D3DX by small channel values."
+        ]
+      }
+    },
+    {
+      "id": "c2-d1-r0-seen1-ctrl",
+      "reference": {
+        "exe_sha256": "7f38496b31b8625196900a69cd1bfed243cab1f9612073e7881dc354b876fd39",
+        "proxy_sha256": "efd64605f034d4d07535329888509fcf1137353cd3867006a4859513ea017480",
+        "config_sha256": "c964ad607cbc4063ee62246d2a6349964c49533514873c6db332cefc6726f0ba",
+        "cfg_sha256": "ea6e07dd096844e3a72a4f5b451cacf53a19b93cf331cc84707080ef4d68f758",
+        "fixture": "one-time entry from an active Replay, not a story clear",
+        "profile": {
+          "backbuffer_bits": 32,
+          "windowed": true,
+          "opts": 1
+        }
+      },
+      "port_binary_sha256": "733f00ec324be86d9a22d2aa73168c74d76f0029f17f92d4cb8c66e050498ece",
+      "terminal_tick": 1567,
+      "state": {
+        "reference_sha256": "db0e5fe200f0a61bf2c29ad3bebba49895f902182461f8139d9163bb39d43b47",
+        "port_sha256": "e69a58a8a67e5466613e8cbbbdbcaaf5a0f404bbdb18af199b330d990561db9c",
+        "reference_terminal_tick": 1567,
+        "port_terminal_tick": 1567,
+        "required_observations": 1566,
+        "compared_observations": 1566,
+        "fields": [
+          "file_prefix_fnv",
+          "pc",
+          "has_seen",
+          "script_time",
+          "pause",
+          "clear",
+          "minimum_pause",
+          "minimum_clear",
+          "long_delay",
+          "short_delay",
+          "text_line",
+          "text_color",
+          "background_y",
+          "scroll_speed",
+          "fade_kind",
+          "fade_timer",
+          "fade_duration"
+        ],
+        "float_absolute_tolerance": 0.0002,
+        "missing_ticks": [],
+        "extra_reference_ticks": [],
+        "extra_port_ticks": [],
+        "differences": {},
+        "passed": true,
+        "scope": "END interpreter and credits after declared direct entry; preceding story clear excluded.",
+        "audio": {
+          "reference_sha256": "57ebfeaaed50c94fa32ce8581b25c41fc8fe0408bdb7be740c55ddfd6a7301f1",
+          "port_sha256": "0f2379722ef56cf025606cfa7c3ae9f11512989e9bca78bc598f1d30a94d79cb",
+          "reference_events": [
+            [
+              1,
+              "music",
+              "th06_16"
+            ],
+            [
+              188,
+              "fade",
+              5.0
+            ],
+            [
+              236,
+              "music",
+              "th06_17"
+            ],
+            [
+              1519,
+              "fade",
+              5.0
+            ]
+          ],
+          "port_events": [
+            [
+              1,
+              "music",
+              "th06_16"
+            ],
+            [
+              188,
+              "fade",
+              5.0
+            ],
+            [
+              236,
+              "music",
+              "th06_17"
+            ],
+            [
+              1519,
+              "fade",
+              5.0
+            ]
+          ],
+          "passed": true,
+          "scope": "END music requests, fade durations and order; stage deletion StopAudio is outside this direct-entry fixture, PCM/timbre compared separately."
+        }
+      },
+      "images": {
+        "checkpoints": 3,
+        "comparable_checkpoints": 2,
+        "full_frame_tolerance_passes": 2,
+        "full_frame_mae_range": [
+          0.5543240017361111,
+          0.6098231336805555
+        ],
+        "first_draw_boundary": "Metrics retained but direct END fixture excludes the preceding Stage draw.",
+        "limitations": [
+          "Bundled Noto Sans JP and ab_glyph differ from GDI font rasterization.",
+          "JPEG decoder pixels can differ from D3DX by small channel values."
+        ]
+      }
+    },
+    {
+      "id": "c3-d1-r0-seen0-plain",
+      "reference": {
+        "exe_sha256": "7f38496b31b8625196900a69cd1bfed243cab1f9612073e7881dc354b876fd39",
+        "proxy_sha256": "efd64605f034d4d07535329888509fcf1137353cd3867006a4859513ea017480",
+        "config_sha256": "f240bf5c88b522825f3918ebb7019c2db43a2d88fec7358537431c7eb8418e8e",
+        "cfg_sha256": "ea6e07dd096844e3a72a4f5b451cacf53a19b93cf331cc84707080ef4d68f758",
+        "fixture": "one-time entry from an active Replay, not a story clear",
+        "profile": {
+          "backbuffer_bits": 32,
+          "windowed": true,
+          "opts": 1
+        }
+      },
+      "port_binary_sha256": "733f00ec324be86d9a22d2aa73168c74d76f0029f17f92d4cb8c66e050498ece",
+      "terminal_tick": 44846,
+      "state": {
+        "reference_sha256": "fd8759d5ea66ba73cd0896fc4c77f64183cb76344a03d94505524ddc4e5af0b4",
+        "port_sha256": "e674698a2b0d9ad1b4d458144b7b3f57ab2645005e2b06c75ee6760f7b5befc7",
+        "reference_terminal_tick": 44846,
+        "port_terminal_tick": 44846,
+        "required_observations": 44845,
+        "compared_observations": 44845,
+        "fields": [
+          "file_prefix_fnv",
+          "pc",
+          "has_seen",
+          "script_time",
+          "pause",
+          "clear",
+          "minimum_pause",
+          "minimum_clear",
+          "long_delay",
+          "short_delay",
+          "text_line",
+          "text_color",
+          "background_y",
+          "scroll_speed",
+          "fade_kind",
+          "fade_timer",
+          "fade_duration"
+        ],
+        "float_absolute_tolerance": 0.0002,
+        "missing_ticks": [],
+        "extra_reference_ticks": [],
+        "extra_port_ticks": [],
+        "differences": {},
+        "passed": true,
+        "scope": "END interpreter and credits after declared direct entry; preceding story clear excluded.",
+        "audio": {
+          "reference_sha256": "732a1129e78650a77d8bc0360ebd78decb67190483bdf3d9bad55dfba0aefdb9",
+          "port_sha256": "2b924beda3cc2711da7db4937254bfb56a9fe727d6af03d5b1a596a6c6d6e86c",
+          "reference_events": [
+            [
+              1,
+              "music",
+              "th06_16"
+            ],
+            [
+              36754,
+              "fade",
+              5.0
+            ],
+            [
+              36995,
+              "music",
+              "th06_17"
+            ],
+            [
+              44605,
+              "fade",
+              5.0
+            ]
+          ],
+          "port_events": [
+            [
+              1,
+              "music",
+              "th06_16"
+            ],
+            [
+              36754,
+              "fade",
+              5.0
+            ],
+            [
+              36995,
+              "music",
+              "th06_17"
+            ],
+            [
+              44605,
+              "fade",
+              5.0
+            ]
+          ],
+          "passed": true,
+          "scope": "END music requests, fade durations and order; stage deletion StopAudio is outside this direct-entry fixture, PCM/timbre compared separately."
+        }
+      },
+      "images": {
+        "checkpoints": 75,
+        "comparable_checkpoints": 74,
+        "full_frame_tolerance_passes": 13,
+        "full_frame_mae_range": [
+          0.2570269097222222,
+          2.768160807291667
+        ],
+        "first_draw_boundary": "Metrics retained but direct END fixture excludes the preceding Stage draw.",
+        "limitations": [
+          "Bundled Noto Sans JP and ab_glyph differ from GDI font rasterization.",
+          "JPEG decoder pixels can differ from D3DX by small channel values."
+        ]
+      }
+    },
+    {
+      "id": "c3-d1-r0-seen1-ctrl",
+      "reference": {
+        "exe_sha256": "7f38496b31b8625196900a69cd1bfed243cab1f9612073e7881dc354b876fd39",
+        "proxy_sha256": "efd64605f034d4d07535329888509fcf1137353cd3867006a4859513ea017480",
+        "config_sha256": "2669f5d285bfc6ba0e9483aaf6b4ca3d744d23945836bf902ff4a92248b8a52a",
+        "cfg_sha256": "ea6e07dd096844e3a72a4f5b451cacf53a19b93cf331cc84707080ef4d68f758",
+        "fixture": "one-time entry from an active Replay, not a story clear",
+        "profile": {
+          "backbuffer_bits": 32,
+          "windowed": true,
+          "opts": 1
+        }
+      },
+      "port_binary_sha256": "733f00ec324be86d9a22d2aa73168c74d76f0029f17f92d4cb8c66e050498ece",
+      "terminal_tick": 1575,
+      "state": {
+        "reference_sha256": "37817936ff82b2946e8c70d78f67e793844f306f52da23af1ba30242526b360e",
+        "port_sha256": "a89a0ba18757e93a4b06d73c8b574d3b0846aec61db387f81fb3844c84db2f58",
+        "reference_terminal_tick": 1575,
+        "port_terminal_tick": 1575,
+        "required_observations": 1574,
+        "compared_observations": 1574,
+        "fields": [
+          "file_prefix_fnv",
+          "pc",
+          "has_seen",
+          "script_time",
+          "pause",
+          "clear",
+          "minimum_pause",
+          "minimum_clear",
+          "long_delay",
+          "short_delay",
+          "text_line",
+          "text_color",
+          "background_y",
+          "scroll_speed",
+          "fade_kind",
+          "fade_timer",
+          "fade_duration"
+        ],
+        "float_absolute_tolerance": 0.0002,
+        "missing_ticks": [],
+        "extra_reference_ticks": [],
+        "extra_port_ticks": [],
+        "differences": {},
+        "passed": true,
+        "scope": "END interpreter and credits after declared direct entry; preceding story clear excluded.",
+        "audio": {
+          "reference_sha256": "7cbd423b94ddf3506bf94a289161b2484d930239f3a659bd5653050a952f6adc",
+          "port_sha256": "cfa50b75b0786af692543bffa68bc51ff90d564bd7307aecfd5f5ddd5c687ec5",
+          "reference_events": [
+            [
+              1,
+              "music",
+              "th06_16"
+            ],
+            [
+              196,
+              "fade",
+              5.0
+            ],
+            [
+              244,
+              "music",
+              "th06_17"
+            ],
+            [
+              1527,
+              "fade",
+              5.0
+            ]
+          ],
+          "port_events": [
+            [
+              1,
+              "music",
+              "th06_16"
+            ],
+            [
+              196,
+              "fade",
+              5.0
+            ],
+            [
+              244,
+              "music",
+              "th06_17"
+            ],
+            [
+              1527,
+              "fade",
+              5.0
+            ]
+          ],
+          "passed": true,
+          "scope": "END music requests, fade durations and order; stage deletion StopAudio is outside this direct-entry fixture, PCM/timbre compared separately."
+        }
+      },
+      "images": {
+        "checkpoints": 3,
+        "comparable_checkpoints": 2,
+        "full_frame_tolerance_passes": 2,
+        "full_frame_mae_range": [
+          0.5539594184027777,
+          0.6091959635416667
+        ],
+        "first_draw_boundary": "Metrics retained but direct END fixture excludes the preceding Stage draw.",
+        "limitations": [
+          "Bundled Noto Sans JP and ab_glyph differ from GDI font rasterization.",
+          "JPEG decoder pixels can differ from D3DX by small channel values."
+        ]
+      }
+    }
+  ],
+  "rea": {
+    "procedure": "Ending::ParseEndFile 0x40f7c0",
+    "evidence_id": "ev_8e47413227abbd81bee70158635cd77dff4757f96f10cf2344b81bfeb864799f"
+  },
+  "scope": "Original EXE entry state set once from a valid active Replay; no END code, timers or assets patched. Scripted external keyboard inputs are declared per case. This verifies all six ending scripts and credits; preceding story completion, ResultScreen and stage deletion StopAudio are separate scenarios.",
+  "pixels": "Measured separately. State/audio PASS does not assert pixel identity. All full-frame metrics are retained; no text masking.",
+  "private_artifacts": "/home/ubuntu/touhou6-web/reference/ending-audit-20261012; local /tmp/th06-scenarios/endings",
+  "negative_comparator_checks": {
+    "empty": true,
+    "duplicate": true,
+    "truncated": true,
+    "nonfinite": true,
+    "changed-pc": true,
+    "stale-terminal-rerun": true,
+    "stale-screenshots-rerun": true
+  }
+}

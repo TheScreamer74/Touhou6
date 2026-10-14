@@ -801,6 +801,44 @@ impl EndingPlayer {
         self.vm.finished
     }
 
+    /// Read-only observation matching refcap's original END interpreter fields.
+    /// The file prefix identifies script switches independently of heap pointers.
+    pub fn reference_state(&self, tick: u32) -> String {
+        let vm = &self.vm;
+        let fingerprint = vm
+            .data
+            .iter()
+            .take(64)
+            .fold(2_166_136_261u32, |hash, byte| {
+                (hash ^ u32::from(*byte)).wrapping_mul(16_777_619)
+            });
+        let fade_kind = match vm.fade.kind {
+            FadeKind::None => 0,
+            FadeKind::InBlack => 1,
+            FadeKind::OutBlack => 2,
+            FadeKind::InWhite => 3,
+            FadeKind::OutWhite => 4,
+        };
+        format!(
+            "{tick},{fingerprint},{},{},{},{},{},{},{},{},{},{},{},{:.9},{:.9},{fade_kind},{},{}",
+            vm.pc,
+            vm.has_seen as u8,
+            vm.script_time,
+            vm.pause,
+            vm.clear,
+            vm.minimum_pause,
+            vm.minimum_clear,
+            vm.long_delay,
+            vm.short_delay,
+            vm.text_line,
+            vm.text_color,
+            vm.background_y,
+            vm.scroll_speed,
+            vm.fade.timer,
+            vm.fade.duration,
+        )
+    }
+
     pub fn update(&mut self, input: &Input) -> Result<Vec<EndingEvent>, EndingError> {
         let mut events = Vec::new();
         let confirm = input.buttons() & 0x1001;
@@ -889,6 +927,7 @@ impl EndingPlayer {
         {
             let top = self.vm.background_y as i32 as f32;
             cmds.push(DrawCmd {
+                clip: None,
                 tex: background.tex,
                 dst: [0.0, 0.0, 640.0, 480.0],
                 src: [
@@ -901,6 +940,7 @@ impl EndingPlayer {
                 rot: 0.0,
                 additive: false,
                 color_add: false,
+                depth: None,
             });
         }
         for slot in self.slots.iter().flatten() {
@@ -913,12 +953,14 @@ impl EndingPlayer {
             };
             let sp = &sprite.sprite;
             let (width, height) = (sp.width * runner.scale[0], sp.height * runner.scale[1]);
-            let mut x = runner.pos[0] + runner.pos_offset[0];
-            let mut y = runner.pos[1] + runner.pos_offset[1];
-            if !runner.corner {
-                x -= width * 0.5;
-                y -= height * 0.5;
-            }
+            let geometry = crate::sprite_geometry::screen(
+                [
+                    runner.pos[0] + runner.pos_offset[0],
+                    runner.pos[1] + runner.pos_offset[1],
+                ],
+                [width, height],
+                runner.corner,
+            );
             let mut src = if slot.text_texture.is_some() {
                 [0.0, 0.0, 1.0, 1.0]
             } else {
@@ -936,8 +978,9 @@ impl EndingPlayer {
                 src.swap(1, 3);
             }
             cmds.push(DrawCmd {
+                clip: None,
                 tex: slot.text_texture.unwrap_or(sprite.image.tex),
-                dst: [x.round(), y.round(), width, height],
+                dst: geometry.dst,
                 src,
                 tint: [
                     runner.color[0],
@@ -948,11 +991,13 @@ impl EndingPlayer {
                 rot: 0.0,
                 additive: runner.additive,
                 color_add: false,
+                depth: None,
             });
         }
         let tint = self.vm.fade.draw();
         if tint[3] != 0.0 {
             cmds.push(DrawCmd {
+                clip: None,
                 tex: self.resources.white,
                 dst: [0.0, 0.0, 640.0, 480.0],
                 src: [0.0, 0.0, 1.0, 1.0],
@@ -960,6 +1005,7 @@ impl EndingPlayer {
                 rot: 0.0,
                 additive: false,
                 color_add: false,
+                depth: None,
             });
         }
         cmds

@@ -19,6 +19,7 @@ fn make_world() -> World {
         max_rank: 32,
         // pos is [0,0]; player at angle 1.2345 so AngleToPlayer == 1.2345.
         player_pos: [1.2345f32.cos(), 1.2345f32.sin()],
+        player_z: 0.49,
         bullets: Vec::new(),
         lasers: Vec::new(),
         events: Vec::new(),

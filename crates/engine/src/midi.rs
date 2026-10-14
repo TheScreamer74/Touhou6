@@ -126,6 +126,18 @@ impl Sequence {
         self.elapsed_ticks + self.milliseconds * self.timebase * 1000 / self.tempo
     }
 
+    /// Original SetFadeOut interval, in multimedia timer callbacks.
+    pub fn fade_milliseconds(&mut self, milliseconds: u32) {
+        self.fade = Some((0, milliseconds.max(1)));
+        self.fade_multiplier = 0.0;
+    }
+
+    /// Read-only counters for comparison with the executable's timer callback.
+    #[doc(hidden)]
+    pub fn reference_clock(&self) -> (u32, u64, u64) {
+        (self.tempo as u32, self.milliseconds, self.elapsed_ticks)
+    }
+
     /// One original multimedia timer callback. Errors stop the malformed track.
     pub fn tick(&mut self) -> Vec<Message> {
         let mut messages = Vec::new();
@@ -360,8 +372,8 @@ impl Player {
         })
     }
     pub fn fade(&mut self, seconds: f32) {
-        self.sequence.fade = Some((0, (seconds * 1000.0).max(1.0) as u32));
-        self.sequence.fade_multiplier = 0.0;
+        self.sequence
+            .fade_milliseconds((seconds * 1000.0).max(1.0) as u32);
     }
     pub fn render(&mut self, left: &mut [f32], right: &mut [f32]) {
         let mut offset = 0;

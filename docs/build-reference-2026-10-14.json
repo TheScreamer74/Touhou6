@@ -1,0 +1,19 @@
+{
+  "date": "2026-10-14",
+  "wasm_sha256": "0cb6025d5b0909daca4d28664f0a40fe11cfa57eb289e602a1913cc3a87d05d8",
+  "wasm_bytes": 9639568,
+  "native_binary_sha256": "330508878953a1bdf306054b764cdd1c4bfeee4073dc6df7d2afc36e70a13158",
+  "runtime_source_sha256": "b94dcce4e17bbbb122f7be36c0dabdfa0b00882046254a34a9055a7d988f2b98",
+  "source_frozen_before_and_after_build": true,
+  "version": "fidelity-20261014-0cb6025d5b09",
+  "tests": {
+    "workspace_passed": 134,
+    "workspace_ignored": 30,
+    "python_passed": 76,
+    "bg_order_depth_gpu_both_modes_passed": true,
+    "clip_gpu_both_modes_passed": true,
+    "clippy_and_format_passed": true,
+    "webgl_browser_16_and_32_bits_passed": true,
+    "midi_audio_worklet_44100_and_48000_hz_passed": true
+  }
+}

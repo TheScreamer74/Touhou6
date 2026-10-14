@@ -1,0 +1,147 @@
+{
+  "kind": "actual-browser-midi-worklet",
+  "wasm_sha256": "4dcaea15c61d14fd322ee5a7bfd2ae408b5a10b6b2ef502479d67f7335daba8d",
+  "inputs_sha256": {
+    "bank": "c5378b62028c920cb11e4803327983fee2f2cdff5dc89c708e39da417e51c854",
+    "midi": "bd046a73250175f16a5f47df98b0056452bbb61c0a84abc5ea3aa308605dc7b0",
+    "probe": "410c65611fdc15360c39d1307b1affd9503e086bf45e1e8a6698dedfa2861eba",
+    "meter": "a6d6bc8510cfde1ecd4d146e747519910218b63480b092edcad900e6036a8cd6",
+    "processor": "5e77d3d3f65a0b1efb2af6fa1eb5203fafca92cee8157c4e14cfa094598bd39b"
+  },
+  "observations": [
+    {
+      "sampleRate": 48000,
+      "before": {
+        "frames": 3174400,
+        "energy": 57497.90755944303,
+        "time": 66.22133333333333
+      },
+      "after": {
+        "frames": 3276800,
+        "energy": 58463.61446198714,
+        "time": 68.35466666666666
+      },
+      "framesDuringObservation": 102400,
+      "pcmEnergyDuringObservation": 965.7069025441087,
+      "errors": [],
+      "passed": true
+    },
+    {
+      "sampleRate": 44100,
+      "before": {
+        "frames": 2649600,
+        "energy": 45448.21798038834,
+        "time": 60.12807256235828
+      },
+      "after": {
+        "frames": 2739200,
+        "energy": 47568.25484605796,
+        "time": 62.15981859410431
+      },
+      "framesDuringObservation": 89600,
+      "pcmEnergyDuringObservation": 2120.0368656696155,
+      "errors": [],
+      "passed": true
+    }
+  ],
+  "scope": "Actual final WASM AudioWorklet with TimGM6mb and original th06_09.mid. UI thread blocked for2seconds plus meter sampling granularity. This proves ongoing PCM synthesis, not Windows GS timbre identity.",
+  "passed": true,
+  "candidate_cf4350dd_validation": {
+    "wasm_sha256": "f19ee134d81fbcea0bed9e85a7e2fad613d943ec04cdd8eeb15ba037a208b651",
+    "runtime_source_sha256": "2fac9c2fd9bd2707fda889e8a78cd5843bbf462a99ff1a778072acd42aa8d366",
+    "local_fetch_harness_sha256": "31016e326eddc46849041f73d9ed5fa362d6cfe13cbe11391547ff83f38ebd44",
+    "method": "Same production AudioWorklet and WASM MidiSynth, original th06_09.mid and TimGM6mb. Local harness replaces file chooser with localhost fetch of those exact assets. UI click stalls main thread2000ms, meter reads ongoing audio-thread PCM.",
+    "inputs": {
+      "gm.sf2": "c5378b62028c920cb11e4803327983fee2f2cdff5dc89c708e39da417e51c854",
+      "midi-reference.mid": "bd046a73250175f16a5f47df98b0056452bbb61c0a84abc5ea3aa308605dc7b0",
+      "midi-worklet.js": "5e77d3d3f65a0b1efb2af6fa1eb5203fafca92cee8157c4e14cfa094598bd39b",
+      "midi-meter-worklet.js": "a6d6bc8510cfde1ecd4d146e747519910218b63480b092edcad900e6036a8cd6"
+    },
+    "rate48000": {
+      "sample_rate": 48000,
+      "before": {
+        "frames": 1113600,
+        "energy": 9600.355057757712,
+        "time": 23.24
+      },
+      "after": {
+        "frames": 1216000,
+        "energy": 11235.933383106614,
+        "time": 25.373333333333335
+      },
+      "frames_during_observation": 102400,
+      "pcm_energy_during_observation": 1635.5783253489026,
+      "passed": true,
+      "errors": []
+    },
+    "rate44100": {
+      "sample_rate": 44100,
+      "before": {
+        "frames": 1715200,
+        "energy": 19778.280968308165,
+        "time": 38.890521541950115
+      },
+      "after": {
+        "frames": 1804800,
+        "energy": 21619.017878130275,
+        "time": 40.922267573696146
+      },
+      "frames_during_observation": 89600,
+      "pcm_energy_during_observation": 1840.7369098221097,
+      "passed": true,
+      "errors": []
+    },
+    "console_errors_or_warnings": [],
+    "scope": "Audio continuity in browser at both rates; not proof of identical Windows GS timbre."
+  },
+  "final_validation": {
+    "date": "2026-10-14",
+    "wasm_sha256": "0cb6025d5b0909daca4d28664f0a40fe11cfa57eb289e602a1913cc3a87d05d8",
+    "runtime_source_sha256": "b94dcce4e17bbbb122f7be36c0dabdfa0b00882046254a34a9055a7d988f2b98",
+    "local_fetch_harness_sha256": "bd9b4751d726ae7dbd6770d2f0f70e5dcc657d26c96e00ce17ee9c872f161811",
+    "method": "Same production AudioWorklet and WASM MidiSynth, original th06_09.mid and TimGM6mb. Local harness replaces file chooser with localhost fetch of those exact assets. UI click stalls main thread2000ms, meter reads ongoing audio-thread PCM.",
+    "inputs": {
+      "gm.sf2": "c5378b62028c920cb11e4803327983fee2f2cdff5dc89c708e39da417e51c854",
+      "midi-reference.mid": "bd046a73250175f16a5f47df98b0056452bbb61c0a84abc5ea3aa308605dc7b0",
+      "midi-worklet.js": "5e77d3d3f65a0b1efb2af6fa1eb5203fafca92cee8157c4e14cfa094598bd39b",
+      "midi-meter-worklet.js": "a6d6bc8510cfde1ecd4d146e747519910218b63480b092edcad900e6036a8cd6"
+    },
+    "rate48000": {
+      "sampleRate": 48000,
+      "before": {
+        "frames": 1190400,
+        "energy": 10956.85807666612,
+        "time": 24.84
+      },
+      "after": {
+        "frames": 1292800,
+        "energy": 12191.357524289588,
+        "time": 26.973333333333333
+      },
+      "framesDuringObservation": 102400,
+      "pcmEnergyDuringObservation": 1234.4994476234679,
+      "errors": [],
+      "passed": true
+    },
+    "rate44100": {
+      "sampleRate": 44100,
+      "before": {
+        "frames": 1216000,
+        "energy": 11426.134750216996,
+        "time": 27.57079365079365
+      },
+      "after": {
+        "frames": 1305600,
+        "energy": 13161.898442828338,
+        "time": 29.602539682539682
+      },
+      "framesDuringObservation": 89600,
+      "pcmEnergyDuringObservation": 1735.7636926113428,
+      "errors": [],
+      "passed": true
+    },
+    "console_errors_or_warnings": [],
+    "scope": "Audio continuity in browser at both rates; not proof of identical Windows GS timbre.",
+    "passed": true
+  }
+}

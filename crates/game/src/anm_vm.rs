@@ -51,8 +51,9 @@ pub struct AnmRunner {
     /// Z rotation in radians (opcode 9), integrated by `angle_vel` (opcode 10).
     pub rotation: f32,
     angle_vel: f32,
-    /// opcode 12 Fade: (from_alpha, to_alpha, elapsed, duration).
-    fade: Option<(f32, f32, u16, u16)>,
+    /// opcode 12 Fade snapshots the complete D3DCOLOR, including RGB. An owner
+    /// changing VM color afterward does not change those interpolation endpoints.
+    fade: Option<([f32; 4], [f32; 4], u16, u16)>,
     /// Anchor at top-left (opcode 23) instead of the sprite center.
     pub corner: bool,
     /// Horizontal mirror (opcode 7).
@@ -76,6 +77,10 @@ pub struct AnmRunner {
     /// D3DTOP_ADD combines texture RGB with the VM color, preserving the
     /// normal texture-alpha × VM-alpha calculation.
     pub color_add: bool,
+    /// ANM31 disables depth writes while keeping the current depth comparison.
+    pub z_write_disable: bool,
+    /// Texture-coordinate scrolling from ANM opcodes27/28.
+    pub uv_scroll: [f32; 2],
     /// True once the script set its own position (opcode 17) — distinguishes
     /// self-placing HUD labels from elements the game positions each frame.
     pub positioned: bool,
@@ -114,6 +119,8 @@ impl AnmRunner {
             pending_random: None,
             additive: false,
             color_add: false,
+            z_write_disable: false,
+            uv_scroll: [0.0; 2],
             positioned: false,
         };
         // SetAndExecuteScript executes frame zero immediately, including the
@@ -126,10 +133,21 @@ impl AnmRunner {
         !self.dead && self.sprite.is_some() && !self.hidden
     }
 
+    /// ANM's stop flag remains set until an interrupt resumes the script.
+    pub fn stopped(&self) -> bool {
+        self.halted
+    }
+
     /// AnmManager::SetActiveSprite, also used by Gui's MSG expression opcode.
     pub fn set_sprite(&mut self, sprite: u32) {
         self.sprite = Some(sprite);
         self.hidden = false;
+    }
+
+    /// Assign the owner's D3DCOLOR after SetAndExecuteScript, as effects do.
+    pub fn set_rgba(&mut self, rgba: [f32; 4]) {
+        self.color = [rgba[0], rgba[1], rgba[2]];
+        self.alpha = rgba[3];
     }
 
     /// Take a pending SetRandomSprite (opcode 16) request: (base, range). The
@@ -181,17 +199,15 @@ impl AnmRunner {
         }
         if let Some((from, to, elapsed, dur)) = self.fade {
             let t = elapsed.saturating_add(1);
-            if t >= dur {
-                self.alpha = to;
-                self.fade = None;
-            } else {
-                // AnmManager interpolates 8-bit color components with an i32
-                // truncation each frame, rather than keeping fractional alpha.
-                self.alpha = ((from * 255.0 + (to - from) * 255.0 * (t as f32 / dur as f32)) as i32)
-                    as f32
-                    / 255.0;
-                self.fade = Some((from, to, t, dur));
-            }
+            let factor = (t as f32 / dur as f32).min(1.0);
+            // ExecuteScript interpolates all four saved 8-bit components,
+            // truncating each result. This can restore the saved RGB after an
+            // owner assigns another tint while the fade is running.
+            self.set_rgba(std::array::from_fn(|k| {
+                ((from[k] * 255.0 + (to[k] - from[k]) * 255.0 * factor) as i32).clamp(0, 255) as f32
+                    / 255.0
+            }));
+            self.fade = (t < dur).then_some((from, to, t, dur));
         }
         if let Some(mut m) = self.moving {
             let t = m.elapsed;
@@ -317,12 +333,11 @@ impl AnmRunner {
                 9 => self.rotation = i.arg_f32(2),
                 10 => self.angle_vel = i.arg_f32(2),
                 12 => {
-                    self.fade = Some((
-                        self.alpha,
-                        (i.arg_u32(0) & 0xff) as f32 / 255.0,
-                        0,
-                        i.arg_u32(1) as u16,
-                    ));
+                    let from = [self.color[0], self.color[1], self.color[2], self.alpha];
+                    let mut to = from;
+                    to[3] = (i.arg_u32(0) & 0xff) as f32 / 255.0;
+                    self.fade =
+                        (i.arg_u32(1) as u16 != 0).then_some((from, to, 0, i.arg_u32(1) as u16));
                 }
                 17 => {
                     let pos = [i.arg_f32(0), i.arg_f32(1)];
@@ -373,8 +388,19 @@ impl AnmRunner {
                     self.pending_random = Some((i.arg_u32(0), i.arg_u32(1) as u16));
                     self.hidden = false;
                 }
+                27 | 28 => {
+                    let axis = (i.opcode - 27) as usize;
+                    self.uv_scroll[axis] += i.arg_f32(0);
+                    // Original performs a single wrap, rather than rem_euclid.
+                    if self.uv_scroll[axis] >= 1.0 {
+                        self.uv_scroll[axis] -= 1.0;
+                    } else if self.uv_scroll[axis] < 0.0 {
+                        self.uv_scroll[axis] += 1.0;
+                    }
+                }
                 // SetVisibility: isVisible = args[0].
                 29 => self.hidden = i.arg_u32(0) == 0,
+                31 => self.z_write_disable = i.arg_u32(0) & 1 != 0,
                 _ => {}
             }
             self.pc += 1;
@@ -385,6 +411,17 @@ impl AnmRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn z_write_disable_uses_original_single_bit_and_resets_with_script() {
+        assert!(!AnmRunner::new(Vec::new()).z_write_disable);
+        for (argument, expected) in [(0, false), (1, true), (2, false), (3, true)] {
+            assert_eq!(
+                AnmRunner::new(vec![instr(31, &[argument])]).z_write_disable,
+                expected
+            );
+        }
+    }
 
     fn instr(opcode: u8, args: &[u32]) -> Instr {
         Instr {
@@ -405,6 +442,18 @@ mod tests {
         assert_eq!(vm.scale, [0.05, 0.05]);
         vm.tick();
         assert_eq!(vm.scale, [0.1, 0.1]);
+    }
+
+    #[test]
+    fn fade_restores_saved_rgba_after_effect_owner_overrides_color() {
+        let mut vm = AnmRunner::new(vec![instr(12, &[0, 40]), instr(21, &[])]);
+        assert_eq!(vm.alpha, 248.0 / 255.0);
+        // EffectManager::SpawnParticles assigns NEONBLUE after executing the
+        // initial script. Its running fade still holds white RGB endpoints.
+        vm.set_rgba([64.0 / 255.0, 64.0 / 255.0, 1.0, 1.0]);
+        vm.tick();
+        assert_eq!(vm.color, [1.0; 3]);
+        assert_eq!(vm.alpha, 242.0 / 255.0);
     }
 
     #[test]

@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use glam::{Mat4, Vec3};
-use th06_engine::{BgScene, Vertex3};
+use th06_engine::{BgDrawRange, BgScene, Vertex3};
 use th06_formats::anm0::{Entry, Instr};
 use th06_formats::std::Std;
 
@@ -41,6 +41,8 @@ struct BgQuadVm {
     uv: [f32; 2],
     /// op13/14: true = additive (One/One) blend.
     blend_add: bool,
+    /// Opcode31 controls ZWRITE independently of the VM's blend mode.
+    z_write_disable: bool,
     /// vm->color modulation [r, g, b, a] (op3 alpha, op4 color, op12 fade).
     color: [f32; 4],
     /// op12 Fade: alpha interpolation (from, to, end_time, timer).
@@ -67,6 +69,7 @@ impl BgQuadVm {
             corner: false,
             uv: [0.0, 0.0],
             blend_add: false,
+            z_write_disable: false,
             color: [1.0, 1.0, 1.0, 1.0],
             fade: [0.0, 0.0],
             fade_end: 0,
@@ -166,8 +169,8 @@ impl BgQuadVm {
                     self.uv[1] = (self.uv[1] + i.arg_f32(0)).rem_euclid(1.0);
                 }
                 29 => self.visible = i.arg_u32(0) != 0,
-                // 3 alpha / 12 fade / 13-14 blend need engine support; 17-20
-                // position is overridden by the STD quad position. Ignored here.
+                31 => self.z_write_disable = i.args.first().copied().unwrap_or(0) & 1 != 0,
+                // 17-20 position is overridden by the STD quad position.
                 _ => {}
             }
             self.pc += 1;
@@ -248,6 +251,9 @@ pub struct Background {
     interp_end: f32,
     /// Camera look direction (STD op2/op3), interpolated like the position.
     facing: Vec3,
+    /// GameManager prepares the draw camera before Stage calculates the next
+    /// facing direction. Positions and fog still use the current Stage state.
+    render_facing: Vec3,
     facing_init: Vec3,
     facing_final: Vec3,
     facing_dur: i32,
@@ -337,7 +343,10 @@ impl Background {
             cam_final: Vec3::ZERO,
             interp_start: 0.0,
             interp_end: 1.0,
-            facing: Vec3::new(0.0, 0.0, 1.0),
+            // GameManager's global facing starts at zero only at process
+            // construction. Game supplies the previous stage/run's value.
+            facing: Vec3::ZERO,
+            render_facing: Vec3::ZERO,
             facing_init: Vec3::new(0.0, 0.0, 1.0),
             facing_final: Vec3::new(0.0, 0.0, 1.0),
             facing_dur: 1,
@@ -360,7 +369,29 @@ impl Background {
         self.unpause_flag = true;
     }
 
+    pub(crate) fn camera_facing(&self) -> [f32; 3] {
+        self.facing.to_array()
+    }
+
+    pub(crate) fn inherit_camera_facing(&mut self, facing: [f32; 3]) {
+        self.facing = Vec3::from_array(facing);
+        self.render_facing = self.facing;
+    }
+
+    pub(crate) fn prepare_draw_camera(&mut self) {
+        self.render_facing = self.facing;
+    }
+
+    pub(crate) fn has_draw_camera(&self) -> bool {
+        // The first process-wide SetupCamera has eye == at. Its degenerate
+        // transform draws no background, preserving the previous menu image.
+        // Do not submit NaN matrices produced by look_at_lh to the GPU.
+        self.render_facing.is_finite()
+            && (self.render_facing.x != 0.0 || self.render_facing.z != 0.0)
+    }
+
     pub fn tick(&mut self) {
+        self.prepare_draw_camera();
         // Camera/fog script (STD): position keys, fog, facing.
         // `parked` is set when we stop on an STDOP_PAUSE whose release hasn't
         // arrived; while parked the script clock (`self.time`) does not tick, so
@@ -547,28 +578,40 @@ impl Background {
     }
 
     fn view_proj(&self) -> Mat4 {
-        let mid_w = FIELD_W / 2.0;
-        let mid_h = FIELD_H / 2.0;
+        self.view_proj_for_size([FIELD_W, FIELD_H])
+    }
+
+    fn view_proj_for_size(&self, size: [f32; 2]) -> Mat4 {
+        let mid_w = size[0] / 2.0;
+        let mid_h = size[1] / 2.0;
         let fov = 30.0_f32.to_radians();
         let cam_dist = mid_h / (fov / 2.0).tan();
-        let eye = Vec3::new(mid_w, -mid_h, -cam_dist * self.facing.z);
-        let at = Vec3::new(mid_w + self.facing.x, -mid_h + self.facing.y, 0.0);
+        let eye = Vec3::new(mid_w, -mid_h, -cam_dist * self.render_facing.z);
+        let at = Vec3::new(
+            mid_w + self.render_facing.x,
+            -mid_h + self.render_facing.y,
+            0.0,
+        );
         let up = Vec3::Y;
         let view = Mat4::look_at_lh(eye, at, up);
         // Far plane 10000 (GameManager::SetupCamera with extraRenderDistance 0),
         // not 20000 — the original clips quads past 10000 (they are fully fogged
         // by then anyway); rendering them produced an over-distant smear band.
-        let proj = Mat4::perspective_lh(fov, FIELD_W / FIELD_H, 100.0, 10000.0);
+        let proj = Mat4::perspective_lh(fov, size[0] / size[1], 100.0, 10000.0);
         proj * view
     }
 
-    fn view_matrix(&self) -> Mat4 {
-        let mid_w = FIELD_W / 2.0;
-        let mid_h = FIELD_H / 2.0;
+    fn view_matrix_for_size(&self, size: [f32; 2]) -> Mat4 {
+        let mid_w = size[0] / 2.0;
+        let mid_h = size[1] / 2.0;
         let fov = 30.0_f32.to_radians();
         let cam_dist = mid_h / (fov / 2.0).tan();
-        let eye = Vec3::new(mid_w, -mid_h, -cam_dist * self.facing.z);
-        let at = Vec3::new(mid_w + self.facing.x, -mid_h + self.facing.y, 0.0);
+        let eye = Vec3::new(mid_w, -mid_h, -cam_dist * self.render_facing.z);
+        let at = Vec3::new(
+            mid_w + self.render_facing.x,
+            -mid_h + self.render_facing.y,
+            0.0,
+        );
         Mat4::look_at_lh(eye, at, Vec3::Y)
     }
 
@@ -600,11 +643,19 @@ impl Background {
     }
 
     pub fn scene(&self) -> BgScene {
-        let mvp = self.view_proj();
-        let view = self.view_matrix();
+        self.scene_for_viewport([FIELD_W, FIELD_H])
+    }
+
+    /// GameManager::SetupCamera derives its eye, aspect and distance from the
+    /// latched DWORD viewport, before later ScreenEffect shake callbacks.
+    pub(crate) fn scene_for_viewport(&self, size: [f32; 2]) -> BgScene {
+        let mvp = self.view_proj_for_size(size);
+        let view = self.view_matrix_for_size(size);
         let [tw, th] = self.tex_size;
         let mut verts = Vec::new();
         let mut verts_add = Vec::new();
+        let mut draw_ranges: Vec<BgDrawRange> = Vec::new();
+        let mut inverse_mvp = None;
 
         for &qi in &self.draw_order {
             let dq = &self.quads[qi];
@@ -652,8 +703,8 @@ impl Background {
             let oy = -(dq.base[1] - self.cam.y) + ay;
             let oz = dq.base[2] - self.cam.z;
 
-            // 3D orientation from the anm rotation (Draw3: Rx*Ry*Rz). auto_rotate
-            // == 2 is a camera-facing billboard, left axis-aligned.
+            // 3D orientation from the anm rotation (Draw3: Rx*Ry*Rz).
+            // autoRotate2 uses the separate projected RHW branch below.
             let rotm = if (vm.rot[0] != 0.0 || vm.rot[1] != 0.0 || vm.rot[2] != 0.0)
                 && vm.auto_rotate != 2
             {
@@ -688,16 +739,97 @@ impl Background {
                 }
             };
 
-            let tl = vtx(-hw, hh, u0, v0);
-            let tr = vtx(hw, hh, u1, v0);
-            let br = vtx(hw, -hh, u1, v1);
-            let bl = vtx(-hw, -hh, u0, v1);
+            let (tl, tr, br, bl) = if vm.auto_rotate == 2 {
+                // Stage.cpp649–670 projects the unanchored center and one X
+                // offset, then overwrites BOTH VM scales before DrawFacingCamera.
+                // Its quad is screen-aligned even with a pitched stage camera.
+                let point =
+                    glam::Vec4::new(dq.base[0] - self.cam.x, -(dq.base[1] - self.cam.y), oz, 1.0);
+                let quad_width = if dq.size[0] != 0.0 { dq.size[0] } else { sw };
+                let projected = mvp * point;
+                let projected_x = mvp * (point + glam::Vec4::X * (quad_width * scale_x));
+                if quad_width == 0.0
+                    || projected.w == 0.0
+                    || projected_x.w == 0.0
+                    || !projected.is_finite()
+                    || !projected_x.is_finite()
+                {
+                    continue;
+                }
+                let center = [
+                    (projected.x / projected.w + 1.0) * size[0] / 2.0,
+                    (1.0 - projected.y / projected.w) * size[1] / 2.0,
+                ];
+                let edge_x = (projected_x.x / projected_x.w + 1.0) * size[0] / 2.0;
+                let screen_scale = (edge_x - center[0]) / quad_width;
+                let half = [sw * screen_scale / 2.0, sh * screen_scale / 2.0];
+                let center = if vm.corner {
+                    [center[0] + half[0], center[1] + half[1]]
+                } else {
+                    center
+                };
+                // D3DXVec3Project includes the background viewport's .5..1 Z
+                // range. DrawInner(0) copies that Z into XYZRHW without rounding.
+                // Wine applies the viewport range once more to those vertices.
+                let rhw_z = 0.5 + 0.5 * (projected.z / projected.w);
+                let inverse = *inverse_mvp.get_or_insert_with(|| mvp.inverse());
+                let billboard_vertex = |dx: f32, dy: f32, u: f32, v: f32| {
+                    let clip = glam::Vec4::new(
+                        (center[0] + dx) * 2.0 / size[0] - 1.0,
+                        1.0 - (center[1] + dy) * 2.0 / size[1],
+                        rhw_z,
+                        1.0,
+                    );
+                    let world = inverse * clip;
+                    Vertex3 {
+                        pos: (world.truncate() / world.w).to_array(),
+                        uv: [u, v],
+                        // Wine11 glsl_shader.c9382 / ffp_hlsl.c361 use ec_pos.z
+                        // for transformed vertices with perspective table fog:
+                        // the copied RHW Z, not the original world-space distance.
+                        depth: rhw_z,
+                        color,
+                    }
+                };
+                (
+                    billboard_vertex(-half[0], -half[1], u0, v0),
+                    billboard_vertex(half[0], -half[1], u1, v0),
+                    billboard_vertex(half[0], half[1], u1, v1),
+                    billboard_vertex(-half[0], half[1], u0, v1),
+                )
+            } else {
+                (
+                    vtx(-hw, hh, u0, v0),
+                    vtx(hw, hh, u1, v0),
+                    vtx(hw, -hh, u1, v1),
+                    vtx(-hw, -hh, u0, v1),
+                )
+            };
             let out = if vm.blend_add {
                 &mut verts_add
             } else {
                 &mut verts
             };
+            let start = out.len() as u32;
             out.extend_from_slice(&[tl, tr, br, tl, br, bl]);
+            let end = out.len() as u32;
+            // Stage::RenderObjects draws instances/quads immediately within
+            // zLevels 0..3; Draw3 applies each VM's blend mode at that point.
+            // Merge only adjacent draws of the same pool, never regroup them.
+            if let Some(last) = draw_ranges.last_mut()
+                && last.additive == vm.blend_add
+                && last.write_depth != vm.z_write_disable
+                && last.end == start
+            {
+                last.end = end;
+            } else {
+                draw_ranges.push(BgDrawRange {
+                    additive: vm.blend_add,
+                    write_depth: !vm.z_write_disable,
+                    start,
+                    end,
+                });
+            }
         }
 
         BgScene {
@@ -707,6 +839,7 @@ impl Background {
             fog_far: self.fog_far,
             verts,
             verts_add,
+            draw_ranges,
             tex: self.tex_slot,
             arcade: [32.0, 16.0, 384.0, 448.0],
         }
@@ -793,5 +926,237 @@ impl Background {
             out.push((dq.anm_script, posrel, dq.size, corners, min_w));
         }
         ([self.facing.x, self.facing.y, self.facing.z], out)
+    }
+}
+
+#[cfg(test)]
+mod camera_order_tests {
+    use super::*;
+    use th06_formats::std::ScriptInstr;
+
+    fn background(facing: [f32; 3]) -> Background {
+        let entry = Entry {
+            width: 256,
+            height: 256,
+            format: 1,
+            name: String::new(),
+            alpha_name: None,
+            sprites: Vec::new(),
+            scripts: Vec::new(),
+        };
+        Background::new(
+            Std {
+                objects: Vec::new(),
+                instances: Vec::new(),
+                script: vec![
+                    ScriptInstr {
+                        frame: 0,
+                        opcode: 2,
+                        args: facing.map(|f| f.to_bits() as i32),
+                    },
+                    ScriptInstr {
+                        frame: 0,
+                        opcode: 0,
+                        args: [12.0_f32, 34.0, 56.0].map(|f| f.to_bits() as i32),
+                    },
+                ],
+            },
+            &entry,
+            0,
+        )
+    }
+
+    #[test]
+    fn background_blend_ranges_follow_instance_quad_order() {
+        let mut background = background([0.0, 0.0, 1.0]);
+        background.render_facing = Vec3::Z;
+        background.sprite_tbl.insert(0, [0.0, 0.0, 16.0, 16.0]);
+        for additive in [false, true, false] {
+            let mut vm = BgQuadVm::new(Vec::new());
+            vm.sprite = Some(0);
+            vm.blend_add = additive;
+            background.quads.push(DrawQuad {
+                base: [0.0; 3],
+                size: [16.0; 2],
+                z: 0,
+                vm,
+                anm_script: 0,
+            });
+        }
+        background.draw_order = vec![0, 1, 2];
+        let scene = background.scene();
+        assert_eq!(
+            scene.draw_ranges,
+            vec![
+                BgDrawRange {
+                    additive: false,
+                    write_depth: true,
+                    start: 0,
+                    end: 6
+                },
+                BgDrawRange {
+                    additive: true,
+                    write_depth: true,
+                    start: 0,
+                    end: 6
+                },
+                BgDrawRange {
+                    additive: false,
+                    write_depth: true,
+                    start: 6,
+                    end: 12
+                },
+            ]
+        );
+        assert_eq!((scene.verts.len(), scene.verts_add.len()), (12, 6));
+    }
+
+    #[test]
+    fn background_zwrite_opcode_is_independent_of_additive_blending() {
+        let mut background = background([0.0, 0.0, 1.0]);
+        background.render_facing = Vec3::Z;
+        background.sprite_tbl.insert(0, [0.0, 0.0, 16.0, 16.0]);
+        for disabled in [0_u8, 1, 0] {
+            let vm = BgQuadVm::new(vec![
+                Instr {
+                    time: 0,
+                    opcode: 1,
+                    args: 0_u32.to_le_bytes().to_vec(),
+                    offset: 0,
+                },
+                Instr {
+                    time: 0,
+                    opcode: 13,
+                    args: Vec::new(),
+                    offset: 8,
+                },
+                Instr {
+                    time: 0,
+                    opcode: 31,
+                    args: vec![disabled],
+                    offset: 12,
+                },
+            ]);
+            background.quads.push(DrawQuad {
+                base: [0.0; 3],
+                size: [16.0; 2],
+                z: 0,
+                vm,
+                anm_script: 0,
+            });
+        }
+        background.draw_order = vec![0, 1, 2];
+        let scene = background.scene();
+        assert_eq!(
+            scene
+                .draw_ranges
+                .iter()
+                .map(|range| (range.additive, range.write_depth, range.start, range.end))
+                .collect::<Vec<_>>(),
+            vec![
+                (true, true, 0, 6),
+                (true, false, 6, 12),
+                (true, true, 12, 18)
+            ]
+        );
+    }
+
+    #[test]
+    fn stage3_billboard_is_screen_aligned_with_projected_rhw_depth_and_fog() {
+        let mut background = background([0.0, 600.0, 0.75]);
+        background.render_facing = Vec3::new(0.0, 600.0, 0.75);
+        background.cam = Vec3::new(0.0, -3260.0, 110.0);
+        background.sprite_tbl.insert(5, [33.0, 49.0, 30.0, 30.0]);
+        let mut vm = BgQuadVm::new(Vec::new());
+        vm.sprite = Some(5);
+        vm.auto_rotate = 2;
+        background.quads.push(DrawQuad {
+            base: [96.0, -3672.0, -20.0],
+            size: [32.0; 2],
+            z: 1,
+            vm,
+            anm_script: 5,
+        });
+        background.draw_order = vec![0];
+        let scene = background.scene();
+        let mvp = Mat4::from_cols_array_2d(&scene.mvp);
+        let screen: Vec<_> = scene
+            .verts
+            .iter()
+            .map(|vertex| {
+                let clip = mvp * glam::Vec4::new(vertex.pos[0], vertex.pos[1], vertex.pos[2], 1.0);
+                [
+                    32.0 + (clip.x / clip.w + 1.0) * 192.0,
+                    16.0 + (1.0 - clip.y / clip.w) * 224.0,
+                    clip.z / clip.w,
+                ]
+            })
+            .collect();
+        // Actual stage3.std frame4070 / object8, instanceY=-3672. The source
+        // D3DXProject + DrawFacingCamera yields a square, unlike a world XY plane.
+        let center = [
+            (screen[0][0] + screen[2][0]) / 2.0,
+            (screen[0][1] + screen[2][1]) / 2.0,
+        ];
+        assert!((center[0] - 123.530).abs() < 0.002);
+        assert!((center[1] - 118.714).abs() < 0.002);
+        let width = screen[1][0] - screen[0][0];
+        let height = screen[2][1] - screen[1][1];
+        assert!((width - 33.490).abs() < 0.002);
+        assert!((height - 33.490).abs() < 0.002);
+        assert!((screen[0][1] - screen[1][1]).abs() < 0.002);
+        assert!((screen[1][0] - screen[2][0]).abs() < 0.002);
+        let original_point = mvp * glam::Vec4::new(96.0, 412.0, -130.0, 1.0);
+        let rhw_z = 0.5 + 0.5 * (original_point.z / original_point.w);
+        for (vertex, screen) in scene.verts.iter().zip(screen) {
+            assert_eq!(vertex.depth, rhw_z); // Wine's fog coordinate for RHW.
+            assert!((screen[2] - rhw_z).abs() < 0.00001);
+        }
+    }
+
+    #[test]
+    fn camera_precedes_stage_facing_but_not_position() {
+        let facing = [0.0, 120.0, 1.0];
+        let mut background = background(facing);
+        background.tick();
+        let (position, current_facing, ..) = background.dbg_state();
+        assert_eq!(position, [12.0, 34.0, 56.0]);
+        assert_eq!(current_facing, facing);
+        assert!(!background.has_draw_camera());
+
+        background.tick();
+        assert!(background.has_draw_camera());
+        assert!(background.view_proj().is_finite());
+        assert_eq!(background.render_facing.to_array(), facing);
+    }
+
+    #[test]
+    fn resized_neutral_camera_preserves_local_world_pixels_at_z_zero() {
+        let mut background = background([0.0, 0.0, 1.0]);
+        background.render_facing = Vec3::Z;
+        let clip = background.view_proj_for_size([364.0, 428.0])
+            * glam::Vec4::new(100.0, -200.0, 0.0, 1.0);
+        // D3DX camera eye moves to (Width/2,-Height/2,-distance), so changing
+        // viewport size does not squeeze the stage's zero-depth world plane.
+        let x = (clip.x / clip.w + 1.0) * 0.5 * 364.0;
+        let y = (1.0 - clip.y / clip.w) * 0.5 * 428.0;
+        assert!((x - 100.0).abs() < 0.0001);
+        assert!((y - 200.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn new_stage_keeps_previous_global_facing_for_first_camera() {
+        let previous = [0.0, -80.0, 1.0];
+        let next = [0.0, 120.0, 1.0];
+        let mut background = background(next);
+        background.inherit_camera_facing(previous);
+        background.tick();
+        assert!(background.has_draw_camera());
+        assert_eq!(background.render_facing.to_array(), previous);
+        assert_eq!(background.camera_facing(), next);
+
+        // GameManager still prepares the camera when Stage itself is paused.
+        background.prepare_draw_camera();
+        assert_eq!(background.render_facing.to_array(), next);
     }
 }

@@ -1,0 +1,211 @@
+{
+  "candidate_cf4350dd_validation": {
+    "binary_sha256": "cf4350ddeede8a2c93233abef00ff833190901c1b431e554fe0110da96f8ae6d",
+    "source_sha256": "2fac9c2fd9bd2707fda889e8a78cd5843bbf462a99ff1a778072acd42aa8d366",
+    "cases": [
+      {
+        "id": "replay-c1-d3-s4",
+        "simulation_passed": true,
+        "images_passed": false,
+        "images": 4,
+        "missing_images": [],
+        "observations": 21712,
+        "pools": 403,
+        "pixel_deltas": [
+          {
+            "stage": 4,
+            "frame": 18260,
+            "playfield_mae_before": 39.45809113033234,
+            "playfield_mae_after": 1.430879138764881,
+            "full_frame_mae_before": 22.150144314236112,
+            "full_frame_mae_after": 0.8554654947916667
+          },
+          {
+            "stage": 4,
+            "frame": 18261,
+            "playfield_mae_before": 39.78200179811508,
+            "playfield_mae_after": 1.4002859933035714,
+            "full_frame_mae_before": 22.331166449652777,
+            "full_frame_mae_after": 0.8378765190972223
+          },
+          {
+            "stage": 4,
+            "frame": 18262,
+            "playfield_mae_before": 40.406093052455354,
+            "playfield_mae_after": 1.3459259517609128,
+            "full_frame_mae_before": 22.681380208333334,
+            "full_frame_mae_after": 0.8083159722222222
+          },
+          {
+            "stage": 4,
+            "frame": 22610,
+            "playfield_mae_before": 2.0847361731150795,
+            "playfield_mae_after": 2.0847361731150795,
+            "full_frame_mae_before": 1.2168532986111111,
+            "full_frame_mae_after": 1.2168532986111111
+          }
+        ]
+      },
+      {
+        "id": "replay-c1-d3-s6",
+        "simulation_passed": true,
+        "images_passed": false,
+        "images": 4,
+        "missing_images": [],
+        "observations": 31537,
+        "pools": 570,
+        "pixel_deltas": [
+          {
+            "stage": 6,
+            "frame": 960,
+            "playfield_mae_before": 18.414312453497026,
+            "playfield_mae_after": 18.0941898406498,
+            "full_frame_mae_before": 10.411216362847222,
+            "full_frame_mae_after": 10.231947699652778
+          },
+          {
+            "stage": 6,
+            "frame": 961,
+            "playfield_mae_before": 2.1053854321676586,
+            "playfield_mae_after": 1.8062918526785714,
+            "full_frame_mae_before": 1.2782845052083334,
+            "full_frame_mae_after": 1.1107921006944443
+          },
+          {
+            "stage": 6,
+            "frame": 962,
+            "playfield_mae_before": 40.01878332713294,
+            "playfield_mae_after": 39.79278855096726,
+            "full_frame_mae_before": 22.506612413194443,
+            "full_frame_mae_after": 22.380055338541666
+          },
+          {
+            "stage": 6,
+            "frame": 31560,
+            "playfield_mae_before": 5.727275545634921,
+            "playfield_mae_after": 5.727275545634921,
+            "full_frame_mae_before": 3.374130859375,
+            "full_frame_mae_after": 3.374130859375
+          }
+        ]
+      },
+      {
+        "id": "replay-c0-d4-s7",
+        "simulation_passed": true,
+        "images_passed": false,
+        "images": 4,
+        "missing_images": [],
+        "observations": 49225,
+        "pools": 842,
+        "pixel_deltas": [
+          {
+            "stage": 7,
+            "frame": 7200,
+            "playfield_mae_before": 27.737918914310516,
+            "playfield_mae_after": 3.0272972470238093,
+            "full_frame_mae_before": 15.580718315972222,
+            "full_frame_mae_after": 1.7423947482638888
+          },
+          {
+            "stage": 7,
+            "frame": 7201,
+            "playfield_mae_before": 28.183109343998016,
+            "playfield_mae_after": 2.960358150421627,
+            "full_frame_mae_before": 15.829803602430555,
+            "full_frame_mae_after": 1.7048014322916667
+          },
+          {
+            "stage": 7,
+            "frame": 7202,
+            "playfield_mae_before": 28.684124658978174,
+            "playfield_mae_after": 2.9244016617063493,
+            "full_frame_mae_before": 16.11161892361111,
+            "full_frame_mae_after": 1.6858268229166666
+          },
+          {
+            "stage": 7,
+            "frame": 54692,
+            "playfield_mae_before": 6.849043588789683,
+            "playfield_mae_after": 6.849043588789683,
+            "full_frame_mae_before": 4.097790798611111,
+            "full_frame_mae_after": 4.097790798611111
+          }
+        ]
+      },
+      {
+        "id": "replay-c0-d1-s3",
+        "simulation_passed": true,
+        "images_passed": false,
+        "images": 7,
+        "missing_images": [],
+        "observations": 17098,
+        "pools": 322,
+        "pixel_deltas": [
+          {
+            "stage": 3,
+            "frame": 2400,
+            "playfield_mae_before": 0.38852074032738093,
+            "playfield_mae_after": 0.38852074032738093,
+            "full_frame_mae_before": 0.26394965277777777,
+            "full_frame_mae_after": 0.26394965277777777
+          },
+          {
+            "stage": 3,
+            "frame": 2401,
+            "playfield_mae_before": 0.39036342075892855,
+            "playfield_mae_after": 0.39036342075892855,
+            "full_frame_mae_before": 0.2650911458333333,
+            "full_frame_mae_after": 0.2650911458333333
+          },
+          {
+            "stage": 3,
+            "frame": 2402,
+            "playfield_mae_before": 0.3966742621527778,
+            "playfield_mae_after": 0.3966742621527778,
+            "full_frame_mae_before": 0.26866644965277775,
+            "full_frame_mae_after": 0.26866644965277775
+          },
+          {
+            "stage": 3,
+            "frame": 3000,
+            "playfield_mae_before": 1.1860739087301588,
+            "playfield_mae_after": 1.1768992590525793,
+            "full_frame_mae_before": 0.7347829861111111,
+            "full_frame_mae_after": 0.7296451822916666
+          },
+          {
+            "stage": 3,
+            "frame": 3001,
+            "playfield_mae_before": 1.2777041480654763,
+            "playfield_mae_after": 1.270782955109127,
+            "full_frame_mae_before": 0.779306640625,
+            "full_frame_mae_after": 0.7754307725694445
+          },
+          {
+            "stage": 3,
+            "frame": 3002,
+            "playfield_mae_before": 1.4100380549355158,
+            "playfield_mae_after": 1.4028591579861112,
+            "full_frame_mae_before": 0.846767578125,
+            "full_frame_mae_after": 0.8427473958333334
+          },
+          {
+            "stage": 3,
+            "frame": 17989,
+            "playfield_mae_before": 2.082821800595238,
+            "playfield_mae_after": 2.082821800595238,
+            "full_frame_mae_before": 1.2159429253472223,
+            "full_frame_mae_after": 1.2159429253472223
+          }
+        ]
+      }
+    ],
+    "complete": true,
+    "aggregate_sha256": "a455778a6610168ca15c1a770eb87f9297b014d0bcea4d2df82b6746f21e428e",
+    "scope": "19 unscaled real-original selected PNG/BMP pairs and four complete natural replay-menu simulation runs. Visual criteria remain failing. Score-popup and boss UI display changes only; subsequent camera correction belongs to a newer build.",
+    "superseded_diagnostic": {
+      "name": "port-captions-cf4350dd",
+      "reason": "Selected images ended before final pool; CLI continued to later attract replay and duplicated scalar IDs. Original terminal image added to fresh v2 runs; old diagnostic retained. New harness rejects this setup before launching."
+    }
+  }
+}

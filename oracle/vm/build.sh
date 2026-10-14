@@ -13,6 +13,22 @@ oracle_check_source
 rm -rf build && mkdir build
 cp "$DECOMP"/*.hpp "$DECOMP"/*.cpp build/
 cp engine_stub/*.hpp build/        # overlay full stub headers
+# Rotate aliases its input/output in Stage4 EX12. Copy the source function,
+# preserving sequential writes instead of a mathematically equivalent stub.
+python3 - "$DECOMP" <<'PY'
+from pathlib import Path
+import sys
+root = Path(sys.argv[1])
+source = root / ('Global.cpp' if (root / 'Global.cpp').exists() else 'utils.cpp')
+text = source.read_text()
+start = text.index('void Rotate(')
+brace = text.index('{', start)
+end, level = brace + 1, 1
+while level:
+    level += (text[end] == '{') - (text[end] == '}')
+    end += 1
+Path('build/original_rotate.inc').write_text(text[start:end] + '\n')
+PY
 # Per-stage real enemy sprite sizes for the despawn test (#38). compare.sh
 # generates enemy_sizes.h for the stage under test; default to a no-op table.
 if [ -f enemy_sizes.h ]; then cp enemy_sizes.h build/; else

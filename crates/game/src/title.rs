@@ -19,19 +19,22 @@ pub struct Title {
     quitting: Option<u16>,
     pending: Option<TitleAction>,
     extra_unlocked: bool,
+    pre_input: bool,
     timer: u16,
-    input: MenuInput,
+    pub(crate) input: MenuInput,
 }
 impl Title {
     pub fn new(mut art: MenuArt) -> Self {
-        art.interrupt_all(2);
+        art.interrupt_all(1);
         Self {
             art,
             cursor: 0,
             quitting: None,
             pending: None,
             extra_unlocked: false,
-            timer: 0,
+            pre_input: true,
+            // RegisterChain assigns 60 after the added callback.
+            timer: 60,
             input: MenuInput::default(),
         }
     }
@@ -39,29 +42,36 @@ impl Title {
         self.extra_unlocked = unlocked;
     }
     pub fn update(&mut self, input: &Input) -> (Vec<DrawCmd>, TitleAction) {
-        self.timer = self.timer.saturating_add(1);
         self.input.tick(input);
         let mut action = TitleAction::None;
+        if self.pre_input {
+            const START_INPUT: u16 = 1 | 2 | 8 | 512 | 1024 | 4096;
+            if self.timer >= 30 && self.input.pressed_mask(input, START_INPUT) {
+                self.pre_input = false;
+                self.timer = 0;
+                self.art.interrupt_all(2);
+            } else {
+                self.art.tick();
+                self.timer = self.timer.saturating_add(1);
+                return (self.draw(), action);
+            }
+        }
         if self.quitting.is_none() {
+            let accepts_selection = self.timer >= 20;
             if self.input.pressed(input, Key::Up) {
                 self.art.sound("select00");
                 self.cursor = (self.cursor + 7) % 8;
                 if self.cursor == 1 && !self.extra_unlocked {
                     self.cursor = 0;
                 }
-            }
-            if self.input.pressed(input, Key::Down) {
+            } else if self.input.pressed(input, Key::Down) {
                 self.art.sound("select00");
                 self.cursor = (self.cursor + 1) % 8;
                 if self.cursor == 1 && !self.extra_unlocked {
                     self.cursor = 2;
                 }
             }
-            if self.timer >= 20 && (input.pressed(Key::Bomb) || input.pressed(Key::Pause)) {
-                self.art.sound("cancel00");
-                self.cursor = 7;
-            }
-            if self.timer >= 20 && (input.pressed(Key::Shoot) || input.pressed(Key::Enter)) {
+            if accepts_selection && (input.pressed(Key::Shoot) || input.pressed(Key::Enter)) {
                 self.art
                     .sound(if self.cursor == 7 { "cancel00" } else { "ok00" });
                 action = match self.cursor {
@@ -82,8 +92,19 @@ impl Title {
                     self.pending = Some(action);
                     self.art.interrupt_all(4);
                     self.quitting = Some(61);
+                    self.timer = 0;
                     action = TitleAction::None;
                 }
+            }
+            if accepts_selection && input.pressed(Key::Quit) {
+                self.art.sound("cancel00");
+                self.pending = None;
+                action = TitleAction::None;
+                self.start_quit();
+            }
+            if accepts_selection && (input.pressed(Key::Bomb) || input.pressed(Key::Pause)) {
+                self.art.sound("cancel00");
+                self.cursor = 7;
             }
         }
         self.art.tick();
@@ -93,10 +114,17 @@ impl Title {
                 action = self.pending.take().unwrap_or(TitleAction::Quit);
             }
         }
+        self.timer = self.timer.saturating_add(1);
+        (self.draw(), action)
+    }
+    pub fn draw(&mut self) -> Vec<DrawCmd> {
+        if self.pre_input {
+            return self.art.draw(|_| Some(([0.0; 2], [1.0; 4])));
+        }
         for idx in 0..8 {
             self.art.highlight(idx, idx == self.cursor);
         }
-        let cmds = self.art.draw(|idx| {
+        self.art.draw(|idx| {
             if idx < 8 {
                 let active = idx == self.cursor;
                 Some((
@@ -106,15 +134,48 @@ impl Title {
             } else {
                 Some(([0.0; 2], [1.0; 4]))
             }
-        });
-        (cmds, action)
+        })
     }
-    pub fn reset(&mut self) {
+    pub fn reset(&mut self, cursor: usize) {
         self.art.reset();
-        self.art.interrupt_all(2);
-        self.timer = 0;
+        self.art.interrupt_all(1);
+        self.cursor = cursor;
+        self.timer = 60;
+        self.pre_input = true;
         self.quitting = None;
         self.pending = None;
+        self.input = MenuInput::default();
+    }
+    /// Returning from selection re-enters STATE_STARTUP in the same MainMenu
+    /// chain. Its timer was reset to zero, then incremented to one.
+    pub fn begin_startup(&mut self, cursor: usize) {
+        self.reset(cursor);
+        self.timer = 1;
+    }
+    /// Options returns directly to the active title menu, without startup.
+    pub fn resume_menu(&mut self, cursor: usize) {
+        self.reset(cursor);
+        self.art.interrupt_all(2);
+        self.pre_input = false;
+        self.timer = 1;
+        self.cursor = cursor;
+    }
+
+    pub fn reference_navigation(&self) -> (u8, usize, u16) {
+        let state = if self.pre_input {
+            1
+        } else if self.quitting.is_some() {
+            match self.pending {
+                Some(TitleAction::StartGame | TitleAction::Extra | TitleAction::Practice) => 6,
+                Some(TitleAction::Replay) => 12,
+                Some(TitleAction::Score) => 10,
+                Some(TitleAction::Music) => 16,
+                _ => 4,
+            }
+        } else {
+            2
+        };
+        (state, self.cursor, self.timer)
     }
     pub fn take_sounds(&mut self) -> Vec<&'static str> {
         self.art.take_sounds()
@@ -122,5 +183,6 @@ impl Title {
     fn start_quit(&mut self) {
         self.art.interrupt_all(4);
         self.quitting = Some(61);
+        self.timer = 0;
     }
 }

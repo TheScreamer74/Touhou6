@@ -3,6 +3,9 @@
 //! the browser — every wav is uploaded by the player and held in memory).
 //! Both fail soft: with no output the game runs silent.
 
+#[path = "audio_trace.rs"]
+pub mod trace;
+
 /// SoundPlayer.cpp: 26 shared files, 32 independently retriggered variants.
 pub const SFX_FILES: [&str; 26] = [
     "plst00", "enep00", "pldead00", "power0", "power1", "tan00", "tan01", "tan02", "ok00",
@@ -88,6 +91,93 @@ mod sound_queue_tests {
         assert_eq!(queue.drain(), vec![10, 11, 12]);
         assert!((sfx_gain(0) - 0.177_827_94).abs() < 1e-7);
         assert!((sfx_gain(1) - 0.1).abs() < 1e-7);
+    }
+
+    #[test]
+    fn matches_executable_queue_variants_and_every_fade_step() {
+        let Some(directory) = std::env::var_os("TH06_AUDIO_REFERENCE_DIR") else {
+            return;
+        };
+        let directory = std::path::PathBuf::from(directory);
+        let variants = std::fs::read_to_string(directory.join("sound-variants.csv")).unwrap();
+        for (index, row) in variants.lines().skip(1).enumerate() {
+            let values: Vec<i32> = row.split(',').map(|value| value.parse().unwrap()).collect();
+            assert_eq!(
+                values,
+                [
+                    index as i32,
+                    SFX_VARIANTS[index].0 as i32,
+                    SFX_VARIANTS[index].1
+                ]
+            );
+        }
+        let calls = std::fs::read_to_string(directory.join("wave-calls.csv")).unwrap();
+        let rows: Vec<Vec<&str>> = calls
+            .lines()
+            .skip(1)
+            .map(|row| row.split(',').collect())
+            .collect();
+        assert_eq!(rows.iter().filter(|row| row[0] == "0").count(), 27);
+        let queue = SoundQueue::default();
+        for (tick, requests) in [
+            [7, 7, 15, 22, 28],
+            [7, 15, 22, 22, 28],
+            [28, 28, 28, 28, 28],
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            for index in requests {
+                queue.queue(index);
+            }
+            let played: Vec<usize> = rows
+                .iter()
+                .filter(|row| {
+                    row[0] == "0" && row[1].parse::<usize>().unwrap() == tick && row[2] == "PLAY"
+                })
+                .map(|row| row[3].parse().unwrap())
+                .collect();
+            assert_eq!(queue.drain(), played);
+        }
+        queue.queue(10); // muted flush keeps the original queue intact
+        queue.queue(11);
+        assert_eq!(
+            queue.drain(),
+            rows.iter()
+                .filter(|row| row[0] == "0" && row[1] == "4" && row[2] == "PLAY")
+                .map(|row| row[3].parse::<usize>().unwrap())
+                .collect::<Vec<_>>()
+        );
+        for (case, seconds) in [0.0, 0.001, 0.016666667, 0.5, 1.0, 2.0, 3.5, 10.0]
+            .into_iter()
+            .enumerate()
+        {
+            let mut fade = Fade::default();
+            fade.start(seconds);
+            let total = (seconds * 60.0) as usize;
+            for tick in 1..=total + 3 {
+                let captured: Vec<_> = rows
+                    .iter()
+                    .filter(|row| {
+                        row[0].parse::<usize>().unwrap() == case + 1
+                            && row[1].parse::<usize>().unwrap() == tick
+                    })
+                    .collect();
+                match fade.tick() {
+                    Some(0.0) => assert_eq!(
+                        captured.iter().map(|row| row[2]).collect::<Vec<_>>(),
+                        ["STOP"]
+                    ),
+                    Some(gain) => {
+                        assert_eq!(captured.len(), 1);
+                        assert_eq!(captured[0][2], "VOLUME");
+                        let db100: f32 = captured[0][4].parse().unwrap();
+                        assert!((gain - 10.0_f32.powf(db100 / 2000.0)).abs() < 1e-7);
+                    }
+                    None => assert!(captured.is_empty()),
+                }
+            }
+        }
     }
 }
 
@@ -343,7 +433,7 @@ mod native {
                 if let Some(sink) = &self.bgm
                     && self.midi_player.is_none()
                 {
-                    sink.set_volume(volume * 0.6);
+                    sink.set_volume(volume);
                 }
                 if volume == 0.0 {
                     self.stop_bgm();
@@ -358,14 +448,10 @@ mod native {
             self.midi_player = None;
         }
 
-        /// Play a registered BGM track on infinite loop. No-op when already
-        /// playing it.
+        /// Play a registered BGM track from its intro, including repeat requests.
         pub fn resume(&self) {}
 
         pub fn play_bgm(&mut self, name: &str) {
-            if self.bgm_name.as_deref() == Some(name) {
-                return;
-            }
             self.stop_bgm();
             self.fade = super::Fade::default();
             if name.ends_with(".mid") {
@@ -382,7 +468,7 @@ mod native {
                 let Ok(sink) = Sink::try_new(&self.handle) else {
                     return;
                 };
-                sink.set_volume(0.6);
+                sink.set_volume(1.0);
                 sink.append(MidiSource {
                     player: player.clone(),
                     samples: [0.0; 512],
@@ -429,7 +515,7 @@ mod native {
             let Ok(sink) = Sink::try_new(&self.handle) else {
                 return;
             };
-            sink.set_volume(0.6);
+            sink.set_volume(1.0);
             sink.append(source);
             self.bgm = Some(sink);
             self.bgm_name = Some(name.to_string());
@@ -568,6 +654,45 @@ mod tests {
         assert_eq!(encoded_sample_rate(&ogg), None);
         assert_eq!(encoded_sample_rate(b""), None);
     }
+
+    #[test]
+    fn supplied_wav_and_ogg_pcm_follow_original_loop_points() {
+        use rodio::{Decoder, Source};
+        use std::io::{BufReader, Cursor};
+        let Some(directory) = std::env::var_os("TH06_AUDIO_REFERENCE_DIR") else {
+            return;
+        };
+        let directory = std::path::PathBuf::from(directory);
+        let manifest = std::fs::read_to_string(directory.join("pcm-files.csv")).unwrap();
+        let mut checked = 0;
+        for row in manifest.lines().skip(1) {
+            let columns: Vec<_> = row.split(',').collect();
+            let decoder = Decoder::new(BufReader::new(Cursor::new(
+                std::fs::read(columns[0]).unwrap(),
+            )))
+            .unwrap();
+            let channels = decoder.channels();
+            let rate = decoder.sample_rate();
+            let samples: Vec<f32> = decoder.convert_samples().collect();
+            let start = columns[1].parse::<usize>().unwrap() * usize::from(channels);
+            let end = columns[2].parse::<usize>().unwrap() * usize::from(channels);
+            assert_eq!(rate, 44100);
+            assert!(start < end && end <= samples.len());
+            let expected: Vec<f32> = samples[end - 256..end]
+                .iter()
+                .copied()
+                .chain(samples[start..start + 768].iter().copied())
+                .collect();
+            let source = LoopSource::for_test(samples, channels, rate, start, end);
+            let actual: Vec<f32> = source.skip(end - 256).take(1024).collect();
+            assert_eq!(actual, expected, "{}", columns[0]);
+            checked += 1;
+        }
+        assert_eq!(
+            checked, 34,
+            "17 supplied original WAVs and 17 hosted Vorbis files"
+        );
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -632,7 +757,7 @@ mod web {
                 }
             }
             let bgm_gain = ctx.create_gain().ok()?;
-            bgm_gain.gain().set_value(0.6);
+            bgm_gain.gain().set_value(1.0);
             let _ = bgm_gain.connect_with_audio_node(&ctx.destination());
             let midi_worklet = Rc::new(RefCell::new(None));
             let midi_worklet_bank: Rc<RefCell<Option<Rc<[u8]>>>> = Rc::new(RefCell::new(None));
@@ -796,7 +921,7 @@ mod web {
             }
             if let Some(volume) = self.fade.tick() {
                 if self.midi_player.is_none() && !self.midi_on_worklet {
-                    self.bgm_gain.gain().set_value(volume * 0.6);
+                    self.bgm_gain.gain().set_value(volume);
                 }
                 if volume == 0.0 {
                     self.stop_bgm();
@@ -825,15 +950,12 @@ mod web {
             *self.bgm_name.borrow_mut() = None;
         }
 
-        /// Play a registered BGM track on infinite loop. No-op when already
-        /// playing it. `name` is the wav basename (e.g. "th06_03.wav").
+        /// Play a registered BGM track from its intro, including repeat requests.
+        /// `name` is the wav basename (e.g. "th06_03.wav").
         pub fn play_bgm(&mut self, name: &str) {
-            if self.bgm_name.borrow().as_deref() == Some(name) {
-                return;
-            }
             self.stop_bgm();
             self.fade = super::Fade::default();
-            self.bgm_gain.gain().set_value(0.6);
+            self.bgm_gain.gain().set_value(1.0);
             if name.ends_with(".mid") {
                 let Some(bank) = &self.soundfont else {
                     return;

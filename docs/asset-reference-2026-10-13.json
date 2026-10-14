@@ -1,0 +1,460 @@
+{
+  "date": "2026-10-13T06:28:55.650885+00:00",
+  "kind": "current-reference-native-asset-attestation",
+  "passed": true,
+  "scope": "Current remote/native snapshots only. Historical execution receipts were not rewritten and did not contain these asset hashes. All96 current original scenario DAT copies are compared. WAV equality concerns the separate original WAV snapshot; per-case WAV presence is explicitly recorded. Hosted Ogg and synthesized MIDI timbre are outside this byte-equality result.",
+  "full_private_receipt_sha256": "50acd25e920a2b0bfe591e7d07ef30c535693e5d16725d9a57c8e250571b2fd0",
+  "collector": "scripts/attest_reference_assets.py",
+  "collector_sha256": "beaed9f0b6ddf11b00d107507b49259754da4490c15025a68311e6ebc9c07978",
+  "original_archives": {
+    "CM.DAT": {
+      "sha256": "a899853d04e214ae4df8090bad7fd42698527027aa9dfccb4650fbb1d7828a0a",
+      "bytes": 935275,
+      "native_byte_identical": true
+    },
+    "ED.DAT": {
+      "sha256": "3fbb51f00785c98d6b4141a7a5a303f5955df3d181d2f220c2c6e81d717e9fee",
+      "bytes": 2017777,
+      "native_byte_identical": true
+    },
+    "IN.DAT": {
+      "sha256": "65d7ee9c4303bcb39f5f08a0ceaf7004e47fccc8242fd73db54b31a911f41af0",
+      "bytes": 760223,
+      "native_byte_identical": true
+    },
+    "MD.DAT": {
+      "sha256": "8f8db1918842857a63eb7c76e7f971fb931203a6239c26828304fa3ce12da911",
+      "bytes": 306003,
+      "native_byte_identical": true
+    },
+    "ST.DAT": {
+      "sha256": "0f834a35aef2d73b05cffecc830c017dacbcc6f11b9a0611a9da2f3970a112e7",
+      "bytes": 2964458,
+      "native_byte_identical": true
+    },
+    "TL.DAT": {
+      "sha256": "c05f4fa755602f9369d7cebd5689cf3655ec81bb746f5b269ee0faf3d5f0a020",
+      "bytes": 1040706,
+      "native_byte_identical": true
+    }
+  },
+  "original_wav_snapshot": {
+    "th06_01.wav": {
+      "sha256": "e14a4c1604300d7790b73d47a30f3475b696f09d038d1a6bb8d8a2fa8e253bfb",
+      "bytes": 11206778,
+      "native_byte_identical": true
+    },
+    "th06_02.wav": {
+      "sha256": "4b0651a530a751218c2705037e1158d269e84355f3dcabf06c0e1dc2f7a28123",
+      "bytes": 15368324,
+      "native_byte_identical": true
+    },
+    "th06_03.wav": {
+      "sha256": "ed015c54149acc243e960d1ec2961791a4817646f29ae01180c5cf644d42d5c1",
+      "bytes": 9945206,
+      "native_byte_identical": true
+    },
+    "th06_04.wav": {
+      "sha256": "615bbbe61d25aaf27afab40126ba10db4d3505951d0e76289566f9d183d23f61",
+      "bytes": 15532158,
+      "native_byte_identical": true
+    },
+    "th06_05.wav": {
+      "sha256": "e514ee13cb3c326e0e039a6b5d28a48f89d19f7195133342b9d07e0df8991b3a",
+      "bytes": 15859834,
+      "native_byte_identical": true
+    },
+    "th06_06.wav": {
+      "sha256": "bc14403d1281fdb8ad5c183d4f4497622985de795b526a2c0d3ebaeb3fa7cacc",
+      "bytes": 24838280,
+      "native_byte_identical": true
+    },
+    "th06_07.wav": {
+      "sha256": "2b42f3c5c629b07354e0045caac8556270ac8868b6e22885343504c8e1eebb6f",
+      "bytes": 18858116,
+      "native_byte_identical": true
+    },
+    "th06_08.wav": {
+      "sha256": "d88bf28bb5266bc3b24c83d3cec523e13afdfbd3afe0fd4dd72daafe2cfee301",
+      "bytes": 21527454,
+      "native_byte_identical": true
+    },
+    "th06_09.wav": {
+      "sha256": "a69f06e4e1f97e2090b6278668c235635666344a2b765bd28c55d2763752077d",
+      "bytes": 23160042,
+      "native_byte_identical": true
+    },
+    "th06_10.wav": {
+      "sha256": "cdd855783cef7f251958b766bd5041afc529f2a95e428d09207985de7dcb2d15",
+      "bytes": 32237314,
+      "native_byte_identical": true
+    },
+    "th06_11.wav": {
+      "sha256": "6147545b7034fa198c6a7e2075f8401e36857f2f21b8d823e3d3995b2d7b96b6",
+      "bytes": 16613542,
+      "native_byte_identical": true
+    },
+    "th06_12.wav": {
+      "sha256": "9de2057f4cf1cdc96bf77c8ad0b3d2f452734d4a4a72ab166d8dc6c97c79df9b",
+      "bytes": 10633346,
+      "native_byte_identical": true
+    },
+    "th06_13.wav": {
+      "sha256": "8eacc14d544505b681cd21edab79ebfe3e9e2da22dbf8a4fdbe958e1ef7c4aef",
+      "bytes": 29065494,
+      "native_byte_identical": true
+    },
+    "th06_14.wav": {
+      "sha256": "e4bbd0620c0e2caf6275b3e1997f69909f9bdc4a0df1fe4b053f9c2d8ef732af",
+      "bytes": 27967616,
+      "native_byte_identical": true
+    },
+    "th06_15.wav": {
+      "sha256": "3f7b66cf3b5a19ee4a7485d59443133502f533588f4064d66bba7d2cda92fcb1",
+      "bytes": 22642824,
+      "native_byte_identical": true
+    },
+    "th06_16.wav": {
+      "sha256": "a2cc8f5f1f0655f48a4ea184aaafc5b126216317e9197cb40c293d2aac086431",
+      "bytes": 10174588,
+      "native_byte_identical": true
+    },
+    "th06_17.wav": {
+      "sha256": "65f543e5d6cf40eaeefd0cf99e2c63f9fd47d096fa48b19429d8b8ea385f29b5",
+      "bytes": 19267718,
+      "native_byte_identical": true
+    }
+  },
+  "current_scenario_archive_copies_compared": 576,
+  "scenario_ids": [
+    "replay-c0-d0-s1",
+    "replay-c0-d0-s2",
+    "replay-c0-d0-s3",
+    "replay-c0-d0-s4",
+    "replay-c0-d0-s5",
+    "replay-c0-d1-s1",
+    "replay-c0-d1-s2",
+    "replay-c0-d1-s3",
+    "replay-c0-d1-s4",
+    "replay-c0-d1-s5",
+    "replay-c0-d1-s6",
+    "replay-c0-d2-s1",
+    "replay-c0-d2-s2",
+    "replay-c0-d2-s3",
+    "replay-c0-d2-s4",
+    "replay-c0-d2-s5",
+    "replay-c0-d2-s6",
+    "replay-c0-d3-s1",
+    "replay-c0-d3-s2",
+    "replay-c0-d3-s3",
+    "replay-c0-d3-s4",
+    "replay-c0-d3-s5",
+    "replay-c0-d3-s6",
+    "replay-c0-d4-s7",
+    "replay-c1-d0-s1",
+    "replay-c1-d0-s2",
+    "replay-c1-d0-s3",
+    "replay-c1-d0-s4",
+    "replay-c1-d0-s5",
+    "replay-c1-d1-s1",
+    "replay-c1-d1-s2",
+    "replay-c1-d1-s3",
+    "replay-c1-d1-s4",
+    "replay-c1-d1-s5",
+    "replay-c1-d1-s6",
+    "replay-c1-d2-s1",
+    "replay-c1-d2-s2",
+    "replay-c1-d2-s3",
+    "replay-c1-d2-s4",
+    "replay-c1-d2-s5",
+    "replay-c1-d2-s6",
+    "replay-c1-d3-s1",
+    "replay-c1-d3-s2",
+    "replay-c1-d3-s3",
+    "replay-c1-d3-s4",
+    "replay-c1-d3-s5",
+    "replay-c1-d3-s6",
+    "replay-c1-d4-s7",
+    "replay-c2-d0-s1",
+    "replay-c2-d0-s2",
+    "replay-c2-d0-s3",
+    "replay-c2-d0-s4",
+    "replay-c2-d0-s5",
+    "replay-c2-d1-s1",
+    "replay-c2-d1-s2",
+    "replay-c2-d1-s3",
+    "replay-c2-d1-s4",
+    "replay-c2-d1-s5",
+    "replay-c2-d1-s6",
+    "replay-c2-d2-s1",
+    "replay-c2-d2-s2",
+    "replay-c2-d2-s3",
+    "replay-c2-d2-s4",
+    "replay-c2-d2-s5",
+    "replay-c2-d2-s6",
+    "replay-c2-d3-s1",
+    "replay-c2-d3-s2",
+    "replay-c2-d3-s3",
+    "replay-c2-d3-s4",
+    "replay-c2-d3-s5",
+    "replay-c2-d3-s6",
+    "replay-c2-d4-s7",
+    "replay-c3-d0-s1",
+    "replay-c3-d0-s2",
+    "replay-c3-d0-s3",
+    "replay-c3-d0-s4",
+    "replay-c3-d0-s5",
+    "replay-c3-d1-s1",
+    "replay-c3-d1-s2",
+    "replay-c3-d1-s3",
+    "replay-c3-d1-s4",
+    "replay-c3-d1-s5",
+    "replay-c3-d1-s6",
+    "replay-c3-d2-s1",
+    "replay-c3-d2-s2",
+    "replay-c3-d2-s3",
+    "replay-c3-d2-s4",
+    "replay-c3-d2-s5",
+    "replay-c3-d2-s6",
+    "replay-c3-d3-s1",
+    "replay-c3-d3-s2",
+    "replay-c3-d3-s3",
+    "replay-c3-d3-s4",
+    "replay-c3-d3-s5",
+    "replay-c3-d3-s6",
+    "replay-c3-d4-s7"
+  ],
+  "current_scenarios_with_wav_directory": 0,
+  "scenario_audio_scope": "All96 current scenario game directories have no bgm directory. The96 audio comparison certifies requested events/timing, not playback PCM. Separate WAV function/loop probes and natural menu probes use the attested WAV snapshot. This is a current presence observation, not reconstructed historical asset provenance.",
+  "archive_pos_midi": {
+    "archive_sha256": "8f8db1918842857a63eb7c76e7f971fb931203a6239c26828304fa3ce12da911",
+    "extractor_sha256": "4b1310ad62e9f4e5b395df29686f69a4dcdda42537c13fca169d9b8ce9405d99",
+    "members": {
+      "musiccmt.txt": {
+        "sha256": "4f0a925e88bbb1ae7582835976f6e7a8df2b526194500c39e5a88b1f0bbfd3dd",
+        "bytes": 5204
+      },
+      "th06_01.mid": {
+        "sha256": "4464c9ec6ec3506248cb158c5e18143c664011a2198851f027c26709150df0fd",
+        "bytes": 40789
+      },
+      "th06_01.pos": {
+        "sha256": "64dda277e16976687d533eebd586bac98f762c80079e96bef1e898cdea70eeaa",
+        "bytes": 8
+      },
+      "th06_02.mid": {
+        "sha256": "bc45b91c210c9b13a0fc909b3bb16ef1fa1a402d5947e12af9d1e3aed3312cb6",
+        "bytes": 67652
+      },
+      "th06_02.pos": {
+        "sha256": "7a0c04b4aaeecbc39c8f5baec030ca6c02dd1ee0fc872abeac4579179478e98d",
+        "bytes": 8
+      },
+      "th06_03.mid": {
+        "sha256": "e77aa5e27120232c7a4a446a6229eb601bc242d49617151a94de4ac75b490138",
+        "bytes": 45545
+      },
+      "th06_03.pos": {
+        "sha256": "7834471eb7a6f8d18c0ddd83ecb85d7d22d0d72129a147dc630af838a27b2852",
+        "bytes": 8
+      },
+      "th06_04.mid": {
+        "sha256": "b2beaac0a6ded09f071b1fdda10776fafc41747ac206a9a623c5ad727c150189",
+        "bytes": 49308
+      },
+      "th06_04.pos": {
+        "sha256": "8ba331d87186afc356f301ee7ec652dc50224b9e0f13d02232e23c056fac6cc5",
+        "bytes": 8
+      },
+      "th06_05.mid": {
+        "sha256": "21b4a60006c06bf549e7b75be1349cadf00e05840a2572141df437504f08afeb",
+        "bytes": 59104
+      },
+      "th06_05.pos": {
+        "sha256": "980d4d3912cf6113a26301be2761ccfd7277fe1473fc24b04940efc43c024532",
+        "bytes": 8
+      },
+      "th06_06.mid": {
+        "sha256": "3b23f9c98ef7f02a15cb0c7c0c895c785d16b597e522df1a63568f5e2d2d6d77",
+        "bytes": 113871
+      },
+      "th06_06.pos": {
+        "sha256": "08081d19a61e1091aa7afcf74aec68e9fbe07650964f5d22970a3ad0489a4de5",
+        "bytes": 8
+      },
+      "th06_07.mid": {
+        "sha256": "40217ab92e1598bf0303b448ba76359868047aadeafab31d82c38e4d1d07cb8e",
+        "bytes": 65206
+      },
+      "th06_07.pos": {
+        "sha256": "eaf85f03f53cad353fa708ce67ad0b84da850aae917b48baf9161426dc05b5b8",
+        "bytes": 8
+      },
+      "th06_08.mid": {
+        "sha256": "09b20b6654656598f0e1fea6162fdebd48a5b48f428d553ba039096047c0e758",
+        "bytes": 59880
+      },
+      "th06_08.pos": {
+        "sha256": "de8af8e810e54a0496cad0e079c35ca60f79ea8bf547ac49c5e0cbc08a23dd7f",
+        "bytes": 8
+      },
+      "th06_09.mid": {
+        "sha256": "bd046a73250175f16a5f47df98b0056452bbb61c0a84abc5ea3aa308605dc7b0",
+        "bytes": 70867
+      },
+      "th06_09.pos": {
+        "sha256": "eae3ea3cbde8984691e01dc3f66ad39dbbdff5676571648318fe1b9a88954372",
+        "bytes": 8
+      },
+      "th06_10.mid": {
+        "sha256": "dd18db5b13c468e1b1bbfc4845a355144a80e4bdd86462226ed4dd616199caee",
+        "bytes": 94384
+      },
+      "th06_10.pos": {
+        "sha256": "39d9980fb13ec4469392e897d43c7cbf42622ec0a1aaf517baf792ab03114708",
+        "bytes": 8
+      },
+      "th06_11.mid": {
+        "sha256": "07be27e1f4e1f1bfcd947e0458234d77b1fe71b15f0815c8b03b8bea43963e05",
+        "bytes": 62439
+      },
+      "th06_11.pos": {
+        "sha256": "27428c6f000aceb89b184461c3c5730966fdd0b6e057e9ea54c58060df926ff6",
+        "bytes": 8
+      },
+      "th06_12.mid": {
+        "sha256": "2fc8b534d324f093d66e0d8a11bd4db01cf3a3f90042e9e0edff422e3c047b3a",
+        "bytes": 49094
+      },
+      "th06_12.pos": {
+        "sha256": "63c54794a059ca6512817b6f4af7601d7921ca782911836d00dd7ff8182a77be",
+        "bytes": 8
+      },
+      "th06_13.mid": {
+        "sha256": "0acb11e6c23af469e945ad9e9f7bc7dbf9c5cbf80bed3cd251760fd6489366ef",
+        "bytes": 82636
+      },
+      "th06_13.pos": {
+        "sha256": "c9c51f22d2c963426ddb9ce06be22560612b8eab32eb6e515c96d2594e2b8920",
+        "bytes": 8
+      },
+      "th06_14.mid": {
+        "sha256": "bebeb812808429e614c0369262246d74b42d293a083512163c847303ed2b9cfd",
+        "bytes": 79962
+      },
+      "th06_14.pos": {
+        "sha256": "0a2fc8cbe433fa2fdb9249b556993025671bffb030263841964110706bba4d4f",
+        "bytes": 8
+      },
+      "th06_15.mid": {
+        "sha256": "61ab1a7b4153b0a3ba9000738c00b26a919c098e7d154a930219ce3afe911e24",
+        "bytes": 72884
+      },
+      "th06_15.pos": {
+        "sha256": "52eee4a84228f1444e93f02ab7a8f49d24ee4af47534aea5a6eb2474fe02959b",
+        "bytes": 8
+      },
+      "th06_16.mid": {
+        "sha256": "ab8a59dd48978a339ab6823216dc16099136e28b5831da819b39f88c85cbf0fd",
+        "bytes": 36646
+      },
+      "th06_16.pos": {
+        "sha256": "195ac196e28609ceae43b7a7f822465f638cc56370f4e5011a695c6f695a14df",
+        "bytes": 8
+      },
+      "th06_17.mid": {
+        "sha256": "74340051d9bb95980c2a4878c6ba5d32f72389d3fb84fa2a449c7a26767175e9",
+        "bytes": 46696
+      },
+      "th06_17.pos": {
+        "sha256": "19ad2b51b88bde461b73b226defb74ecb003f7448bd1b16f5b8844fa0c0a4cd1",
+        "bytes": 8
+      },
+      "ver0102.dat": {
+        "sha256": "dc3bdc05cb9f47376709733f274dd8d22ccdfaedcf39626757084d64042878b1",
+        "bytes": 63
+      }
+    },
+    "pos_points_source_sample_frames": {
+      "th06_01.pos": [
+        264615,
+        2611365
+      ],
+      "th06_02.pos": [
+        915840,
+        3835274
+      ],
+      "th06_03.pos": [
+        126772,
+        2447402
+      ],
+      "th06_04.pos": [
+        303922,
+        3859239
+      ],
+      "th06_05.pos": [
+        255387,
+        3949028
+      ],
+      "th06_06.pos": [
+        1984125,
+        6166786
+      ],
+      "th06_07.pos": [
+        1038039,
+        4640658
+      ],
+      "th06_08.pos": [
+        182801,
+        4885398
+      ],
+      "th06_09.pos": [
+        1296010,
+        5201385
+      ],
+      "th06_10.pos": [
+        905130,
+        7184497
+      ],
+      "th06_11.pos": [
+        239441,
+        3719278
+      ],
+      "th06_12.pos": [
+        165995,
+        2608611
+      ],
+      "th06_13.pos": [
+        1464168,
+        6210283
+      ],
+      "th06_14.pos": [
+        1581217,
+        6761044
+      ],
+      "th06_15.pos": [
+        197127,
+        5576176
+      ],
+      "th06_16.pos": [
+        400219,
+        2477733
+      ],
+      "th06_17.pos": [
+        239507,
+        4669601
+      ]
+    },
+    "scope": "Fresh extraction from the attested native MD.DAT, byte-identical to the reference archive. POS and MIDI are archive members, not external Ogg files or a synthesizer bank."
+  },
+  "optional_free_soundfont": {
+    "asset": {
+      "sha256": "c5378b62028c920cb11e4803327983fee2f2cdff5dc89c708e39da417e51c854",
+      "bytes": 5969788,
+      "resolved_path": "/private/tmp/th06-tooling/downloads/timgm6mb/gm.sf2"
+    },
+    "scope": "Optional port synthesizer bank. It is separate from original MIDI events, original WAV recordings and POS points; no Windows MIDI timbre identity is claimed."
+  },
+  "hosted_ogg_scope": "The hosted Ogg encodings are lossy and are not claimed byte-identical to original WAV. Their decoded loop alignment is measured separately in the audio receipt.",
+  "errors": []
+}

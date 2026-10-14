@@ -21,6 +21,7 @@ pub mod retry_menu;
 pub mod save;
 mod score_popups;
 pub mod selection;
+mod sprite_geometry;
 pub mod stage;
 pub mod title;
 
@@ -242,6 +243,9 @@ struct StageData {
     dialogue_tex: HashMap<u32, (usize, f32, f32)>,
     /// Pre-baked JP stage-name texture (STD header name[128]), shown at start.
     stage_name_tex: Option<(usize, f32, f32)>,
+    song_name_tex: Vec<(usize, f32, f32)>,
+    spell_background: stage::PortraitAsset,
+    late_spell_background: Option<stage::PortraitAsset>,
 }
 
 /// Shared (cross-stage) assets plus the per-stage table.
@@ -259,6 +263,7 @@ struct Assets {
     ascii: Anm0,
     face_chara: Anm0,
     player_portraits: [Vec<stage::PortraitAsset>; 2],
+    loading: stage::PortraitAsset,
     stages: Vec<StageData>,
 }
 
@@ -349,6 +354,20 @@ impl Assets {
             stage_name_script,
             sd.stage_name_tex,
         );
+        result.configure_loading_screen(self.loading.clone());
+        result.configure_spell_background(
+            sd.spell_background.clone(),
+            sd.late_spell_background.clone(),
+        );
+        result.configure_song_names(
+            self.text.entries[0]
+                .scripts
+                .iter()
+                .find(|(id, _)| *id == 1)
+                .map(|(_, instructions)| instructions.clone())
+                .unwrap_or_default(),
+            sd.song_name_tex.clone(),
+        );
         result.set_portrait_assets(
             self.player_portraits[usize::from(character.is_marisa())].clone(),
             sd.boss_portraits.clone(),
@@ -410,6 +429,29 @@ pub const CHARACTERS: [Character; 4] = [
     Character::MarisaB,
 ];
 
+pub struct ReplayReferenceTerminal {
+    pub event: &'static str,
+    pub frame: i32,
+    pub stage: usize,
+    pub state: String,
+    pub pools: String,
+    pub lifecycle: String,
+}
+
+impl ReplayReferenceTerminal {
+    pub fn json_line(&self) -> String {
+        format!(
+            "{{\"event\":\"{}\",\"frame\":{},\"stage\":{},\"state\":\"{}\",\"pools\":{},\"lifecycle\":\"{}\"}}\n",
+            self.event,
+            self.frame,
+            self.stage,
+            self.state,
+            self.pools.trim_end(),
+            self.lifecycle
+        )
+    }
+}
+
 pub struct Game {
     scene: Scene,
     title: Title,
@@ -426,6 +468,14 @@ pub struct Game {
     controller_path: String,
     replay_directory: String,
     replay_session: Option<replay::Session>,
+    replay_reference_terminal: Option<ReplayReferenceTerminal>,
+    pending_stage_transition: bool,
+    pending_stage_back: bool,
+    pending_replay_start: Option<(th06_formats::replay::Replay, usize)>,
+    pending_live_start: Option<Box<Stage>>,
+    pending_practice_exit: u8,
+    pending_result: Option<i64>,
+    pending_result_back: bool,
     replay_menu: replay_menu::ReplayMenu,
     replay_slots: Vec<Option<th06_formats::replay::Replay>>,
     ending_assets: Result<ending::EndingAssets, ending::EndingError>,
@@ -433,6 +483,12 @@ pub struct Game {
     pending_stats: Option<result::RunStats>,
     result_stats: Option<result::RunStats>,
     active_frames: u32,
+    fps_counter: hud::FpsCounter,
+    draw_serial: u64,
+    diagnostic_draw_millis: Option<u32>,
+    diagnostic_color_mode: Option<bool>,
+    diagnostic_stage_seed: Option<u16>,
+    diagnostic_score_fixture: Option<(u64, i64)>,
     title_idle: u16,
     demo_frames: Option<u32>,
     demo_replay: Option<th06_formats::replay::Replay>,
@@ -440,10 +496,14 @@ pub struct Game {
     starting_lives: i32,
     starting_bombs: i32,
     audio: Option<Audio>,
+    audio_stage: usize,
+    pending_music_room_back: bool,
     assets: Assets,
     /// Stage currently being played (0-based), and the chosen character — used
     /// to build the next stage on clear.
     current_stage: usize,
+    /// GameManager's camera direction survives stage registration and menus.
+    stage_camera_facing: [f32; 3],
     character: Character,
     hiscore: i64,
     /// High-score table (descending), capped at MAX_SCORES.
@@ -527,9 +587,10 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
         )); // 2,3,4,5,6
     }
     textures.push(engine.create_texture(&[255u8; 2 * 2 * 4], 2, 2)); // 7 white
-    // 8: ascii font (alpha mask doubles as tintable glyph color).
+    // 8: original ASCII color atlas plus its separate alpha mask. Using the
+    // mask as color would replace the original outlined digits with solid ink.
     let (rgba, w, h) = compose_rgba(
-        &files.inn["ascii_a.png"],
+        &files.inn["ascii.png"],
         Some(files.inn["ascii_a.png"].as_slice()),
     );
     textures.push(engine.create_texture_with_format(
@@ -560,10 +621,11 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
         Some("player01_a.png"),
         &mut textures,
     );
-    // 13: power-bar gradient, 2x1 (0xe0e0e0 -> 0x80e0e0) sampled linearly so the
-    // HUD power bar is the decomp's exact per-vertex gradient (Gui.cpp:1162-1163).
+    // 13: untextured diffuse gradient: original D3DCOLOR is ARGB, so
+    // 0xe0e0e0ff -> 0x80e0e0ff changes alpha, retaining RGB (224,224,255).
+    // Diffuse vertex colors retain 8-bit precision even in 16-bit mode.
     debug_assert_eq!(textures.len(), stage::TEX_POWER_GRAD);
-    textures.push(engine.create_texture(&[224, 224, 224, 255, 128, 224, 224, 255], 2, 1));
+    textures.push(engine.create_diffuse_texture(&[224, 224, 255, 224, 224, 224, 255, 128], 2, 1));
     // 14: etama4 (particle/effect sprite sheet). Fixed slot before the dynamic
     // per-stage textures.
     let etama4_tex = load(&files.cm, "etama4.png", Some("etama4_a.png"), &mut textures);
@@ -705,16 +767,38 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
             if end == 0 {
                 return None;
             }
-            let img = th06_engine::text::render_shiftjis(
+            let img = th06_engine::text::render_sprite_shiftjis_aligned(
                 &nm[..end],
-                20.0,
-                [180, 240, 240],
-                Some([0, 0, 0]),
+                256,
+                16,
+                15,
+                th06_engine::text::SpriteTextAlign::Center,
+                [224, 255, 255],
             );
             let slot = textures.len();
-            textures.push(engine.create_texture(&img.rgba, img.width, img.height));
+            textures.push(engine.create_texture_with_format(&img.rgba, img.width, img.height, 5));
             Some((slot, img.width as f32, img.height as f32))
         });
+        let song_name_tex = (0..4)
+            .map(|song| {
+                let raw = &std_bytes[0x90 + song * 128..0x90 + (song + 1) * 128];
+                let end = raw.iter().position(|&c| c == 0).unwrap_or(raw.len());
+                let mut name = vec![0x81, 0xf4]; // Shift-JIS ♪, TH_SONG_NAME
+                name.extend_from_slice(&raw[..end]);
+                let img = th06_engine::text::render_sprite_shiftjis_aligned(
+                    &name,
+                    256,
+                    16,
+                    16,
+                    th06_engine::text::SpriteTextAlign::Right,
+                    [224, 255, 255],
+                );
+                let slot = textures.len();
+                textures
+                    .push(engine.create_texture_with_format(&img.rgba, img.width, img.height, 5));
+                (slot, img.width as f32, img.height as f32)
+            })
+            .collect();
         stages.push(StageData {
             ecl_data: ecl_bytes,
             msg_data,
@@ -734,6 +818,21 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
             spell_name_tex,
             dialogue_tex,
             stage_name_tex,
+            song_name_tex,
+            spell_background: portrait(
+                &files.st,
+                &format!(
+                    "eff0{}",
+                    match n {
+                        6 => 5,
+                        7 => 4,
+                        _ => n,
+                    }
+                ),
+                &mut textures,
+            ),
+            late_spell_background: (n >= 6)
+                .then(|| portrait(&files.st, &format!("eff0{n}"), &mut textures)),
         });
     }
 
@@ -826,7 +925,22 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
         }
     }
 
-    options_menu.midi_available = audio.as_ref().is_some_and(Audio::midi_available);
+    options_menu.midi_available = if with_audio {
+        audio.as_ref().is_some_and(Audio::midi_available)
+    } else {
+        // Headless diagnostics still use the supplied assets' availability;
+        // absence of a hardware output must not change the original menu.
+        files
+            .soundfont
+            .as_deref()
+            .is_some_and(|bank| th06_engine::midi::soundfont(bank).is_ok())
+            && (1..=17).all(|index| {
+                files
+                    .midi
+                    .get(&format!("th06_{index:02}.mid"))
+                    .is_some_and(|bytes| th06_engine::midi::Sequence::parse(bytes).is_ok())
+            })
+    };
     let assets = Assets {
         player: Anm0::parse(&files.cm["player00.anm"]).expect("parse player00"),
         player_tex: stage::TEX_PLAYER,
@@ -840,6 +954,7 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
         ascii: Anm0::parse(&files.inn["ascii.anm"]).expect("parse ascii"),
         text: Anm0::parse(&files.inn["text.anm"]).expect("parse text"),
         player_portraits,
+        loading: portrait(&files.cm, "loading", &mut textures),
         face_chara: Anm0::parse(&files.cm["face00a.anm"]).expect("parse face00a"),
         stages,
     };
@@ -860,6 +975,14 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
         controller_path: "th06-controller.bin".into(),
         replay_directory: "replay".into(),
         replay_session: None,
+        replay_reference_terminal: None,
+        pending_stage_transition: false,
+        pending_stage_back: false,
+        pending_replay_start: None,
+        pending_live_start: None,
+        pending_practice_exit: 0,
+        pending_result: None,
+        pending_result_back: false,
         persistence_error: None,
         starting_lives: 3,
         starting_bombs: 3,
@@ -870,6 +993,12 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
         pending_stats: None,
         result_stats: None,
         active_frames: 0,
+        fps_counter: hud::FpsCounter::default(),
+        draw_serial: 0,
+        diagnostic_draw_millis: None,
+        diagnostic_color_mode: None,
+        diagnostic_stage_seed: None,
+        diagnostic_score_fixture: None,
         title_idle: 0,
         demo_frames: None,
         demo_replay: files
@@ -877,8 +1006,11 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
             .get("demo00.rpy")
             .and_then(|b| th06_formats::replay::Replay::parse(b).ok()),
         audio,
+        audio_stage: 0,
+        pending_music_room_back: false,
         assets,
         current_stage: 0,
+        stage_camera_facing: [0.0; 3],
         character: Character::ReimuA,
         hiscore: 0,
         scores: Vec::new(),
@@ -891,6 +1023,24 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
 }
 
 impl Game {
+    /// Windowed D3D uses the desktop format, independent of colorMode16bit.
+    /// The native capture CLI can explicitly override the framebuffer format.
+    pub fn effective_color_16bit(&self) -> bool {
+        self.diagnostic_color_mode
+            .unwrap_or(self.options.color_16bit && !self.options.windowed)
+    }
+
+    pub fn set_diagnostic_color_mode(&mut self, value: bool) {
+        self.diagnostic_color_mode = Some(value);
+        th06_engine::set_color_16bit(value);
+    }
+
+    /// Match refcap's declared synthetic Present clock during image capture.
+    /// This affects only the FPS label; simulation timers and inputs are separate.
+    pub fn set_diagnostic_draw_millis(&mut self, milliseconds: u32) {
+        self.diagnostic_draw_millis = Some(milliseconds);
+    }
+
     pub fn configure_storage(&mut self, directory: &str) {
         let join = |file: &str| {
             if directory.is_empty() {
@@ -913,7 +1063,7 @@ impl Game {
         if !self.options_menu.midi_available {
             self.options.music_mode = self.options.music_mode.min(1);
         }
-        th06_engine::set_color_16bit(self.options.color_16bit);
+        th06_engine::set_color_16bit(self.effective_color_16bit());
         #[cfg(not(target_arch = "wasm32"))]
         th06_engine::set_windowed(self.options.windowed);
         if let Some(bytes) = save::load_bytes(&self.controller_path).filter(|b| b.len() == 18) {
@@ -945,9 +1095,20 @@ impl Game {
         data: th06_formats::replay::Replay,
         index: usize,
     ) -> Result<(), String> {
+        self.start_replay_inner(data, index, false)
+    }
+
+    fn start_replay_inner(
+        &mut self,
+        data: th06_formats::replay::Replay,
+        index: usize,
+        attract_demo: bool,
+    ) -> Result<(), String> {
         if index >= TOTAL_STAGES || data.stages[index].is_none() {
             return Err("Replay has no data for this stage".into());
         }
+        self.replay_reference_terminal = None;
+        self.pending_stage_transition = false;
         self.character = CHARACTERS[data.character as usize];
         self.difficulty = *Difficulty::ALL
             .get(data.difficulty as usize)
@@ -958,6 +1119,7 @@ impl Game {
             RunMode::Story
         };
         self.current_stage = index;
+        self.refresh_score_table();
         let mut stage = self.assets.new_stage(
             index,
             self.character,
@@ -968,9 +1130,45 @@ impl Game {
         );
         let mut session = replay::Session::playback(data);
         session.begin_stage(index, &mut stage)?;
+        stage.set_hiscore(self.hiscore);
+        stage.set_attract_demo(attract_demo);
         self.replay_session = Some(session);
-        self.scene = Scene::Stage(Box::new(stage));
+        self.demo_frames = attract_demo.then_some(0);
+        self.enter_stage(stage);
         Ok(())
+    }
+
+    fn enter_stage(&mut self, mut stage: Stage) {
+        stage.inherit_camera_facing(self.stage_camera_facing);
+        if let Some(seed) = self.diagnostic_stage_seed {
+            stage.set_rng_seed(seed);
+        }
+        // GameManager::AddedCallback requests stage music before the first
+        // calculation tick; the title's attract demo keeps the title music.
+        self.audio_stage = self.current_stage + 1;
+        th06_engine::audio::trace::context(None, self.audio_stage);
+        stage.events.retain(|event| {
+            if let Event::Bgm(file) = event {
+                if self.demo_frames.is_none() {
+                    self.play_bgm(file);
+                }
+                false
+            } else {
+                true
+            }
+        });
+        self.scene = Scene::Stage(Box::new(stage));
+    }
+
+    fn stop_stage_audio(&mut self) {
+        // GameManager_DeletedCallback skips this only for the attract demo.
+        if self.demo_frames.is_none() {
+            th06_engine::audio::trace::context(None, self.audio_stage);
+            th06_engine::audio::trace::stop();
+            if let Some(audio) = &mut self.audio {
+                audio.stop_bgm();
+            }
+        }
     }
 
     pub fn replay_reference_state(&self) -> Option<String> {
@@ -979,6 +1177,138 @@ impl Game {
         };
         let session = self.replay_session.as_ref()?;
         Some(format!("{},{}", session.frame(), stage.reference_state()))
+    }
+
+    /// Read-only live and paused-stage observations for the native capture CLI.
+    pub fn diagnostic_stage_state(&self) -> Option<String> {
+        let stage = match &self.scene {
+            Scene::Stage(stage) | Scene::Continue { stage, .. } => stage,
+            _ => return None,
+        };
+        Some(format!(
+            "{},{}",
+            self.active_frames,
+            stage.reference_state()
+        ))
+    }
+
+    pub fn diagnostic_transition(&self) -> String {
+        let frame = self
+            .replay_session
+            .as_ref()
+            .map_or(self.active_frames as i32, replay::Session::frame);
+        if self.pending_practice_exit >= 2
+            || self.pending_result.is_some()
+            || self.pending_result_back
+        {
+            let scene = if self.pending_practice_exit == 3 || self.pending_result_back {
+                1
+            } else {
+                7
+            };
+            return format!("{scene},-1,{},0,0,0,0,0,0", self.audio_stage);
+        }
+        match &self.scene {
+            Scene::Stage(stage) | Scene::Continue { stage, .. } => {
+                let (paused, pause_state, pause_timer) = stage.diagnostic_pause();
+                let retry =
+                    matches!(self.scene, Scene::Continue { .. }) || self.pending_practice_exit == 1;
+                let (retry_state, retry_timer) = self.retry_menu.diagnostic_state();
+                let game_menu = if paused {
+                    if pause_state == 0 { 1 } else { 2 }
+                } else {
+                    0
+                };
+                let frame = if paused || (retry && retry_state != 0) {
+                    -1
+                } else {
+                    frame
+                };
+                let scene = if self.pending_stage_back { 1 } else { 2 };
+                let frame = if self.pending_stage_back || frame == 0 {
+                    -1
+                } else {
+                    frame
+                };
+                format!(
+                    "{scene},{frame},{},{pause_state},{pause_timer},{retry_state},{retry_timer},{game_menu},{}",
+                    self.current_stage + 1,
+                    u8::from(retry)
+                )
+            }
+            _ => format!(
+                "{},-1,{},0,0,0,0,0,0",
+                if self.pending_replay_start.is_some() || self.pending_live_start.is_some() {
+                    2
+                } else if matches!(self.scene, Scene::Result) {
+                    if self.result_stats.is_some() { 7 } else { 6 }
+                } else {
+                    1
+                },
+                self.audio_stage
+            ),
+        }
+    }
+
+    pub fn diagnostic_navigation(&self) -> Option<String> {
+        let (state, cursor, timer) = match &self.scene {
+            Scene::Title => self.title.reference_navigation(),
+            Scene::Options => self.options_menu.reference_navigation(),
+            Scene::Selection => self.selection.reference_navigation(),
+            Scene::Replay => self.replay_menu.reference_navigation(),
+            _ => return None,
+        };
+        Some(format!("{state},{cursor},{timer}"))
+    }
+
+    pub fn diagnostic_boss_ui(&self) -> Option<String> {
+        let stage = match &self.scene {
+            Scene::Stage(stage) | Scene::Continue { stage, .. } => stage,
+            _ => return None,
+        };
+        let frame = self
+            .replay_session
+            .as_ref()
+            .map_or(self.active_frames as i32, |s| s.frame());
+        Some(format!("{frame},{}", stage.reference_boss_ui()))
+    }
+
+    pub fn diagnostic_results(&self) -> Option<String> {
+        // Leaving requests Title and removes Result's callback immediately;
+        // retain its scene only for the already drawn final presentation.
+        if !matches!(self.scene, Scene::Result) || self.pending_result_back {
+            return None;
+        }
+        let (state, timer, cursor, cheat) = self.result.reference_state();
+        let mut progress = String::new();
+        for character in 0..4 {
+            for values in [
+                &self.progress.stages_cleared_without_continues[character],
+                &self.progress.stages_cleared[character],
+            ] {
+                for value in values {
+                    use std::fmt::Write;
+                    write!(progress, "{value:02x}").unwrap();
+                }
+            }
+        }
+        Some(format!("{state},{timer},{cursor},{cheat},{progress}"))
+    }
+
+    pub fn diagnostic_lifecycle(&self) -> Option<String> {
+        let stage = match &self.scene {
+            Scene::Stage(stage) | Scene::Continue { stage, .. } => stage,
+            _ => return None,
+        };
+        let frame = self
+            .replay_session
+            .as_ref()
+            .map_or(self.active_frames as i32, |s| s.frame());
+        Some(format!(
+            "{frame},{},{}",
+            self.current_stage + 1,
+            stage.reference_lifecycle()
+        ))
     }
 
     pub fn replay_reference_bullets(&self) -> Option<String> {
@@ -992,6 +1322,19 @@ impl Game {
             return None;
         };
         Some(stage.reference_effects(self.replay_session.as_ref()?.frame()))
+    }
+
+    pub fn replay_reference_pools(&self) -> Option<String> {
+        let Scene::Stage(stage) = &self.scene else {
+            return None;
+        };
+        Some(stage.reference_pools(self.replay_session.as_ref()?.frame()))
+    }
+
+    /// A stage-ending update replaces Scene::Stage before a CLI can inspect
+    /// it. Retain that exact final observation and its semantic event once.
+    pub fn take_replay_reference_terminal(&mut self) -> Option<ReplayReferenceTerminal> {
+        self.replay_reference_terminal.take()
     }
     pub fn extra_unlocked(&self) -> [bool; 4] {
         std::array::from_fn(|c| {
@@ -1167,14 +1510,20 @@ impl Game {
         if let Some(sc) = score {
             s.set_score(sc);
         }
-        self.scene = Scene::Stage(Box::new(s));
+        self.enter_stage(s);
     }
 
     /// Shared seed protocol for the independent C++/Rust ECL oracle.
     pub fn debug_set_stage_seed(&mut self, seed: u16) {
+        self.diagnostic_stage_seed = Some(seed);
         if let Scene::Stage(stage) = &mut self.scene {
             stage.set_rng_seed(seed);
         }
+    }
+
+    /// Explicit capture fixture, applied after drawing and before calculation.
+    pub fn debug_set_score_fixture(&mut self, present: u64, score: i64) {
+        self.diagnostic_score_fixture = Some((present, score));
     }
 
     /// Debug: fast-forward the current stage's simulation until the midboss
@@ -1227,6 +1576,21 @@ impl Game {
             }
             Scene::Stage(_) | Scene::Continue { .. } => RecordPhase::Stage(self.current_stage),
             Scene::Result | Scene::Ending { .. } => RecordPhase::Ended,
+        }
+    }
+
+    /// Read-only name for deterministic screenshot receipts.
+    pub fn diagnostic_scene(&self) -> &'static str {
+        match self.scene {
+            Scene::Title => "title",
+            Scene::Selection => "selection",
+            Scene::Stage(_) => "stage",
+            Scene::Continue { .. } => "continue",
+            Scene::Ending { .. } => "ending",
+            Scene::Result => "result",
+            Scene::MusicRoom => "music-room",
+            Scene::Replay => "replay",
+            Scene::Options => "options",
         }
     }
 
@@ -1288,7 +1652,16 @@ impl Game {
         self.play_bgm("th06_01.wav");
     }
 
+    fn run_title_cursor(&self) -> usize {
+        if self.mode == RunMode::Practice {
+            2
+        } else {
+            usize::from(self.difficulty == Difficulty::Extra)
+        }
+    }
+
     fn play_bgm(&mut self, file: &str) {
+        th06_engine::audio::trace::bgm(file, self.options.music_mode != 0);
         if self.options.music_mode == 0 {
             return;
         }
@@ -1302,9 +1675,35 @@ impl Game {
     }
 
     pub fn update(&mut self, input: &Input) -> Frame {
-        // ReplayManager's final calc-chain job restarts the entire chain during
-        // eligible dialogue until frameId % 3 == 2. Only the final tick draws.
-        let mut output = self.update_render_frame(input);
+        self.draw_serial = self.draw_serial.wrapping_add(1);
+        if let Some((milliseconds, presentations)) = self
+            .diagnostic_draw_millis
+            .map(|milliseconds| (milliseconds, self.draw_serial))
+            .or_else(th06_engine::presentation_clock)
+        {
+            self.fps_counter.observe(milliseconds, presentations);
+        }
+        // GameWindow::Render draws first, runs the calculation chain, then
+        // presents that earlier image. Replay dialogue may restart only the
+        // calculation chain, so draw exactly once before all three ticks.
+        if let Scene::Stage(stage) | Scene::Continue { stage, .. } = &mut self.scene
+            && let Some(sound) = stage.take_draw_sound()
+        {
+            th06_engine::audio::trace::sfx(sound);
+            if let Some(audio) = &self.audio {
+                audio.play_sfx_idx(sound);
+            }
+        }
+        let mut output = self.draw_scene_before_calc();
+        if let Some((present, score)) = self.diagnostic_score_fixture
+            && self.draw_serial == present + 1
+        {
+            if let Scene::Stage(stage) = &mut self.scene {
+                stage.set_score(score);
+            }
+            self.diagnostic_score_fixture = None;
+        }
+        output.quit |= self.update_render_frame(input).quit;
         for _ in 0..2 {
             let accelerate = matches!(&self.scene, Scene::Stage(stage) if stage.replay_accelerates_dialogue())
                 && self
@@ -1314,8 +1713,13 @@ impl Game {
             if !accelerate {
                 break;
             }
-            output = self.update_render_frame(input);
+            output.quit |= self.update_render_frame(input).quit;
         }
+        th06_engine::audio::trace::context(
+            self.replay_session.as_ref().map(replay::Session::frame),
+            self.audio_stage,
+        );
+        th06_engine::audio::trace::flush(self.options.play_sounds);
         if self.options.play_sounds
             && let Some(audio) = &self.audio
         {
@@ -1324,7 +1728,92 @@ impl Game {
         output
     }
 
+    fn draw_scene_before_calc(&mut self) -> Frame {
+        if self.pending_practice_exit == 3 || self.pending_result_back {
+            // Result's deleted callback has removed the old draw chain;
+            // MainMenu is registered in the following calculation.
+            return Frame {
+                cmds: Vec::new(),
+                bg: None,
+                quit: false,
+            };
+        }
+        let (cmds, bg) = if matches!(self.scene, Scene::Selection) {
+            let character = self.selection.character * 2 + self.selection.shot;
+            let difficulty = self.selection.difficulty.min(3);
+            let count = self.practice_stages(character, difficulty);
+            let scores: Vec<i64> = self.progress.practice_scores[character]
+                .iter()
+                .map(|score| score[difficulty] as i64)
+                .collect();
+            (self.selection.draw(&scores, count), None)
+        } else {
+            match &mut self.scene {
+                Scene::Title => {
+                    self.title
+                        .set_extra_unlocked(self.extra_unlocked().iter().any(|&value| value));
+                    (self.title.draw(), None)
+                }
+                Scene::Stage(stage) => (stage.draw(), stage.background_scene()),
+                Scene::Continue { frozen, stage, .. } => {
+                    let mut cmds = frozen.clone();
+                    cmds.extend(self.retry_menu.draw());
+                    (cmds, stage.background_scene())
+                }
+                Scene::Ending { player, .. } => (player.draw(), None),
+                Scene::Result => (self.result.draw(), None),
+                Scene::MusicRoom => (self.music_room.draw(), None),
+                Scene::Replay => (self.replay_menu.draw(&self.replay_slots), None),
+                Scene::Options => (self.options_menu.draw(&self.options), None),
+                Scene::Selection => unreachable!(),
+            }
+        };
+        let mut frame = Frame {
+            cmds,
+            bg,
+            quit: false,
+        };
+        if !matches!(self.scene, Scene::Ending { .. }) {
+            self.fps_counter.draw(&mut frame.cmds);
+        }
+        if matches!(self.scene, Scene::Title | Scene::Options)
+            && let Some(background) = frame.cmds.first_mut()
+        {
+            // MainMenu_OnDraw copies title00.jpg, then draws the active
+            // menu's black alpha64 square before any of its ANM sprites.
+            background.tint[0] *= 191.0 / 255.0;
+            background.tint[1] *= 191.0 / 255.0;
+            background.tint[2] *= 191.0 / 255.0;
+        }
+        if let Some(elapsed) = self.demo_frames.filter(|&elapsed| elapsed >= 3600) {
+            frame.cmds.push(DrawCmd {
+                clip: None,
+                tex: stage::TEX_WHITE,
+                dst: [0.0, 0.0, 640.0, 480.0],
+                src: [0.0, 0.0, 1.0, 1.0],
+                tint: [0.0, 0.0, 0.0, (elapsed - 3600) as f32 / 120.0],
+                rot: 0.0,
+                additive: false,
+                color_add: false,
+                depth: None,
+            });
+        }
+        // Original SW texture blending leaves D3DTOP_MODULATE active even
+        // when a VM requests ADD (AnmManager::Draw, line 462). Alpha blending
+        // and additive destination blending remain independent and unchanged.
+        if !self.options.hardware_texture_blending {
+            for command in &mut frame.cmds {
+                command.color_add = false;
+            }
+        }
+        frame
+    }
+
     fn update_render_frame(&mut self, input: &Input) -> Frame {
+        th06_engine::audio::trace::context(
+            self.replay_session.as_ref().map(replay::Session::frame),
+            self.audio_stage,
+        );
         if let Some(frame) = &mut self.demo_frames {
             *frame += 1;
             if input.buttons() != 0 || *frame >= 3720 {
@@ -1332,10 +1821,21 @@ impl Game {
                 self.title_idle = 0;
                 self.replay_session = None;
                 self.scene = Scene::Title;
-                self.title.reset();
+                self.title.reset(0);
             }
         }
-        let mut output = self.update_inner(input);
+        let applying_stage_transition = self.pending_stage_transition;
+        let neutral = Input::default();
+        let mut output = self.update_inner(if applying_stage_transition {
+            &neutral
+        } else {
+            input
+        });
+        if applying_stage_transition {
+            // Supervisor creates the new chain, clears the input globals, then
+            // the newly registered callbacks calculate within this same tick.
+            output.quit |= self.update_inner(&neutral).quit;
+        }
         let sounds = [
             self.title.take_sounds(),
             self.selection.take_sounds(),
@@ -1345,42 +1845,113 @@ impl Game {
             self.result.take_sounds(),
             self.replay_menu.take_sounds(),
         ];
-        if let Some(audio) = &self.audio {
-            for sound in sounds.into_iter().flatten() {
+        for sound in sounds.into_iter().flatten() {
+            th06_engine::audio::trace::sfx_named(sound);
+            if let Some(audio) = &self.audio {
                 audio.play_sfx(sound);
             }
-        }
-        if let Some(frame) = self.demo_frames.filter(|&frame| frame >= 3600) {
-            output.cmds.push(DrawCmd {
-                tex: stage::TEX_WHITE,
-                dst: [0.0, 0.0, 640.0, 480.0],
-                src: [0.0, 0.0, 1.0, 1.0],
-                tint: [0.0, 0.0, 0.0, (frame - 3600) as f32 / 120.0],
-                rot: 0.0,
-                additive: false,
-                color_add: false,
-            });
         }
         output
     }
     fn update_inner(&mut self, input: &Input) -> Frame {
-        if let Some(audio) = &mut self.audio {
+        if std::mem::take(&mut self.pending_result_back) {
+            self.replay_session = None;
+            self.scene = Scene::Title;
+            self.title.reset(if self.result_stats.is_some() {
+                self.run_title_cursor()
+            } else {
+                4
+            });
+            self.play_bgm("th06_01.wav");
+            return self.update_inner(&Input::default());
+        }
+        if let Some(stage) = self.pending_live_start.take() {
+            self.enter_stage(*stage);
+            return self.update_inner(&Input::default());
+        }
+        if let Some((data, stage)) = self.pending_replay_start.take() {
+            match self.start_replay(data, stage) {
+                Ok(()) => return self.update_inner(&Input::default()),
+                Err(error) => self.persistence_error = Some(error),
+            }
+        }
+        if std::mem::take(&mut self.pending_stage_back) {
+            self.stop_stage_audio();
+            self.replay_session = None;
+            self.scene = Scene::Title;
+            self.title.reset(self.run_title_cursor());
+            self.play_bgm("th06_01.wav");
+            return self.update_inner(&Input::default());
+        }
+        if self.pending_practice_exit != 0 {
+            match self.pending_practice_exit {
+                1 => {
+                    self.pending_practice_exit = 0;
+                    if let Scene::Stage(stage) = &mut self.scene {
+                        stage.resume_after_game_over();
+                    }
+                    // AsciiManager releases Retry and requests Result, then
+                    // the current stage chain finishes this calculation.
+                    let frame = self.update_inner(input);
+                    self.pending_practice_exit = 2;
+                    return frame;
+                }
+                2 => {
+                    self.stop_stage_audio();
+                    self.replay_session = None;
+                    self.pending_practice_exit = 3;
+                }
+                _ => {
+                    self.pending_practice_exit = 0;
+                    self.scene = Scene::Title;
+                    self.title.reset(2);
+                    self.play_bgm("th06_01.wav");
+                    return self.update_inner(&Input::default());
+                }
+            }
+            return Frame {
+                cmds: Vec::new(),
+                bg: None,
+                quit: false,
+            };
+        }
+        if let Some(score) = self.pending_result.take() {
+            self.stop_stage_audio();
+            self.finish_run(score);
+            return self.update_inner(&Input::default());
+        }
+        if !self.pending_stage_transition
+            && let Some(audio) = &mut self.audio
+        {
             audio.tick();
             if input.buttons() != 0 {
                 audio.resume();
             }
         }
+        if std::mem::take(&mut self.pending_music_room_back) {
+            // Supervisor observes MusicRoom's state change on the next calc.
+            self.scene = Scene::Title;
+            self.title.reset(5);
+            self.play_bgm("th06_01.wav");
+        }
         if matches!(self.scene, Scene::Replay) {
             match self.replay_menu.update(input, &self.replay_slots) {
                 replay_menu::ReplayAction::Back => {
                     self.scene = Scene::Title;
-                    self.title.reset();
+                    self.title.begin_startup(0);
+                    self.title.input = self.replay_menu.input;
+                    let (cmds, _) = self.title.update(input);
+                    return Frame {
+                        cmds,
+                        bg: None,
+                        quit: false,
+                    };
                 }
                 replay_menu::ReplayAction::Play { slot, stage } => {
-                    if let Some(data) = self.replay_slots[slot].clone()
-                        && let Err(error) = self.start_replay(data, stage - 1)
-                    {
-                        self.persistence_error = Some(error);
+                    if let Some(data) = self.replay_slots[slot].clone() {
+                        // MainMenu requests Supervisor's gameplay state.
+                        // Registration follows the next pre-calc menu draw.
+                        self.pending_replay_start = Some((data, stage - 1));
                     }
                 }
                 replay_menu::ReplayAction::None => {}
@@ -1394,7 +1965,9 @@ impl Game {
         if let Scene::Ending { player, score } = &mut self.scene {
             let score = *score;
             let events = player.update(input);
-            let cmds = player.draw();
+            // Ending drawing (including its fade timer) already ran before
+            // this calculation, once per presentation, in draw_scene_before_calc.
+            let cmds = Vec::new();
             let done = player.finished();
             match events {
                 Ok(events) => {
@@ -1407,6 +1980,7 @@ impl Game {
                                     .trim_end_matches(".wav")
                             )),
                             ending::EndingEvent::FadeMusic(seconds) => {
+                                th06_engine::audio::trace::fade(seconds);
                                 if let Some(audio) = &mut self.audio {
                                     audio.fade_bgm(seconds);
                                 }
@@ -1429,6 +2003,9 @@ impl Game {
             };
         }
         if matches!(self.scene, Scene::Continue { .. }) {
+            if let Scene::Continue { stage, .. } = &mut self.scene {
+                stage.prepare_draw_camera();
+            }
             let action = self.retry_menu.update(input);
             if !matches!(action, retry_menu::RetryAction::None) {
                 let Scene::Continue {
@@ -1439,20 +2016,24 @@ impl Game {
                 };
                 match action {
                     retry_menu::RetryAction::Continue => {
-                        self.replay_session = None;
                         stage.continue_run();
                         self.scene = Scene::Stage(stage);
+                        // AsciiManager clears Retry before GameManager and
+                        // Player callbacks, which resume in this same calc.
+                        return self.update_inner(input);
                     }
                     retry_menu::RetryAction::Finish => {
-                        self.finish_run(score);
+                        stage.resume_after_game_over();
+                        self.scene = Scene::Stage(stage);
+                        let frame = self.update_inner(input);
+                        if let Some(session) = &mut self.replay_session {
+                            session.end_stage(self.current_stage, score);
+                        }
+                        self.pending_result = Some(score);
+                        return frame;
                     }
                     retry_menu::RetryAction::None => unreachable!(),
                 }
-                return Frame {
-                    cmds: Vec::new(),
-                    bg: None,
-                    quit: false,
-                };
             }
             let Scene::Continue { frozen, stage, .. } = &self.scene else {
                 unreachable!()
@@ -1467,33 +2048,45 @@ impl Game {
         }
         if matches!(self.scene, Scene::Options) {
             let previous_options = self.options.clone();
-            match self.options_menu.update(input, &mut self.options) {
-                options::OptionsAction::Back => {
-                    self.scene = Scene::Title;
-                    self.title.reset();
-                }
-                options::OptionsAction::Changed => {
-                    th06_engine::set_color_16bit(self.options.color_16bit);
-                    if previous_options.windowed != self.options.windowed {
-                        th06_engine::set_windowed(self.options.windowed);
-                    }
-                    self.starting_lives = self.options.life_count as i32 + 1;
-                    self.starting_bombs = self.options.bomb_count as i32;
-                    if let Err(error) =
-                        save::store_bytes(&self.options_path, &self.options.encode())
-                    {
-                        self.persistence_error = Some(error);
-                    }
-                    if previous_options.music_mode != self.options.music_mode {
-                        if self.options.music_mode == 0 {
-                            if let Some(a) = &mut self.audio {
-                                a.stop_bgm();
-                            }
-                        } else {
-                            self.play_bgm("th06_01.wav");
+            let action = self.options_menu.update(input, &mut self.options);
+            let final_music_mode = self.options.music_mode;
+            for event in self.options_menu.take_audio_events() {
+                match event {
+                    options::OptionsAudio::Sound(sound) => {
+                        th06_engine::audio::trace::sfx_named(sound);
+                        if let Some(audio) = &self.audio {
+                            audio.play_sfx(sound);
                         }
                     }
+                    options::OptionsAudio::Music(mode) => {
+                        th06_engine::audio::trace::stop();
+                        if let Some(audio) = &mut self.audio {
+                            audio.stop_bgm();
+                        }
+                        self.options.music_mode = mode;
+                        self.play_bgm("th06_01.wav");
+                    }
                 }
+            }
+            self.options.music_mode = final_music_mode;
+            if previous_options != self.options {
+                th06_engine::set_color_16bit(self.effective_color_16bit());
+                if previous_options.windowed != self.options.windowed {
+                    th06_engine::set_windowed(self.options.windowed);
+                }
+                self.starting_lives = self.options.life_count as i32 + 1;
+                self.starting_bombs = self.options.bomb_count as i32;
+                if let Err(error) = save::store_bytes(&self.options_path, &self.options.encode()) {
+                    self.persistence_error = Some(error);
+                }
+            }
+            match action {
+                options::OptionsAction::Back => {
+                    self.scene = Scene::Title;
+                    self.title.resume_menu(6);
+                    self.title.input = self.options_menu.input;
+                }
+                options::OptionsAction::Changed | options::OptionsAction::DefaultsRestored => {}
                 options::OptionsAction::ControllerChanged => {
                     let bytes: Vec<u8> = th06_engine::controller_mapping()
                         .iter()
@@ -1515,13 +2108,16 @@ impl Game {
             match self.music_room.update(input) {
                 music_room::MusicAction::None => {}
                 music_room::MusicAction::Back => {
-                    self.scene = Scene::Title;
-                    self.title.reset();
-                    self.play_bgm("th06_01.wav");
+                    self.pending_music_room_back = true;
                 }
                 music_room::MusicAction::Play(path) => {
                     let path = basename(&path).replace(".mid", ".wav");
                     self.play_bgm(&path);
+                }
+                music_room::MusicAction::PlayAndBack(path) => {
+                    let path = basename(&path).replace(".mid", ".wav");
+                    self.play_bgm(&path);
+                    self.pending_music_room_back = true;
                 }
             }
             return Frame {
@@ -1539,10 +2135,23 @@ impl Game {
                 .iter()
                 .map(|s| s[d] as i64)
                 .collect();
-            match self.selection.update(input, extra, count) {
-                SelectionAction::Back => {
+            let action = self.selection.update(input, extra, count);
+            if self.selection.mode != RunMode::Extra
+                && matches!(self.selection.step, selection::SelectionStep::TitleUnload)
+            {
+                self.options.default_difficulty = self.selection.difficulty as u8;
+            }
+            match action {
+                SelectionAction::Back { cursor } => {
+                    if self.selection.mode != RunMode::Extra {
+                        self.options.default_difficulty = self.selection.difficulty as u8;
+                    }
                     self.scene = Scene::Title;
-                    self.title.reset();
+                    self.title.begin_startup(cursor);
+                    // Selection and Title are states of the same original
+                    // MainMenu chain: Supervisor's held-input counter survives.
+                    self.title.input = self.selection.input;
+                    let _ = self.title.update(input);
                 }
                 SelectionAction::Start {
                     character,
@@ -1569,7 +2178,7 @@ impl Game {
                     );
                     s.set_hiscore(self.hiscore);
                     s.set_spellcard_records(&self.progress.spellcards);
-                    s.set_rng_seed(replay::seed());
+                    s.set_rng_seed(self.diagnostic_stage_seed.unwrap_or_else(replay::seed));
                     self.replay_session = if mode == RunMode::Practice {
                         None
                     } else {
@@ -1587,7 +2196,7 @@ impl Game {
                     {
                         self.persistence_error = Some(error);
                     }
-                    self.scene = Scene::Stage(Box::new(s));
+                    self.pending_live_start = Some(Box::new(s));
                     return Frame {
                         cmds: Vec::new(),
                         bg: None,
@@ -1605,11 +2214,13 @@ impl Game {
         if matches!(self.scene, Scene::Result) {
             match self.result.update(input, &self.replay_slots) {
                 result::ResultAction::None => {}
+                result::ResultAction::UnlockAll => {
+                    self.progress.stages_cleared = [[99; 5]; 4];
+                    self.progress.stages_cleared_without_continues = [[99; 5]; 4];
+                    self.save_progress();
+                }
                 result::ResultAction::Back => {
-                    self.replay_session = None;
-                    self.scene = Scene::Title;
-                    self.title.reset();
-                    self.play_bgm("th06_01.wav");
+                    self.pending_result_back = true;
                 }
                 result::ResultAction::SaveScore { name } => {
                     let stats = self
@@ -1656,9 +2267,8 @@ impl Game {
                 if self.title_idle >= 720 {
                     self.title_idle = 0;
                     if let Some(replay) = self.demo_replay.clone()
-                        && self.start_replay(replay, 3).is_ok()
+                        && self.start_replay_inner(replay, 3, true).is_ok()
                     {
-                        self.demo_frames = Some(0);
                         return Frame {
                             cmds: Vec::new(),
                             bg: None,
@@ -1673,6 +2283,7 @@ impl Game {
                     TitleAction::StartGame => {
                         self.selection
                             .begin(RunMode::Story, self.options.default_difficulty as usize);
+                        self.selection.input = self.title.input;
                         self.scene = Scene::Selection;
                     }
                     TitleAction::Extra | TitleAction::Practice => {
@@ -1683,9 +2294,11 @@ impl Game {
                         };
                         self.selection
                             .begin(mode, self.options.default_difficulty as usize);
+                        self.selection.input = self.title.input;
                         self.scene = Scene::Selection;
                     }
                     TitleAction::Score => {
+                        self.result_stats = None;
                         self.result.begin_browse(&self.progress);
                         self.scene = Scene::Result;
                     }
@@ -1695,11 +2308,13 @@ impl Game {
                     }
                     TitleAction::Options => {
                         self.options_menu.begin();
+                        self.options_menu.input = self.title.input;
                         self.scene = Scene::Options;
                     }
                     TitleAction::Replay => {
                         self.replay_slots = replay::load_slots(&self.replay_directory);
                         self.replay_menu.begin();
+                        self.replay_menu.input = self.title.input;
                         self.scene = Scene::Replay;
                     }
                     TitleAction::Quit => {
@@ -1718,35 +2333,73 @@ impl Game {
                 }
             }
             Scene::Stage(stage) => {
-                if stage.replay_frame_active(input) {
-                    self.active_frames = self.active_frames.saturating_add(1);
-                }
+                let applying_transition = std::mem::take(&mut self.pending_stage_transition);
                 let playback = self
                     .replay_session
                     .as_ref()
                     .is_some_and(replay::Session::is_playback);
-                let replay_input = self
-                    .replay_session
-                    .as_mut()
-                    .map(|session| session.input(self.current_stage, stage, input));
-                let cmds = stage.update(replay_input.as_ref().unwrap_or(input));
+                let (cmds, events) = if applying_transition {
+                    (stage.draw(), vec![Event::NextStage])
+                } else {
+                    if stage.replay_frame_active(input) {
+                        self.active_frames = self.active_frames.saturating_add(1);
+                    }
+                    let replay_input = self
+                        .replay_session
+                        .as_mut()
+                        .map(|session| session.input(self.current_stage, stage, input));
+                    th06_engine::audio::trace::context(
+                        self.replay_session.as_ref().map(replay::Session::frame),
+                        self.audio_stage,
+                    );
+                    let cmds = stage.update(replay_input.as_ref().unwrap_or(input));
+                    (cmds, stage.events.drain(..).collect::<Vec<Event>>())
+                };
                 let bg = stage.background_scene();
-                let events: Vec<Event> = stage.events.drain(..).collect();
+                if let Some(facing) = stage.camera_facing() {
+                    self.stage_camera_facing = facing;
+                }
                 // Snapshot now, before the event loop reborrows self.
                 let carry = stage.carry();
                 let can_continue = stage.can_continue();
                 let spellcards = stage.spellcard_records().to_vec();
+                if playback
+                    && !applying_transition
+                    && let Some(event) = events.iter().find_map(|event| match event {
+                        Event::NextStage => Some("msg-stage-end"),
+                        Event::GameOver(_) => Some("game-over"),
+                        _ => None,
+                    })
+                {
+                    let frame = self.replay_session.as_ref().unwrap().frame();
+                    self.replay_reference_terminal = Some(ReplayReferenceTerminal {
+                        event,
+                        frame,
+                        stage: self.current_stage + 1,
+                        state: format!("{frame},{}", stage.reference_state()),
+                        pools: stage.reference_pools(frame),
+                        lifecycle: stage.reference_lifecycle(),
+                    });
+                }
                 let mut back = false;
                 let mut next_stage = false;
                 let mut game_over: Option<i64> = None;
                 for ev in events {
                     match ev {
+                        Event::ScoreExtend => {
+                            th06_engine::audio::trace::score_extend();
+                            if let Some(audio) = &self.audio {
+                                audio.play_sfx_idx(28);
+                            }
+                        }
                         Event::SfxIdx(index) => {
+                            th06_engine::audio::trace::sfx(index);
                             if let Some(audio) = &self.audio {
                                 audio.play_sfx_idx(index);
                             }
                         }
                         Event::Sfx(name) => {
+                            th06_engine::audio::trace::sfx_named(name);
                             if let Some(a) = &self.audio {
                                 a.play_sfx(name);
                             }
@@ -1762,6 +2415,7 @@ impl Game {
                             if self.demo_frames.is_some() {
                                 continue;
                             }
+                            th06_engine::audio::trace::fade(seconds);
                             if let Some(a) = &mut self.audio {
                                 a.fade_bgm(seconds);
                             }
@@ -1790,6 +2444,12 @@ impl Game {
                 if !playback {
                     self.progress.spellcards = spellcards;
                 }
+                if (next_stage && applying_transition)
+                    || (game_over.is_some()
+                        && (playback || (self.mode != RunMode::Practice && !can_continue)))
+                {
+                    self.stop_stage_audio();
+                }
                 if let Some(score) = game_over {
                     if self.mode == RunMode::Practice {
                         let character = CHARACTERS
@@ -1800,16 +2460,16 @@ impl Game {
                             [self.current_stage][self.difficulty as usize];
                         *record = (*record).max(score.clamp(0, u32::MAX as i64) as u32);
                         self.save_progress();
-                        self.scene = Scene::Title;
-                        self.title.reset();
-                        self.play_bgm("th06_01.wav");
+                        self.pending_practice_exit = 1;
                         return Frame {
                             cmds,
                             bg: None,
                             quit: false,
                         };
                     }
-                    if let Some(session) = &mut self.replay_session {
+                    if (playback || !can_continue)
+                        && let Some(session) = &mut self.replay_session
+                    {
                         session.end_stage(self.current_stage, score);
                     }
                     if playback {
@@ -1817,7 +2477,7 @@ impl Game {
                         self.title_idle = 0;
                         self.replay_session = None;
                         self.scene = Scene::Title;
-                        self.title.reset();
+                        self.title.reset(self.run_title_cursor());
                         self.play_bgm("th06_01.wav");
                         return Frame {
                             cmds,
@@ -1852,6 +2512,34 @@ impl Game {
                         quit: false,
                     };
                 }
+                if next_stage && !applying_transition {
+                    if self.mode == RunMode::Practice {
+                        // Gui::MSG_OPCODE_STAGEEND requests ResultFromGame
+                        // directly; practice has no retry prompt on a clear.
+                        let character = CHARACTERS
+                            .iter()
+                            .position(|&v| v == self.character)
+                            .unwrap_or(0);
+                        let record = &mut self.progress.practice_scores[character]
+                            [self.current_stage][self.difficulty as usize];
+                        *record = (*record).max(carry.score.clamp(0, u32::MAX as i64) as u32);
+                        self.save_progress();
+                        self.pending_practice_exit = 2;
+                        return Frame {
+                            cmds,
+                            bg,
+                            quit: false,
+                        };
+                    }
+                    // Gui only changes Supervisor.curState here. The old
+                    // scene remains alive for the next pre-calc draw.
+                    self.pending_stage_transition = true;
+                    return Frame {
+                        cmds,
+                        bg,
+                        quit: false,
+                    };
+                }
                 if next_stage {
                     if let Some(session) = &mut self.replay_session {
                         session.end_stage(self.current_stage, carry.score);
@@ -1869,19 +2557,24 @@ impl Game {
                                 self.starting_lives,
                                 self.starting_bombs,
                             );
+                            // NEXT_STAGE preserves GameManager's run totals;
+                            // ReplayManager then overwrites only its recorded
+                            // per-stage fields (stock, seed, rank, power...).
+                            s.apply_carry(carry);
+                            s.reveal_after_loading();
                             self.replay_session
                                 .as_mut()
                                 .unwrap()
                                 .begin_stage(next, &mut s)
                                 .expect("validated replay stage");
                             self.current_stage = next;
-                            self.scene = Scene::Stage(Box::new(s));
+                            self.enter_stage(s);
                         } else {
                             self.replay_session = None;
                             self.demo_frames = None;
                             self.title_idle = 0;
                             self.scene = Scene::Title;
-                            self.title.reset();
+                            self.title.reset(self.run_title_cursor());
                             self.play_bgm("th06_01.wav");
                         }
                         return Frame {
@@ -1920,23 +2613,26 @@ impl Game {
                             self.starting_bombs,
                         );
                         s.apply_carry(carry);
+                        s.reveal_after_loading();
                         s.set_spellcard_records(&self.progress.spellcards);
                         if let Some(session) = &mut self.replay_session {
                             let _ = session.begin_stage(self.current_stage, &mut s);
                         }
                         s.set_hiscore(self.hiscore);
-                        self.scene = Scene::Stage(Box::new(s));
+                        self.enter_stage(s);
                         return Frame {
                             cmds,
                             bg: None,
                             quit: false,
                         };
                     }
-                    let has_seen = self
-                        .progress
-                        .stages_cleared
-                        .iter()
-                        .any(|stages| (1..=3).any(|d| stages[d] == 99));
+                    // Ending::AddedCallback remembers this shot/difficulty
+                    // and distinguishes endings reached with a Continue.
+                    let has_seen = if carry.continues_used == 0 {
+                        self.progress.stages_cleared_without_continues[c][d] == 99
+                    } else {
+                        self.progress.stages_cleared[c][d] == 99
+                    };
                     if self.mode != RunMode::Practice {
                         self.progress.stages_cleared[c][d] = 99;
                         if carry.continues_used == 0 {
@@ -1945,9 +2641,7 @@ impl Game {
                     }
                     self.save_progress();
                     if self.mode == RunMode::Practice {
-                        self.scene = Scene::Title;
-                        self.title.reset();
-                        self.play_bgm("th06_01.wav");
+                        self.pending_practice_exit = 1;
                         return Frame {
                             cmds,
                             bg: None,
@@ -1995,13 +2689,12 @@ impl Game {
                     if !playback {
                         self.save_progress();
                     }
-                    self.replay_session = None;
-                    self.scene = Scene::Title;
-                    self.title.reset();
-                    self.play_bgm("th06_01.wav");
+                    // StageMenu requests MainMenu after Supervisor has run.
+                    // Preserve this stage for one final pre-calc draw.
+                    self.pending_stage_back = true;
                     return Frame {
                         cmds,
-                        bg: None,
+                        bg,
                         quit: false,
                     };
                 }

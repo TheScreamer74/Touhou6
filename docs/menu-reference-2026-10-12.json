@@ -1,0 +1,366 @@
+{
+  "date": "2026-10-12",
+  "status": "diagnostic-comparisons-before-final-source-freeze",
+  "passed": true,
+  "compared_observations": 1439,
+  "cases": [
+    {
+      "kind": "navigation",
+      "required_present_interval": [
+        180,
+        409
+      ],
+      "required_observations": 230,
+      "compared_observations": 230,
+      "fields": [
+        "menu_state",
+        "cursor",
+        "timer"
+      ],
+      "missing_frames": [],
+      "differences": {},
+      "reference_sha256": "473421f82716fdd176d24c0168f106ec210004145c873624ae75806bd05379fa",
+      "port_sha256": "2e690a821d5d7d3b6bfbac5f303f25304a68de530cb9b4ff9983a354c44f8f9d",
+      "passed": true,
+      "scope": "Declared natural menu navigation/state; pixels, raw controller hardware and physical audio require separate evidence.",
+      "id": "selection-fast",
+      "binary_sha256": "a8bae32dd7e569cb17566313f965f595d8f5b0332115b6129ff6abb75cba5993",
+      "input_sha256": "0ba7cd26c88a94b9e945ff83efe24a65c3b0237481d3e85e9ad131ff6b708fc9",
+      "original_execution": {
+        "id": "selection-fast",
+        "status": "completed-process",
+        "returncode": 0,
+        "elapsed_seconds": 5.379847912117839,
+        "command": [
+          "timeout",
+          "90",
+          "/home/ubuntu/touhou6-web/reference/tools/wine-11.0-amd64-wow64/bin/wine",
+          "./102h.exe"
+        ],
+        "exe_sha256": "7f38496b31b8625196900a69cd1bfed243cab1f9612073e7881dc354b876fd39",
+        "proxy_sha256": "18998b08c3be1937e2c4a24ab0751e216242014ac7e13d751361c251b05a6851",
+        "config_sha256": "01ee063ea1fdf9045da6e207e84f8ef2f4bd42efe02688ed4d972dd11b682eb4",
+        "input_sha256": "0ba7cd26c88a94b9e945ff83efe24a65c3b0237481d3e85e9ad131ff6b708fc9",
+        "stop_present": 650,
+        "scene_entry": "natural keyboard navigation",
+        "patches": "declared input and synthetic clock only; no state/score/menu writes"
+      }
+    },
+    {
+      "kind": "navigation",
+      "required_present_interval": [
+        180,
+        799
+      ],
+      "required_observations": 620,
+      "compared_observations": 620,
+      "fields": [
+        "menu_state",
+        "cursor",
+        "timer"
+      ],
+      "missing_frames": [],
+      "differences": {},
+      "reference_sha256": "1ed69afafd0452100eae49c8a3667c265f88c56d87500471dd6f575feab2f402",
+      "port_sha256": "5e199365a72289f5f333a0d9258e2074a7a34a286f9ccd0770e49451074929df",
+      "passed": true,
+      "scope": "Declared natural menu navigation/state; pixels, raw controller hardware and physical audio require separate evidence.",
+      "id": "keyconfig-return",
+      "binary_sha256": "a8bae32dd7e569cb17566313f965f595d8f5b0332115b6129ff6abb75cba5993",
+      "input_sha256": "e7c53e765cb5c877a4ca46d3ae6450b9adb31405ced98596166239d2076a2f8a",
+      "original_execution": {
+        "id": "keyconfig-return",
+        "status": "completed-process",
+        "returncode": 0,
+        "elapsed_seconds": 5.224264504387975,
+        "command": [
+          "timeout",
+          "90",
+          "/home/ubuntu/touhou6-web/reference/tools/wine-11.0-amd64-wow64/bin/wine",
+          "./102h.exe"
+        ],
+        "exe_sha256": "7f38496b31b8625196900a69cd1bfed243cab1f9612073e7881dc354b876fd39",
+        "proxy_sha256": "18998b08c3be1937e2c4a24ab0751e216242014ac7e13d751361c251b05a6851",
+        "config_sha256": "ad8ed5c3bea7b7dc207db28b5cd3a238ffcd6d95f14f714c9658ef2d400c774c",
+        "input_sha256": "e7c53e765cb5c877a4ca46d3ae6450b9adb31405ced98596166239d2076a2f8a",
+        "stop_present": 800,
+        "scene_entry": "natural keyboard navigation",
+        "patches": "declared input and synthetic clock only; no state/score/menu writes"
+      }
+    },
+    {
+      "kind": "results",
+      "required_present_interval": [
+        411,
+        999
+      ],
+      "required_observations": 589,
+      "compared_observations": 589,
+      "fields": [
+        "state",
+        "timer",
+        "cursor",
+        "cheat_step",
+        "progress"
+      ],
+      "missing_frames": [],
+      "differences": {},
+      "reference_sha256": "d4eff4241e32ece9598c2802d0f4356558fbdc715759e1759d4b81db33fa20cf",
+      "port_sha256": "d42263faaad48d147207a86ece53590b567c2c25ded5a1aae9d257d24c5cb08e",
+      "passed": true,
+      "scope": "Declared natural menu navigation/state; pixels, raw controller hardware and physical audio require separate evidence.",
+      "id": "extra-unlock",
+      "binary_sha256": "a8bae32dd7e569cb17566313f965f595d8f5b0332115b6129ff6abb75cba5993",
+      "input_sha256": "25dd9d41045a75ff0608dd215f22e758272d40efe76f78d8e35dc2b7d56da21c",
+      "original_execution": {
+        "id": "extra-unlock",
+        "status": "completed-process",
+        "returncode": 0,
+        "elapsed_seconds": 5.711920460686088,
+        "command": [
+          "timeout",
+          "90",
+          "/home/ubuntu/touhou6-web/reference/tools/wine-11.0-amd64-wow64/bin/wine",
+          "./102h.exe"
+        ],
+        "exe_sha256": "7f38496b31b8625196900a69cd1bfed243cab1f9612073e7881dc354b876fd39",
+        "proxy_sha256": "18998b08c3be1937e2c4a24ab0751e216242014ac7e13d751361c251b05a6851",
+        "config_sha256": "b669f469e1f7668e2bc220860a48c5474dbe8fcff8f31e58a0725af34b3119f2",
+        "input_sha256": "25dd9d41045a75ff0608dd215f22e758272d40efe76f78d8e35dc2b7d56da21c",
+        "stop_present": 1000,
+        "scene_entry": "natural keyboard navigation",
+        "patches": "declared input and synthetic clock only; no state/score/menu writes"
+      }
+    }
+  ],
+  "scopes": [
+    "Natural source/executable selection loading, options/key configuration keyboard navigation and return",
+    "Extra score unlock sequence and all40progress bytes",
+    "Title startup before Present180 is outside comparison; port excludes original executable initialization",
+    "Raw controller button assignment, pixels and physical sound are outside this scalar receipt"
+  ],
+  "candidate_validation": {
+    "observed_at_utc": "2026-10-13T13:26:25.080445+00:00",
+    "binary_sha256": "cf4350ddeede8a2c93233abef00ff833190901c1b431e554fe0110da96f8ae6d",
+    "runtime_source_sha256": "2fac9c2fd9bd2707fda889e8a78cd5843bbf462a99ff1a778072acd42aa8d366",
+    "passed": true,
+    "counts": {
+      "transition_presentations": 29284,
+      "gameplay_observations": 23159,
+      "return_navigation_observations": 422,
+      "results_observations": 759,
+      "transition_audio_requests": 4242,
+      "menu_audio_requests": 162
+    },
+    "audio_passed_cases": 13,
+    "audio_requests": 4404,
+    "scope": "Six natural pause/Continue/Practice/Result/save paths and seven Options/MusicRoom audio probes, bound only to this frozen candidate. Exact declared callback/presentation clocks and field sets. Sound/music request order and fades are compared; pixels, gameplay object pools and physical output PCM are outside this receipt. Current local original/native files and successful execution output hashes were checked against the comparison receipts. Saved replay playback semantics and highscore records at or above 5,000,000 are compared; byte identity of saved files is not claimed.",
+    "full_private_receipt_sha256": "a58c188b82715c03a551b594896cdb059f5f605682da3ddc7df9b283854db767",
+    "compared_fields": {
+      "transition-comparison": [
+        "scene",
+        "frame",
+        "stage",
+        "pause_state",
+        "pause_timer",
+        "retry_state",
+        "retry_timer",
+        "game_menu",
+        "retry"
+      ],
+      "return-navigation-comparison": [
+        "menu_state",
+        "cursor",
+        "timer"
+      ],
+      "stage-comparison": [
+        "frame",
+        "stage",
+        "x",
+        "y",
+        "lives",
+        "bombs",
+        "power",
+        "score",
+        "graze_stage",
+        "graze_total",
+        "rank",
+        "subrank",
+        "rng",
+        "bullets",
+        "lasers",
+        "items",
+        "particle_timer"
+      ],
+      "results-comparison": [
+        "state",
+        "timer",
+        "cursor",
+        "cheat_step",
+        "progress"
+      ]
+    },
+    "cases": [
+      {
+        "id": "pause-replay",
+        "passed": true,
+        "execution_sha256": "447850e4bd098789d78dedf1c79df20be2ffce9658a21335b0d3bd57dd5d7b4e",
+        "audio_comparison_sha256": "4644e50f34886364a5abe2181c941b2df03a46b6cf49bd55a8b22a660673bfe8",
+        "audio_requests": 208,
+        "transition-comparison": {
+          "sha256": "b83a2c31c0301b306a72fc84275657104f538300970956808477841f34ce4806",
+          "observations": 1119
+        },
+        "return-navigation-comparison": {
+          "sha256": "a18cba1bd1e5a0b486418daa21a3235f15da2ded76c19710ac6bd4f3cbe29125",
+          "observations": 79
+        }
+      },
+      {
+        "id": "live-continue",
+        "passed": true,
+        "execution_sha256": "c31f5d7dd0008e5d707617605ab2bf2a82d048614bddd4fb29897f4914a625c6",
+        "audio_comparison_sha256": "cf4809a517180f9a75d80b8df23437a154009886b6cd378534d77d66d814cb00",
+        "audio_requests": 29,
+        "transition-comparison": {
+          "sha256": "ce95b31691df5f43b028ea6669bd1374ed5df46d0240def1fce3ed3902f442cf",
+          "observations": 2829
+        },
+        "stage-comparison": {
+          "sha256": "067872c9a1d75e750bbcd97a39c6e18a0c02a575ae3a1cfc1a26c9ae0adb1858",
+          "observations": 1435
+        }
+      },
+      {
+        "id": "live-decline",
+        "passed": true,
+        "execution_sha256": "dea19e46e33c2f941e722d0411cbace042aac2117cbef51ef8d17fc6d0f09578",
+        "audio_comparison_sha256": "fd4e54e4c643ccfecdbebc9b59aa9042e15db201968e516f43dfa95857290e89",
+        "audio_requests": 16,
+        "transition-comparison": {
+          "sha256": "91e44fa965f23a62b7981c1688e338710e5d79a1967a9ee29242ea8c729dc0cc",
+          "observations": 2829
+        },
+        "stage-comparison": {
+          "sha256": "b61701b58e666b692a865c146eb995160bf92ce79e47cf4c32842ee5bcb4a98f",
+          "observations": 956
+        }
+      },
+      {
+        "id": "practice-death",
+        "passed": true,
+        "execution_sha256": "312508573d9841d4e149113357085db6837aedfbe46b890fe4fcf7aa637f443d",
+        "audio_comparison_sha256": "45cd85de99f3475fe009f8c9a1dd878341ab6bce3623c80704ee80c5ac22e5e1",
+        "audio_requests": 25,
+        "transition-comparison": {
+          "sha256": "a0b27b82f0bfb4da65ec3348f7469ff0b882c626e00737ada47697feb1d27d6e",
+          "observations": 2439
+        },
+        "stage-comparison": {
+          "sha256": "20559eb2557dddabed29f587856f3c4c923192adafe62d7fc6d6b30e56ec9382",
+          "observations": 2358
+        },
+        "return-navigation-comparison": {
+          "sha256": "400afde3ce4bfb1fe4bdb66ba49eb2a6b6907050caaf06835b1a153262a8c7f8",
+          "observations": 80
+        }
+      },
+      {
+        "id": "practice-clear",
+        "passed": true,
+        "execution_sha256": "e7b7020387804add6abf14df742a830edabbe95cdc25a3c3d47248272cf49eb3",
+        "audio_comparison_sha256": "28cbe711f62483082deeb82dcb98ab3e6aa1a5554b0ffdf1dd830820e32ed132",
+        "audio_requests": 3929,
+        "transition-comparison": {
+          "sha256": "96bb82c5fe030d272622d2158908d9fdd5fd731e47f235d22c6df7bf1f14b7ae",
+          "observations": 17539
+        },
+        "stage-comparison": {
+          "sha256": "404b8b04823fac000bbaec6dd9116e9dd9b4727bc4a6f537142eec7a046628f9",
+          "observations": 17454
+        },
+        "return-navigation-comparison": {
+          "sha256": "d573416e99ee84abb320d59debec396052b09c395aba99b81464cf8405f55257",
+          "observations": 84
+        }
+      },
+      {
+        "id": "score-save",
+        "passed": true,
+        "execution_sha256": "3cb46a9b1a4269ea7fbd8666867ebef5dc4d914dce966e19b6160e8817886a26",
+        "audio_comparison_sha256": "b2ca6a439ddc65dfc8caa68acd7279312dc9817e7989bbfd7d776c8e7bb877f6",
+        "audio_requests": 35,
+        "transition-comparison": {
+          "sha256": "ec850f9954c8b69dd0e8ce0a34481838e0274deb8f06d4b31716e3ac5137cf5d",
+          "observations": 2529
+        },
+        "stage-comparison": {
+          "sha256": "c96e88ae1ccef6398fa97161a934bf4ad144463430bfd7d7e1869bdc226af4d0",
+          "observations": 956
+        },
+        "return-navigation-comparison": {
+          "sha256": "a9c45080879585091f247134fb74be4f897c096d157d52dbf205dae2cde4807f",
+          "observations": 179
+        },
+        "results-comparison": {
+          "sha256": "c1499699b148e1eb9c943668d6efd25b1dee3b5e9aee790549453a53edfe0016",
+          "observations": 759
+        },
+        "saved-comparison": {
+          "sha256": "342d3bab046df91a48f35afe062b71361161fe6c568c11862704ec36e88b5056",
+          "passed": true,
+          "minimum_compared_highscore": 5000000
+        }
+      },
+      {
+        "id": "audio-options-defaults",
+        "passed": true,
+        "execution_sha256": "088d6d768dfa1bb3818232684d8505bd5593fb86091592c78bdd7fb08b6a9759",
+        "audio_comparison_sha256": "e0ec92ed23ede9826e163cb1e40590a33c594af49a7d4d388cffeba2a373dbde",
+        "audio_requests": 11
+      },
+      {
+        "id": "audio-options-ranges",
+        "passed": true,
+        "execution_sha256": "909cc3ff95e5237bb6e31906851b04113f8776b72fff82901654579affdde0aa",
+        "audio_comparison_sha256": "64564aa831ce0bcd6152e7ef872b6d4017bfa2afd63281760d638c9f903dce1a",
+        "audio_requests": 93
+      },
+      {
+        "id": "audio-options-repeat",
+        "passed": true,
+        "execution_sha256": "f134d4b674accd54828436b261d3a8df68aab9082fe127c613ae16a4be2480d9",
+        "audio_comparison_sha256": "927fcafd9af75b4c34e9e0fd29dd30b890ae732b7d93f00e5d10cfc8fe28eb02",
+        "audio_requests": 13
+      },
+      {
+        "id": "audio-musicroom-mode0",
+        "passed": true,
+        "execution_sha256": "0d91ace6c4cc3670786b7246dd8d235ed66cc90cf8a5f5090de4c96587a04c2c",
+        "audio_comparison_sha256": "8a6927e49ccca12410e89314cedab8813d79581d222c9ee929e83d95643709a5",
+        "audio_requests": 11
+      },
+      {
+        "id": "audio-musicroom-mode1",
+        "passed": true,
+        "execution_sha256": "9a326727b3c1aa96e7f32e5c2480f03f11387b735fc594a15eed0469dbf4fee6",
+        "audio_comparison_sha256": "05f5f5e182d19468f7d56947a23090dee890037a21598fc330602679a79f17d1",
+        "audio_requests": 11
+      },
+      {
+        "id": "audio-musicroom-mode2",
+        "passed": true,
+        "execution_sha256": "39beaa92fe6218bd326eeeba5a3e001c999245fe294f31805b8a94e2680c55db",
+        "audio_comparison_sha256": "79a411c0976a13e10f36f66abe026f1713631a75c218088805214317812a6f9d",
+        "audio_requests": 11
+      },
+      {
+        "id": "audio-musicroom-combined",
+        "passed": true,
+        "execution_sha256": "d5a0da4a9857fb7802777273df86ee976da7da87ab14a885dd94f248e30f4353",
+        "audio_comparison_sha256": "01f5411fc2f1b1cc9ae2c017ef602cd6cab40aba49104a90ebd788c3d610c357",
+        "audio_requests": 12
+      }
+    ]
+  }
+}

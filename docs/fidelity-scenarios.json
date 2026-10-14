@@ -1,0 +1,1920 @@
+{
+  "schema_version": 1,
+  "purpose": "Required coverage, not a success receipt. Missing, truncated or unaligned evidence is incomplete.",
+  "original_executable_sha256": "7f38496b31b8625196900a69cd1bfed243cab1f9612073e7881dc354b876fd39",
+  "legal_stage_cases": 96,
+  "comparison_rules": {
+    "positions_tolerance_px": 0.0002,
+    "scalar_counts_rng_score": "exact; nonfinite observations fail",
+    "pixels": "retain whole-frame and separate playfield/HUD/text metrics; report masks and tolerances explicitly; no pixel-identity claim from aggregate similarity",
+    "audio": "separate requested events, dispatched variants, PCM/loop alignment and synthesizer timbre",
+    "source_identity": "fingerprint original EXE, input RPY/config, runtime code and harness for each run",
+    "coverage": "A modality passing for one case cannot satisfy another case or another modality."
+  },
+  "scenarios": [
+    {
+      "id": "easy-stage1-reimu-a",
+      "kind": "stage",
+      "stage": 1,
+      "difficulty": "easy",
+      "shot": "reimu-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "easy-stage1-reimu-b",
+      "kind": "stage",
+      "stage": 1,
+      "difficulty": "easy",
+      "shot": "reimu-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "easy-stage1-marisa-a",
+      "kind": "stage",
+      "stage": 1,
+      "difficulty": "easy",
+      "shot": "marisa-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "easy-stage1-marisa-b",
+      "kind": "stage",
+      "stage": 1,
+      "difficulty": "easy",
+      "shot": "marisa-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "easy-stage2-reimu-a",
+      "kind": "stage",
+      "stage": 2,
+      "difficulty": "easy",
+      "shot": "reimu-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "easy-stage2-reimu-b",
+      "kind": "stage",
+      "stage": 2,
+      "difficulty": "easy",
+      "shot": "reimu-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "easy-stage2-marisa-a",
+      "kind": "stage",
+      "stage": 2,
+      "difficulty": "easy",
+      "shot": "marisa-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "easy-stage2-marisa-b",
+      "kind": "stage",
+      "stage": 2,
+      "difficulty": "easy",
+      "shot": "marisa-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "easy-stage3-reimu-a",
+      "kind": "stage",
+      "stage": 3,
+      "difficulty": "easy",
+      "shot": "reimu-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "easy-stage3-reimu-b",
+      "kind": "stage",
+      "stage": 3,
+      "difficulty": "easy",
+      "shot": "reimu-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "easy-stage3-marisa-a",
+      "kind": "stage",
+      "stage": 3,
+      "difficulty": "easy",
+      "shot": "marisa-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "easy-stage3-marisa-b",
+      "kind": "stage",
+      "stage": 3,
+      "difficulty": "easy",
+      "shot": "marisa-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "easy-stage4-reimu-a",
+      "kind": "stage",
+      "stage": 4,
+      "difficulty": "easy",
+      "shot": "reimu-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "easy-stage4-reimu-b",
+      "kind": "stage",
+      "stage": 4,
+      "difficulty": "easy",
+      "shot": "reimu-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "easy-stage4-marisa-a",
+      "kind": "stage",
+      "stage": 4,
+      "difficulty": "easy",
+      "shot": "marisa-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "easy-stage4-marisa-b",
+      "kind": "stage",
+      "stage": 4,
+      "difficulty": "easy",
+      "shot": "marisa-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "easy-stage5-reimu-a",
+      "kind": "stage",
+      "stage": 5,
+      "difficulty": "easy",
+      "shot": "reimu-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "easy-stage5-reimu-b",
+      "kind": "stage",
+      "stage": 5,
+      "difficulty": "easy",
+      "shot": "reimu-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "easy-stage5-marisa-a",
+      "kind": "stage",
+      "stage": 5,
+      "difficulty": "easy",
+      "shot": "marisa-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "easy-stage5-marisa-b",
+      "kind": "stage",
+      "stage": 5,
+      "difficulty": "easy",
+      "shot": "marisa-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "normal-stage1-reimu-a",
+      "kind": "stage",
+      "stage": 1,
+      "difficulty": "normal",
+      "shot": "reimu-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "normal-stage1-reimu-b",
+      "kind": "stage",
+      "stage": 1,
+      "difficulty": "normal",
+      "shot": "reimu-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "normal-stage1-marisa-a",
+      "kind": "stage",
+      "stage": 1,
+      "difficulty": "normal",
+      "shot": "marisa-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "normal-stage1-marisa-b",
+      "kind": "stage",
+      "stage": 1,
+      "difficulty": "normal",
+      "shot": "marisa-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "normal-stage2-reimu-a",
+      "kind": "stage",
+      "stage": 2,
+      "difficulty": "normal",
+      "shot": "reimu-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "normal-stage2-reimu-b",
+      "kind": "stage",
+      "stage": 2,
+      "difficulty": "normal",
+      "shot": "reimu-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "normal-stage2-marisa-a",
+      "kind": "stage",
+      "stage": 2,
+      "difficulty": "normal",
+      "shot": "marisa-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "normal-stage2-marisa-b",
+      "kind": "stage",
+      "stage": 2,
+      "difficulty": "normal",
+      "shot": "marisa-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "normal-stage3-reimu-a",
+      "kind": "stage",
+      "stage": 3,
+      "difficulty": "normal",
+      "shot": "reimu-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "normal-stage3-reimu-b",
+      "kind": "stage",
+      "stage": 3,
+      "difficulty": "normal",
+      "shot": "reimu-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "normal-stage3-marisa-a",
+      "kind": "stage",
+      "stage": 3,
+      "difficulty": "normal",
+      "shot": "marisa-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "normal-stage3-marisa-b",
+      "kind": "stage",
+      "stage": 3,
+      "difficulty": "normal",
+      "shot": "marisa-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "normal-stage4-reimu-a",
+      "kind": "stage",
+      "stage": 4,
+      "difficulty": "normal",
+      "shot": "reimu-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "normal-stage4-reimu-b",
+      "kind": "stage",
+      "stage": 4,
+      "difficulty": "normal",
+      "shot": "reimu-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "normal-stage4-marisa-a",
+      "kind": "stage",
+      "stage": 4,
+      "difficulty": "normal",
+      "shot": "marisa-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "normal-stage4-marisa-b",
+      "kind": "stage",
+      "stage": 4,
+      "difficulty": "normal",
+      "shot": "marisa-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "normal-stage5-reimu-a",
+      "kind": "stage",
+      "stage": 5,
+      "difficulty": "normal",
+      "shot": "reimu-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "normal-stage5-reimu-b",
+      "kind": "stage",
+      "stage": 5,
+      "difficulty": "normal",
+      "shot": "reimu-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "normal-stage5-marisa-a",
+      "kind": "stage",
+      "stage": 5,
+      "difficulty": "normal",
+      "shot": "marisa-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "normal-stage5-marisa-b",
+      "kind": "stage",
+      "stage": 5,
+      "difficulty": "normal",
+      "shot": "marisa-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "normal-stage6-reimu-a",
+      "kind": "stage",
+      "stage": 6,
+      "difficulty": "normal",
+      "shot": "reimu-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "normal-stage6-reimu-b",
+      "kind": "stage",
+      "stage": 6,
+      "difficulty": "normal",
+      "shot": "reimu-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "normal-stage6-marisa-a",
+      "kind": "stage",
+      "stage": 6,
+      "difficulty": "normal",
+      "shot": "marisa-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "normal-stage6-marisa-b",
+      "kind": "stage",
+      "stage": 6,
+      "difficulty": "normal",
+      "shot": "marisa-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "hard-stage1-reimu-a",
+      "kind": "stage",
+      "stage": 1,
+      "difficulty": "hard",
+      "shot": "reimu-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "hard-stage1-reimu-b",
+      "kind": "stage",
+      "stage": 1,
+      "difficulty": "hard",
+      "shot": "reimu-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "hard-stage1-marisa-a",
+      "kind": "stage",
+      "stage": 1,
+      "difficulty": "hard",
+      "shot": "marisa-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "hard-stage1-marisa-b",
+      "kind": "stage",
+      "stage": 1,
+      "difficulty": "hard",
+      "shot": "marisa-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "hard-stage2-reimu-a",
+      "kind": "stage",
+      "stage": 2,
+      "difficulty": "hard",
+      "shot": "reimu-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "hard-stage2-reimu-b",
+      "kind": "stage",
+      "stage": 2,
+      "difficulty": "hard",
+      "shot": "reimu-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "hard-stage2-marisa-a",
+      "kind": "stage",
+      "stage": 2,
+      "difficulty": "hard",
+      "shot": "marisa-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "hard-stage2-marisa-b",
+      "kind": "stage",
+      "stage": 2,
+      "difficulty": "hard",
+      "shot": "marisa-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "hard-stage3-reimu-a",
+      "kind": "stage",
+      "stage": 3,
+      "difficulty": "hard",
+      "shot": "reimu-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "hard-stage3-reimu-b",
+      "kind": "stage",
+      "stage": 3,
+      "difficulty": "hard",
+      "shot": "reimu-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "hard-stage3-marisa-a",
+      "kind": "stage",
+      "stage": 3,
+      "difficulty": "hard",
+      "shot": "marisa-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "hard-stage3-marisa-b",
+      "kind": "stage",
+      "stage": 3,
+      "difficulty": "hard",
+      "shot": "marisa-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "hard-stage4-reimu-a",
+      "kind": "stage",
+      "stage": 4,
+      "difficulty": "hard",
+      "shot": "reimu-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "hard-stage4-reimu-b",
+      "kind": "stage",
+      "stage": 4,
+      "difficulty": "hard",
+      "shot": "reimu-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "hard-stage4-marisa-a",
+      "kind": "stage",
+      "stage": 4,
+      "difficulty": "hard",
+      "shot": "marisa-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "hard-stage4-marisa-b",
+      "kind": "stage",
+      "stage": 4,
+      "difficulty": "hard",
+      "shot": "marisa-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "hard-stage5-reimu-a",
+      "kind": "stage",
+      "stage": 5,
+      "difficulty": "hard",
+      "shot": "reimu-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "hard-stage5-reimu-b",
+      "kind": "stage",
+      "stage": 5,
+      "difficulty": "hard",
+      "shot": "reimu-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "hard-stage5-marisa-a",
+      "kind": "stage",
+      "stage": 5,
+      "difficulty": "hard",
+      "shot": "marisa-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "hard-stage5-marisa-b",
+      "kind": "stage",
+      "stage": 5,
+      "difficulty": "hard",
+      "shot": "marisa-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "hard-stage6-reimu-a",
+      "kind": "stage",
+      "stage": 6,
+      "difficulty": "hard",
+      "shot": "reimu-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "hard-stage6-reimu-b",
+      "kind": "stage",
+      "stage": 6,
+      "difficulty": "hard",
+      "shot": "reimu-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "hard-stage6-marisa-a",
+      "kind": "stage",
+      "stage": 6,
+      "difficulty": "hard",
+      "shot": "marisa-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "hard-stage6-marisa-b",
+      "kind": "stage",
+      "stage": 6,
+      "difficulty": "hard",
+      "shot": "marisa-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "lunatic-stage1-reimu-a",
+      "kind": "stage",
+      "stage": 1,
+      "difficulty": "lunatic",
+      "shot": "reimu-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "lunatic-stage1-reimu-b",
+      "kind": "stage",
+      "stage": 1,
+      "difficulty": "lunatic",
+      "shot": "reimu-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "lunatic-stage1-marisa-a",
+      "kind": "stage",
+      "stage": 1,
+      "difficulty": "lunatic",
+      "shot": "marisa-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "lunatic-stage1-marisa-b",
+      "kind": "stage",
+      "stage": 1,
+      "difficulty": "lunatic",
+      "shot": "marisa-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "lunatic-stage2-reimu-a",
+      "kind": "stage",
+      "stage": 2,
+      "difficulty": "lunatic",
+      "shot": "reimu-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "lunatic-stage2-reimu-b",
+      "kind": "stage",
+      "stage": 2,
+      "difficulty": "lunatic",
+      "shot": "reimu-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "lunatic-stage2-marisa-a",
+      "kind": "stage",
+      "stage": 2,
+      "difficulty": "lunatic",
+      "shot": "marisa-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "lunatic-stage2-marisa-b",
+      "kind": "stage",
+      "stage": 2,
+      "difficulty": "lunatic",
+      "shot": "marisa-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "lunatic-stage3-reimu-a",
+      "kind": "stage",
+      "stage": 3,
+      "difficulty": "lunatic",
+      "shot": "reimu-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "lunatic-stage3-reimu-b",
+      "kind": "stage",
+      "stage": 3,
+      "difficulty": "lunatic",
+      "shot": "reimu-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "lunatic-stage3-marisa-a",
+      "kind": "stage",
+      "stage": 3,
+      "difficulty": "lunatic",
+      "shot": "marisa-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "lunatic-stage3-marisa-b",
+      "kind": "stage",
+      "stage": 3,
+      "difficulty": "lunatic",
+      "shot": "marisa-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "lunatic-stage4-reimu-a",
+      "kind": "stage",
+      "stage": 4,
+      "difficulty": "lunatic",
+      "shot": "reimu-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "lunatic-stage4-reimu-b",
+      "kind": "stage",
+      "stage": 4,
+      "difficulty": "lunatic",
+      "shot": "reimu-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "lunatic-stage4-marisa-a",
+      "kind": "stage",
+      "stage": 4,
+      "difficulty": "lunatic",
+      "shot": "marisa-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "lunatic-stage4-marisa-b",
+      "kind": "stage",
+      "stage": 4,
+      "difficulty": "lunatic",
+      "shot": "marisa-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "lunatic-stage5-reimu-a",
+      "kind": "stage",
+      "stage": 5,
+      "difficulty": "lunatic",
+      "shot": "reimu-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "lunatic-stage5-reimu-b",
+      "kind": "stage",
+      "stage": 5,
+      "difficulty": "lunatic",
+      "shot": "reimu-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "lunatic-stage5-marisa-a",
+      "kind": "stage",
+      "stage": 5,
+      "difficulty": "lunatic",
+      "shot": "marisa-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "lunatic-stage5-marisa-b",
+      "kind": "stage",
+      "stage": 5,
+      "difficulty": "lunatic",
+      "shot": "marisa-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "lunatic-stage6-reimu-a",
+      "kind": "stage",
+      "stage": 6,
+      "difficulty": "lunatic",
+      "shot": "reimu-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "lunatic-stage6-reimu-b",
+      "kind": "stage",
+      "stage": 6,
+      "difficulty": "lunatic",
+      "shot": "reimu-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "lunatic-stage6-marisa-a",
+      "kind": "stage",
+      "stage": 6,
+      "difficulty": "lunatic",
+      "shot": "marisa-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "lunatic-stage6-marisa-b",
+      "kind": "stage",
+      "stage": 6,
+      "difficulty": "lunatic",
+      "shot": "marisa-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "extra-stage7-reimu-a",
+      "kind": "stage",
+      "stage": 7,
+      "difficulty": "extra",
+      "shot": "reimu-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "extra-stage7-reimu-b",
+      "kind": "stage",
+      "stage": 7,
+      "difficulty": "extra",
+      "shot": "reimu-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "extra-stage7-marisa-a",
+      "kind": "stage",
+      "stage": 7,
+      "difficulty": "extra",
+      "shot": "marisa-a",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "extra-stage7-marisa-b",
+      "kind": "stage",
+      "stage": 7,
+      "difficulty": "extra",
+      "shot": "marisa-b",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "original MSG stage-end or explicitly reported incomplete",
+      "simulation": "every observed original replay frame; stage and session identity retained",
+      "images": "predeclared replay-frame checkpoints and first divergence context",
+      "instrumentation": "invulnerability permitted only when declared on both sides; deaths require separate unmodified scenarios"
+    },
+    {
+      "id": "title-navigation",
+      "kind": "transition",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "every title row, wrap and cancel",
+      "instrumentation": "read-only observation and fixed keyboard/controller input, or declared setup with limits"
+    },
+    {
+      "id": "selection-story",
+      "kind": "transition",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "all difficulties, characters, shots and back navigation",
+      "instrumentation": "read-only observation and fixed keyboard/controller input, or declared setup with limits"
+    },
+    {
+      "id": "selection-practice-extra",
+      "kind": "transition",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "locked/unlocked stages and Extra shot availability",
+      "instrumentation": "read-only observation and fixed keyboard/controller input, or declared setup with limits"
+    },
+    {
+      "id": "options-ranges-defaults",
+      "kind": "transition",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "wrap settings, restore defaults, persistence and exit",
+      "instrumentation": "read-only observation and fixed keyboard/controller input, or declared setup with limits"
+    },
+    {
+      "id": "controller-config",
+      "kind": "transition",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "assignment, sharing/swapping and default mapping",
+      "instrumentation": "read-only observation and fixed keyboard/controller input, or declared setup with limits"
+    },
+    {
+      "id": "replay-menu",
+      "kind": "transition",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "valid/invalid slots, stage selection, back and playback",
+      "instrumentation": "read-only observation and fixed keyboard/controller input, or declared setup with limits"
+    },
+    {
+      "id": "score-results",
+      "kind": "transition",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "score filters, name entry, replay save and return",
+      "instrumentation": "read-only observation and fixed keyboard/controller input, or declared setup with limits"
+    },
+    {
+      "id": "music-room",
+      "kind": "transition",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "all 17 tracks, comments, scrolling, back",
+      "instrumentation": "read-only observation and fixed keyboard/controller input, or declared setup with limits"
+    },
+    {
+      "id": "pause-resume-retry-quit",
+      "kind": "transition",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "each pause action and its audio behavior",
+      "instrumentation": "read-only observation and fixed keyboard/controller input, or declared setup with limits"
+    },
+    {
+      "id": "death-deathbomb-respawn",
+      "kind": "transition",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "grace boundary, drops, stocks and invulnerability",
+      "instrumentation": "read-only observation and fixed keyboard/controller input, or declared setup with limits"
+    },
+    {
+      "id": "continue-accept-reject",
+      "kind": "transition",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "continue accepted, rejected and unavailable",
+      "instrumentation": "read-only observation and fixed keyboard/controller input, or declared setup with limits"
+    },
+    {
+      "id": "stage-transitions",
+      "kind": "transition",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "story stages1\u20136; Easy ends at5; Extra independent",
+      "instrumentation": "read-only observation and fixed keyboard/controller input, or declared setup with limits"
+    },
+    {
+      "id": "ending-reimu-a-good",
+      "kind": "ending",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "staff roll complete and return; normal and accelerated text waits",
+      "instrumentation": "declare ending entry setup; exercise original script to its terminal"
+    },
+    {
+      "id": "ending-reimu-b-good",
+      "kind": "ending",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "staff roll complete and return; normal and accelerated text waits",
+      "instrumentation": "declare ending entry setup; exercise original script to its terminal"
+    },
+    {
+      "id": "ending-marisa-a-good",
+      "kind": "ending",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "staff roll complete and return; normal and accelerated text waits",
+      "instrumentation": "declare ending entry setup; exercise original script to its terminal"
+    },
+    {
+      "id": "ending-marisa-b-good",
+      "kind": "ending",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "staff roll complete and return; normal and accelerated text waits",
+      "instrumentation": "declare ending entry setup; exercise original script to its terminal"
+    },
+    {
+      "id": "ending-reimu-bad",
+      "kind": "ending",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "staff roll complete and return; normal and accelerated text waits",
+      "instrumentation": "declare ending entry setup; exercise original script to its terminal"
+    },
+    {
+      "id": "ending-marisa-bad",
+      "kind": "ending",
+      "required": [
+        "state",
+        "image",
+        "audio-events"
+      ],
+      "terminal": "staff roll complete and return; normal and accelerated text waits",
+      "instrumentation": "declare ending entry setup; exercise original script to its terminal"
+    },
+    {
+      "id": "audio-track-01",
+      "kind": "audio",
+      "required": [
+        "audio-pcm",
+        "audio-midi-events"
+      ],
+      "terminal": "at least two loop boundaries, fade and stop at44.1/48kHz",
+      "instrumentation": "original WAV/.pos and MIDI events; Windows GS timbre remains unverified"
+    },
+    {
+      "id": "audio-track-02",
+      "kind": "audio",
+      "required": [
+        "audio-pcm",
+        "audio-midi-events"
+      ],
+      "terminal": "at least two loop boundaries, fade and stop at44.1/48kHz",
+      "instrumentation": "original WAV/.pos and MIDI events; Windows GS timbre remains unverified"
+    },
+    {
+      "id": "audio-track-03",
+      "kind": "audio",
+      "required": [
+        "audio-pcm",
+        "audio-midi-events"
+      ],
+      "terminal": "at least two loop boundaries, fade and stop at44.1/48kHz",
+      "instrumentation": "original WAV/.pos and MIDI events; Windows GS timbre remains unverified"
+    },
+    {
+      "id": "audio-track-04",
+      "kind": "audio",
+      "required": [
+        "audio-pcm",
+        "audio-midi-events"
+      ],
+      "terminal": "at least two loop boundaries, fade and stop at44.1/48kHz",
+      "instrumentation": "original WAV/.pos and MIDI events; Windows GS timbre remains unverified"
+    },
+    {
+      "id": "audio-track-05",
+      "kind": "audio",
+      "required": [
+        "audio-pcm",
+        "audio-midi-events"
+      ],
+      "terminal": "at least two loop boundaries, fade and stop at44.1/48kHz",
+      "instrumentation": "original WAV/.pos and MIDI events; Windows GS timbre remains unverified"
+    },
+    {
+      "id": "audio-track-06",
+      "kind": "audio",
+      "required": [
+        "audio-pcm",
+        "audio-midi-events"
+      ],
+      "terminal": "at least two loop boundaries, fade and stop at44.1/48kHz",
+      "instrumentation": "original WAV/.pos and MIDI events; Windows GS timbre remains unverified"
+    },
+    {
+      "id": "audio-track-07",
+      "kind": "audio",
+      "required": [
+        "audio-pcm",
+        "audio-midi-events"
+      ],
+      "terminal": "at least two loop boundaries, fade and stop at44.1/48kHz",
+      "instrumentation": "original WAV/.pos and MIDI events; Windows GS timbre remains unverified"
+    },
+    {
+      "id": "audio-track-08",
+      "kind": "audio",
+      "required": [
+        "audio-pcm",
+        "audio-midi-events"
+      ],
+      "terminal": "at least two loop boundaries, fade and stop at44.1/48kHz",
+      "instrumentation": "original WAV/.pos and MIDI events; Windows GS timbre remains unverified"
+    },
+    {
+      "id": "audio-track-09",
+      "kind": "audio",
+      "required": [
+        "audio-pcm",
+        "audio-midi-events"
+      ],
+      "terminal": "at least two loop boundaries, fade and stop at44.1/48kHz",
+      "instrumentation": "original WAV/.pos and MIDI events; Windows GS timbre remains unverified"
+    },
+    {
+      "id": "audio-track-10",
+      "kind": "audio",
+      "required": [
+        "audio-pcm",
+        "audio-midi-events"
+      ],
+      "terminal": "at least two loop boundaries, fade and stop at44.1/48kHz",
+      "instrumentation": "original WAV/.pos and MIDI events; Windows GS timbre remains unverified"
+    },
+    {
+      "id": "audio-track-11",
+      "kind": "audio",
+      "required": [
+        "audio-pcm",
+        "audio-midi-events"
+      ],
+      "terminal": "at least two loop boundaries, fade and stop at44.1/48kHz",
+      "instrumentation": "original WAV/.pos and MIDI events; Windows GS timbre remains unverified"
+    },
+    {
+      "id": "audio-track-12",
+      "kind": "audio",
+      "required": [
+        "audio-pcm",
+        "audio-midi-events"
+      ],
+      "terminal": "at least two loop boundaries, fade and stop at44.1/48kHz",
+      "instrumentation": "original WAV/.pos and MIDI events; Windows GS timbre remains unverified"
+    },
+    {
+      "id": "audio-track-13",
+      "kind": "audio",
+      "required": [
+        "audio-pcm",
+        "audio-midi-events"
+      ],
+      "terminal": "at least two loop boundaries, fade and stop at44.1/48kHz",
+      "instrumentation": "original WAV/.pos and MIDI events; Windows GS timbre remains unverified"
+    },
+    {
+      "id": "audio-track-14",
+      "kind": "audio",
+      "required": [
+        "audio-pcm",
+        "audio-midi-events"
+      ],
+      "terminal": "at least two loop boundaries, fade and stop at44.1/48kHz",
+      "instrumentation": "original WAV/.pos and MIDI events; Windows GS timbre remains unverified"
+    },
+    {
+      "id": "audio-track-15",
+      "kind": "audio",
+      "required": [
+        "audio-pcm",
+        "audio-midi-events"
+      ],
+      "terminal": "at least two loop boundaries, fade and stop at44.1/48kHz",
+      "instrumentation": "original WAV/.pos and MIDI events; Windows GS timbre remains unverified"
+    },
+    {
+      "id": "audio-track-16",
+      "kind": "audio",
+      "required": [
+        "audio-pcm",
+        "audio-midi-events"
+      ],
+      "terminal": "at least two loop boundaries, fade and stop at44.1/48kHz",
+      "instrumentation": "original WAV/.pos and MIDI events; Windows GS timbre remains unverified"
+    },
+    {
+      "id": "audio-track-17",
+      "kind": "audio",
+      "required": [
+        "audio-pcm",
+        "audio-midi-events"
+      ],
+      "terminal": "at least two loop boundaries, fade and stop at44.1/48kHz",
+      "instrumentation": "original WAV/.pos and MIDI events; Windows GS timbre remains unverified"
+    }
+  ]
+}

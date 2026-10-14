@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use th06_engine::{DrawCmd, Input, Key};
+use th06_engine::{DepthState, DepthTest, DrawCmd, Input, Key};
 use th06_formats::anm0::{Entry, Instr as AnmInstr, Sprite};
 use th06_formats::ecl::Ecl;
 use th06_formats::msg::Msg;
@@ -92,9 +92,6 @@ const EXTEND_SCORES: [i64; 5] = [
     1_900_000_000,
 ];
 
-/// Frames you can still bomb after a lethal hit (Player.cpp respawnTimer = 6).
-const DEATHBOMB_FRAMES: u32 = 6;
-
 /// g_PowerItemScore: score for collecting a power item at max power, indexed by
 /// the running power-item count (ItemManager.cpp).
 const POWER_ITEM_SCORE: [i64; 31] = [
@@ -127,6 +124,8 @@ pub const SFX_BY_IDX: [&str; 32] = [
 pub enum Event {
     Sfx(&'static str),
     SfxIdx(u8),
+    /// SOUND_1UP requested by GameManager before its gameFrames increment.
+    ScoreExtend,
     Bgm(&'static str),
     BgmFade(f32),
     BackToTitle,
@@ -589,6 +588,60 @@ pub struct ScriptRef {
     pub tex_size: [f32; 2],
 }
 
+fn screen_asset_cmd(asset: &PortraitAsset, runner: &AnmRunner) -> Option<DrawCmd> {
+    if !runner.visible() {
+        return None;
+    }
+    let sprite = runner.sprite.and_then(|idx| {
+        asset
+            .entry
+            .sprites
+            .iter()
+            .find(|sprite| sprite.index == idx)
+    })?;
+    let (tw, th) = (asset.tex_size.0 as f32, asset.tex_size.1 as f32);
+    let mut src = [
+        sprite.x / tw + runner.uv_scroll[0],
+        sprite.y / th + runner.uv_scroll[1],
+        (sprite.x + sprite.width) / tw + runner.uv_scroll[0],
+        (sprite.y + sprite.height) / th + runner.uv_scroll[1],
+    ];
+    if runner.flip_x ^ (runner.scale[0] < 0.0) {
+        src.swap(0, 2);
+    }
+    if runner.flip_y ^ (runner.scale[1] < 0.0) {
+        src.swap(1, 3);
+    }
+    let geometry = crate::sprite_geometry::screen_rotated(
+        [
+            runner.pos[0] + runner.pos_offset[0],
+            runner.pos[1] + runner.pos_offset[1],
+        ],
+        [
+            sprite.width * runner.scale[0].abs(),
+            sprite.height * runner.scale[1].abs(),
+        ],
+        runner.rotation,
+        runner.corner,
+    );
+    Some(DrawCmd {
+        tex: asset.tex,
+        dst: geometry.dst,
+        src,
+        tint: [
+            runner.color[0],
+            runner.color[1],
+            runner.color[2],
+            runner.alpha,
+        ],
+        rot: geometry.rotation,
+        additive: runner.additive,
+        color_add: runner.color_add,
+        clip: None,
+        depth: None,
+    })
+}
+
 /// Build a sprite DrawCmd from an ANM runner + its script, centred at (cx, cy).
 /// Shared by the enemy primary vm and the op99 sub-vms.
 fn sprite_cmd_from(
@@ -598,6 +651,7 @@ fn sprite_cmd_from(
     cy: f32,
     rot: f32,
     additive: bool,
+    z: f32,
 ) -> Option<DrawCmd> {
     let idx = anim.sprite?;
     let sp = script.sprites.get(&idx)?;
@@ -615,14 +669,24 @@ fn sprite_cmd_from(
     if anim.flip_y {
         std::mem::swap(&mut v0, &mut v1);
     }
+    let mut geometry =
+        crate::sprite_geometry::world([cx - FIELD_X, cy - FIELD_Y], [w, h], rot, anim.corner, z);
+    geometry.dst[0] += FIELD_X;
+    geometry.dst[1] += FIELD_Y;
     Some(DrawCmd {
         tex: script.tex,
-        dst: [cx - w / 2.0, cy - h / 2.0, w, h],
+        dst: geometry.dst,
         src: [u0, v0, u1, v1],
         tint: [anim.color[0], anim.color[1], anim.color[2], anim.alpha],
-        rot,
+        rot: geometry.rotation,
         additive,
         color_add: anim.color_add,
+        clip: None,
+        depth: Some(DepthState {
+            z: crate::sprite_geometry::world_depth(z),
+            test: DepthTest::LessEqual,
+            write: !anim.z_write_disable,
+        }),
     })
 }
 
@@ -704,6 +768,10 @@ pub struct Stage {
     lives: i32,
     bombs: i32,
     invuln: u32,
+    /// The original timer counts upward while alive, after protection expires.
+    player_alive_timer: u32,
+    /// Player::respawnTimer remains nonzero after a successful deathbomb.
+    player_respawn_timer: u32,
     bullet_grace_period: u32,
     /// `> 0` while a bomb is running (mirrors PlayerBombInfo.isInUse for the many
     /// `bombing > 0` gates).
@@ -737,6 +805,9 @@ pub struct Stage {
     /// Each registered shake consumes two u32 RNG draws (x, y) per active tick.
     /// Overlapping Fantasy Seal explosions retain separate ScreenEffect chains.
     arcade: [f32; 4],
+    /// GameManager's DWORD viewport, latched before ScreenEffect's calc chain.
+    /// Draw2/Draw3 retain it; RHW positions read the newer floating arcade origin.
+    draw_arcade: [f32; 4],
     shakes: Vec<ScreenShake>,
     /// spellcardInfo.usedBomb: a bomb was fired while a spellcard was active.
     spell_used_bomb: bool,
@@ -786,8 +857,11 @@ pub struct Stage {
     /// Eased boss health bar (Gui bossHealthBar2): rises 0.01/frame toward the
     /// boss life fraction, falls 0.02/frame.
     boss_bar: f32,
+    boss_bar_target: f32,
+    boss_lives: i32,
     hiscore: i64,
     clear_bonus: i64,
+    clear_bonus_pending: bool,
     /// Running count for scoring power items collected at max power.
     power_item_count: usize,
     paused: bool,
@@ -798,6 +872,12 @@ pub struct Stage {
     rand_item_table: usize,
     rand_item_spawn: usize,
     spell_active: bool,
+    spell_background: Option<PortraitAsset>,
+    late_spell_background: Option<PortraitAsset>,
+    spell_background_runner: Option<AnmRunner>,
+    spell_background_ticks: u32,
+    loading_asset: Option<PortraitAsset>,
+    loading_runner: Option<AnmRunner>,
     spell_name: String,
     spell_capturing: bool,
     spell_result: u32,
@@ -806,6 +886,7 @@ pub struct Stage {
     /// for the capture bonus; the "Spell Card Bonus!" popup (frames, amount).
     spell_id: i32,
     spell_secs: i32,
+    last_drawn_spell_secs: i32,
     /// text.anm script 7 (TEXT_ENEMY_SPELLCARD_NAME) + the live runner that
     /// drives the spell-name announce animation (fly-in, shrink, fly-up/off).
     spell_name_script: Vec<AnmInstr>,
@@ -821,6 +902,11 @@ pub struct Stage {
     /// Stage-name intro (text.anm script 0): pre-baked JP texture + live runner.
     stage_name_tex: Option<(usize, f32, f32)>,
     stage_name_runner: Option<AnmRunner>,
+    song_name_script: Vec<AnmInstr>,
+    song_name_tex: Vec<(usize, f32, f32)>,
+    song_name_runner: Option<AnmRunner>,
+    song_name_index: usize,
+    attract_demo: bool,
     /// Boss spellcard portrait (face*.anm script 3) + which boss-face sprite.
     portrait_script: Vec<AnmInstr>,
     portrait_runner: Option<AnmRunner>,
@@ -850,6 +936,21 @@ pub struct Stage {
 }
 
 impl Stage {
+    pub fn configure_song_names(
+        &mut self,
+        script: Vec<AnmInstr>,
+        textures: Vec<(usize, f32, f32)>,
+    ) {
+        self.song_name_runner = (!script.is_empty()).then(|| AnmRunner::new(script.clone()));
+        self.song_name_script = script;
+        self.song_name_tex = textures;
+        self.song_name_index = 0;
+    }
+
+    pub fn set_attract_demo(&mut self, value: bool) {
+        self.attract_demo = value;
+    }
+
     pub fn set_pause_art(&mut self, asset: PortraitAsset) {
         self.pause_asset = Some(asset);
     }
@@ -915,10 +1016,43 @@ impl Stage {
         }
     }
 
-    /// ReplayManager records dialogue frames as well as combat. Entering or
-    /// leaving the pause menu consumes no simulation/input-recording frame.
+    /// Gui priority12 follows Player7 and Enemy9. A spellcard VM created by
+    /// either callback executes again in this same calculation, after its
+    /// SetAndExecuteScript frame zero. Keep these ticks in the common GUI phase.
+    fn tick_spellcard_vms(&mut self) {
+        if let Some(banner) = &mut self.bomb_banner {
+            for runner in [&mut banner.name, &mut banner.portrait] {
+                if let Some(vm) = runner {
+                    vm.tick();
+                    if !vm.visible() {
+                        *runner = None;
+                    }
+                }
+            }
+        }
+        for runner in [&mut self.spell_name_runner, &mut self.portrait_runner] {
+            if let Some(vm) = runner {
+                vm.tick();
+                if !vm.visible() {
+                    *runner = None;
+                }
+            }
+        }
+    }
+
+    /// ReplayManager records dialogue frames as well as combat. Opening the
+    /// pause menu freezes the simulation; its closing callback resumes it.
+    pub fn diagnostic_pause(&self) -> (bool, u8, u16) {
+        (self.paused, self.pause_state, self.pause_timer)
+    }
+
     pub fn replay_frame_active(&self, input: &Input) -> bool {
-        !(self.paused
+        let closing = self.paused
+            && self.pause_state == 3
+            && self.pause_timer >= 20
+            && !input.pressed(Key::Pause)
+            && !input.pressed(Key::Quit);
+        !((self.paused && !closing)
             || input.pressed(Key::Pause)
                 && matches!(
                     self.state,
@@ -984,6 +1118,8 @@ impl Stage {
                 rot: 0.0,
                 additive: false,
                 color_add: false,
+                clip: None,
+                depth: None,
             });
         }
         let w = 256.0 * runner.scale[0];
@@ -1001,6 +1137,8 @@ impl Stage {
             rot: 0.0,
             additive: runner.additive,
             color_add: false,
+            clip: None,
+            depth: None,
         });
     }
 
@@ -1033,11 +1171,7 @@ impl Stage {
         }
         cmds.push(DrawCmd {
             tex: asset.tex,
-            dst: if runner.corner {
-                [x, y, w, h]
-            } else {
-                [x - w / 2.0, y - h / 2.0, w, h]
-            },
+            dst: crate::sprite_geometry::screen([x, y], [w, h], runner.corner).dst,
             src,
             tint: [
                 runner.color[0],
@@ -1048,6 +1182,8 @@ impl Stage {
             rot: 0.0,
             additive: runner.additive,
             color_add: false,
+            clip: None,
+            depth: None,
         });
     }
 
@@ -1095,6 +1231,8 @@ impl Stage {
                 rot: 0.0,
                 additive: false,
                 color_add: false,
+                clip: None,
+                depth: None,
             });
         } else {
             draw_text(cmds, pos, 16.0, tint, text);
@@ -1196,6 +1334,7 @@ impl Stage {
                 min_rank,
                 max_rank,
                 player_pos: [FIELD_W / 2.0, FIELD_H - 64.0],
+                player_z: 0.49,
                 bullets: Vec::new(),
                 next_bullet_index: 0,
                 lasers: Vec::new(),
@@ -1258,6 +1397,8 @@ impl Stage {
             lives: starting_lives,
             bombs: starting_bombs,
             invuln: 0,
+            player_alive_timer: 0,
+            player_respawn_timer: 8,
             bullet_grace_period: 0,
             bombing: 0,
             bomb_timer: 0,
@@ -1273,6 +1414,7 @@ impl Stage {
             bomb_regions: [BombRect::default(); 32],
             bomb_region_dmg: [0; 32],
             arcade: [FIELD_X, FIELD_Y, FIELD_W, FIELD_H],
+            draw_arcade: [FIELD_X, FIELD_Y, FIELD_W, FIELD_H],
             shakes: Vec::new(),
             spell_used_bomb: false,
             bomb_sprites: (0..32).map(|_| None).collect(),
@@ -1309,8 +1451,11 @@ impl Stage {
             full_power_timer: 0,
             was_full: false,
             boss_bar: 0.0,
+            boss_bar_target: 0.0,
+            boss_lives: 0,
             hiscore: 0,
             clear_bonus: 0,
+            clear_bonus_pending: false,
             power_item_count: 0,
             paused: false,
             pause_state: 0,
@@ -1320,6 +1465,12 @@ impl Stage {
             rand_item_table: item_table_index,
             rand_item_spawn: item_spawn_index,
             spell_active: false,
+            spell_background: None,
+            late_spell_background: None,
+            spell_background_runner: None,
+            spell_background_ticks: 0,
+            loading_asset: None,
+            loading_runner: None,
             spell_name: String::new(),
             spell_name_tex,
             spell_name_cur: None,
@@ -1330,8 +1481,14 @@ impl Stage {
             // Start the stage-name intro immediately (Gui shows it at stage init).
             stage_name_runner: (!stage_name_script.is_empty() && stage_name_tex.is_some())
                 .then(|| AnmRunner::new(stage_name_script)),
+            song_name_script: Vec::new(),
+            song_name_tex: Vec::new(),
+            song_name_runner: None,
+            song_name_index: 0,
+            attract_demo: false,
             spell_id: 0,
             spell_secs: 0,
+            last_drawn_spell_secs: 0,
             spell_name_script,
             spell_name_runner: None,
             portrait_script,
@@ -1503,12 +1660,19 @@ impl Stage {
         self.point_items = 0;
         self.world.power = 0;
         self.next_extend = 0;
-        self.pos = [FIELD_W / 2.0, FIELD_H - 64.0];
-        self.invuln = 0;
-        self.dying = 0;
-        self.state = PlayerState::Spawning(1);
+        // StageMenu resets GameManager fields only. Player already entered
+        // its spawning state before opening Retry; its clocks stay intact.
+        self.resume_after_game_over();
         self.paused = false;
         true
+    }
+
+    /// Retry is a GameManager gate; Player already prepared spawning state1.
+    /// Both Yes and No release the remaining calculation callbacks once.
+    pub fn resume_after_game_over(&mut self) {
+        if matches!(self.state, PlayerState::GameOver) {
+            self.state = PlayerState::Spawning(1);
+        }
     }
 
     pub fn set_lives(&mut self, lives: i32) {
@@ -1562,9 +1726,60 @@ impl Stage {
             self.world.sub_rank,
             self.world.rng.seed(),
             self.world.bullets.len(),
-            self.world.lasers.len(),
+            self.world
+                .lasers
+                .iter()
+                .filter(|laser| laser.in_use)
+                .count(),
             self.items.len(),
             self.player_particle_timer
+        )
+    }
+
+    /// Read-only Gui fields, observed after calculation by the capture CLI.
+    pub fn reference_boss_ui(&self) -> String {
+        format!(
+            "{},{},{},{},{},{},{},{},{},{}",
+            self.stage_num,
+            u8::from(self.world.boss_present),
+            self.hud.boss_state(),
+            self.boss_bar_target,
+            self.boss_bar,
+            (self.hud.boss_opacity() * 255.0).round() as u32,
+            self.boss_lives,
+            self.spell_secs,
+            self.last_drawn_spell_secs,
+            if self.dialogue.active {
+                self.dialogue.msg_idx as i32
+            } else {
+                -1
+            }
+        )
+    }
+
+    /// Original Player state/timers plus GameManager menu gates, for traces.
+    pub fn reference_lifecycle(&self) -> String {
+        let (state, respawn, invuln) = match self.state {
+            PlayerState::Dead(elapsed) => (2, self.dying, elapsed),
+            PlayerState::Spawning(elapsed) => (1, 0, elapsed),
+            PlayerState::GameOver => (1, 0, 1),
+            _ => (
+                if self.invuln > 0 { 3 } else { 0 },
+                self.player_respawn_timer,
+                if self.invuln > 0 {
+                    self.invuln
+                } else {
+                    self.player_alive_timer
+                },
+            ),
+        };
+        format!(
+            "{state},{respawn},{},{invuln},{},{},{},{}",
+            self.bullet_grace_period,
+            u8::from(self.bomb_in_use),
+            self.bomb_timer,
+            u8::from(matches!(self.state, PlayerState::GameOver)),
+            u8::from(self.paused)
         )
     }
 
@@ -1604,6 +1819,76 @@ impl Stage {
 
     pub fn reference_effects(&self, frame: i32) -> String {
         self.world.reference_effects(frame)
+    }
+
+    /// Read-only pool snapshot. Empty pools remain explicit, so a missing
+    /// checkpoint or an omitted object can never look like a successful diff.
+    pub fn reference_pools(&self, frame: i32) -> String {
+        use std::fmt::Write;
+        let mut out = format!(
+            "{{\"frame\":{frame},\"stage\":{},\"enemies\":[",
+            self.stage_num
+        );
+        let mut comma = "";
+        for e in self.enemies.iter().filter(|e| e.occupied) {
+            let (sub, pc, time, phase_timer) = e.reference_ecl_state();
+            write!(out, "{comma}{{\"slot\":{},\"x\":{:.9},\"y\":{:.9},\"z\":{:.9},\"life\":{},\"max_life\":{},\"sub\":{sub},\"pc\":{pc},\"time\":{time},\"phase_timer\":{phase_timer}}}", e.pool_index, e.pos[0], e.pos[1], e.pos[2], e.life, e.max_life).unwrap();
+            comma = ",";
+        }
+        out.push_str("],\"shots\":[");
+        comma = "";
+        for s in &self.shots {
+            write!(out, "{comma}{{\"slot\":{},\"x\":{:.9},\"y\":{:.9},\"vx\":{:.9},\"vy\":{:.9},\"width\":{:.9},\"height\":{:.9},\"angle\":{:.9},\"speed\":{:.9},\"state\":{},\"timer\":{},\"damage\":{},\"type\":{}}}", s.pool_index, s.pos[0], s.pos[1], s.vel[0], s.vel[1], s.size[0], s.size[1], s.angle, s.spd, if s.collided {2} else {1}, s.age, s.damage, s.bt).unwrap();
+            comma = ",";
+        }
+        out.push_str("],\"bullets\":[");
+        comma = "";
+        for b in &self.world.bullets {
+            let state = if b.despawn_timer > 0 {
+                5
+            } else if b.spawn_delay > 0 {
+                if b.ex_flags & 2 != 0 {
+                    2
+                } else if b.ex_flags & 4 != 0 {
+                    3
+                } else {
+                    4
+                }
+            } else {
+                1
+            };
+            write!(out, "{comma}{{\"slot\":{},\"x\":{:.9},\"y\":{:.9},\"vx\":{:.9},\"vy\":{:.9},\"angle\":{:.9},\"speed\":{:.9},\"state\":{state},\"timer\":{}}}", b.pool_index, b.pos[0], b.pos[1], b.velocity[0], b.velocity[1], b.angle, b.speed, b.timer).unwrap();
+            comma = ",";
+        }
+        out.push_str("],\"lasers\":[");
+        comma = "";
+        for (slot, l) in self.world.lasers.iter().enumerate() {
+            if !l.in_use {
+                continue;
+            }
+            write!(out, "{comma}{{\"slot\":{slot},\"x\":{:.9},\"y\":{:.9},\"angle\":{:.9},\"speed\":{:.9},\"start_offset\":{:.9},\"end_offset\":{:.9},\"width\":{:.9},\"state\":{},\"timer\":{}}}", l.pos[0], l.pos[1], l.angle, l.speed, l.start_offset, l.end_offset, l.width, l.state, l.timer).unwrap();
+            comma = ",";
+        }
+        out.push_str("],\"items\":[");
+        comma = "";
+        for i in &self.items {
+            write!(out, "{comma}{{\"slot\":{},\"x\":{:.9},\"y\":{:.9},\"state\":{},\"timer\":{},\"type\":{}}}", i.pool_index, i.pos[0], i.pos[1], i.state, i.timer, i.kind).unwrap();
+            comma = ",";
+        }
+        let target = self.last_enemy_hit.unwrap_or([-999.0, -999.0]);
+        write!(
+            out,
+            "],\"player_target\":[{:.9},{:.9}],\"damage_ready\":[",
+            target[0], target[1]
+        )
+        .unwrap();
+        comma = "";
+        for e in self.enemies.iter().filter(|e| e.ready_for_damage()) {
+            write!(out, "{comma}{}", e.pool_index).unwrap();
+            comma = ",";
+        }
+        out.push_str("]}\n");
+        out
     }
 
     /// Remaining bombs — the auto-player bombs to escape when cornered.
@@ -1652,21 +1937,102 @@ impl Stage {
         self.hiscore = hiscore;
     }
 
+    pub fn configure_spell_background(
+        &mut self,
+        normal: PortraitAsset,
+        late: Option<PortraitAsset>,
+    ) {
+        self.spell_background = Some(normal);
+        self.late_spell_background = late;
+    }
+
+    pub fn configure_loading_screen(&mut self, asset: PortraitAsset) {
+        self.loading_asset = Some(asset);
+    }
+
+    fn begin_loading_screen(&mut self) {
+        self.loading_runner = self.loading_asset.as_ref().and_then(|asset| {
+            asset
+                .entry
+                .scripts
+                .iter()
+                .find(|(id, _)| *id == 0)
+                .map(|(_, script)| AnmRunner::new(script.clone()))
+        });
+    }
+
+    /// Gui::ActualAddedCallback preserves the loading image between stages
+    /// and interrupts the same ANM to reveal the newly created stage.
+    pub fn reveal_after_loading(&mut self) {
+        self.begin_loading_screen();
+        if let Some(runner) = &mut self.loading_runner {
+            runner.interrupt(1);
+        }
+    }
+
+    fn reset_spell_background(&mut self) {
+        self.spell_background_ticks = 0;
+        self.spell_background_runner = self.spell_background.as_ref().and_then(|asset| {
+            asset
+                .entry
+                .scripts
+                .iter()
+                .find(|(id, _)| *id == 0)
+                .map(|(_, script)| AnmRunner::new(script.clone()))
+        });
+    }
+
+    pub(crate) fn camera_facing(&self) -> Option<[f32; 3]> {
+        self.background.as_ref().map(Background::camera_facing)
+    }
+
+    pub(crate) fn inherit_camera_facing(&mut self, facing: [f32; 3]) {
+        if let Some(background) = &mut self.background {
+            background.inherit_camera_facing(facing);
+        }
+    }
+
+    pub(crate) fn prepare_draw_camera(&mut self) {
+        // GameManager::OnUpdate assigns D3DVIEWPORT8 (DWORD fields) before
+        // ScreenEffect::ShakeScreen changes arcadeRegion later in this calc.
+        self.draw_arcade = self.arcade.map(|value| value as u32 as f32);
+        if let Some(background) = &mut self.background {
+            background.prepare_draw_camera();
+        }
+    }
+
     pub fn background_scene(&self) -> Option<BgScene> {
-        self.background.as_ref().map(|b| {
-            let mut sc = b.scene();
-            // The 3D bg fills the arcade region, so the shake shifts its origin
-            // and shrinks its viewport (arcadeRegionTopLeftPos + arcadeRegionSize).
-            sc.arcade = self.arcade;
-            sc
-        })
+        if self.loading_runner.as_ref().is_some_and(AnmRunner::stopped) {
+            return None;
+        }
+        if self.spell_active && self.spell_background_ticks > 60 {
+            return None;
+        }
+        self.background
+            .as_ref()
+            .filter(|b| b.has_draw_camera())
+            .map(|b| {
+                let mut sc = b.scene_for_viewport([self.draw_arcade[2], self.draw_arcade[3]]);
+                sc.arcade = self.draw_arcade;
+                sc
+            })
     }
 
     pub fn update(&mut self, input: &Input) -> Vec<DrawCmd> {
+        // GameManager::OnUpdate sets the camera before Stage::OnUpdate, even
+        // when pause/time stop prevents the latter from advancing its script.
+        self.prepare_draw_camera();
         // The pause menu freezes the whole game (no tick, no sim).
         if self.paused {
             self.run_pause_menu(input);
-            return self.draw();
+            if self.paused
+                || self
+                    .events
+                    .iter()
+                    .any(|event| matches!(event, Event::BackToTitle))
+            {
+                return self.draw();
+            }
         }
         if input.pressed(Key::Pause)
             && matches!(
@@ -1677,14 +2043,28 @@ impl Stage {
             self.paused = true;
             self.pause_state = 0;
             self.arcade = [FIELD_X, FIELD_Y, FIELD_W, FIELD_H];
-            self.run_pause_menu(&Input::default());
+            // GameManager resets the region before assigning its viewport.
+            self.draw_arcade = self.arcade;
+            // AsciiManager precedes GameManager in the original calc chain.
+            // The latter opens Pause after its menu callback has already run.
             return self.draw();
         }
 
         self.score_popups.tick();
         self.tick += 1;
         self.anim += 1;
-        if !self.world.time_stopped {
+        if self.world.time_stopped {
+            if let Some(runner) = &mut self.spell_background_runner {
+                runner.alpha = 96.0 / 255.0;
+                runner.color = [48.0 / 255.0, 48.0 / 255.0, 128.0 / 255.0];
+            }
+        } else {
+            if self.spell_active {
+                self.spell_background_ticks += 1;
+                if let Some(runner) = &mut self.spell_background_runner {
+                    runner.tick();
+                }
+            }
             if let Some(bg) = &mut self.background {
                 bg.tick();
             }
@@ -1698,44 +2078,18 @@ impl Stage {
         }
         self.was_full = full;
         self.full_power_timer = self.full_power_timer.saturating_sub(1);
-        self.roll_boss_bar();
-        // Track the boss spell timer (for the capture bonus) and tick popups.
-        if let Some(secs) = self
-            .enemies
-            .iter()
-            .find(|e| e.is_boss && e.occupied)
-            .and_then(|e| e.spell_seconds_left())
-        {
-            self.spell_secs = secs;
-        }
         self.spell_bonus_timer = self.spell_bonus_timer.saturating_sub(1);
         self.bonus_score_timer = self.bonus_score_timer.saturating_sub(1);
-        if let Some(banner) = &mut self.bomb_banner {
-            for runner in [&mut banner.name, &mut banner.portrait] {
-                if let Some(vm) = runner {
-                    vm.tick();
-                    if !vm.visible() {
-                        *runner = None;
-                    }
-                }
-            }
-        }
-        if let Some(r) = &mut self.spell_name_runner {
-            r.tick();
-            if !r.visible() {
-                self.spell_name_runner = None;
-            }
-        }
         if let Some(r) = &mut self.stage_name_runner {
             r.tick();
             if !r.visible() {
                 self.stage_name_runner = None;
             }
         }
-        if let Some(r) = &mut self.portrait_runner {
+        if let Some(r) = &mut self.song_name_runner {
             r.tick();
             if !r.visible() {
-                self.portrait_runner = None;
+                self.song_name_runner = None;
             }
         }
 
@@ -1748,8 +2102,10 @@ impl Stage {
         }
         // Player's chain callback precedes EnemyManager. Time stop freezes the
         // player, its shots and its respawn timers, while ECL keeps running.
-        if !self.world.time_stopped && self.update_player_lifecycle(input) {
-            return self.draw();
+        if !self.world.time_stopped {
+            // Setting isInRetryMenu in Player::OnUpdate does not break the
+            // calculation chain: enemies, projectiles and GUI finish this tick.
+            self.update_player_lifecycle(input);
         }
         self.spell_result = self.spell_result.saturating_sub(1);
         self.world.player_pos = self.pos;
@@ -1760,6 +2116,9 @@ impl Stage {
         // triggering. Bullets, enemies and collision keep running so the
         // player must still dodge whatever is already on screen.
         self.run_timeline();
+        // SpawnEnemy runs its initial ECL immediately during the timeline.
+        // Its item/cancel requests precede the per-enemy damage/death pass.
+        self.drain_world_events();
         self.update_enemies();
         // EffectManager::OnUpdate (chain prio 10, between enemy 9 and bullet 11):
         // draw the RNG for effects spawned this frame (enemy deaths, etc.). (#26)
@@ -1773,10 +2132,41 @@ impl Stage {
         }
         self.update_bullets();
         self.drain_world_events();
-        // Gui's MSG interpreter runs after enemy/bullet/item update. An
-        // ECLRESUME therefore releases the next frame's timeline MSGWAIT.
-        if self.dialogue.active && !self.world.time_stopped {
-            self.run_dialogue(input);
+        // Gui_OnUpdate calls UpdateStageElements before RunMsg. MSG9 only
+        // marks finishedStage; its bonus is added on the following GUI tick.
+        if !self.world.time_stopped {
+            self.hud
+                .tick_boss(self.world.boss_present, self.dialogue.active);
+            self.roll_boss_bar();
+            self.tick_spellcard_vms();
+            if self.clear_bonus_pending {
+                self.clear_bonus_pending = false;
+                let bonus = stage_clear_bonus(
+                    self.stage_num,
+                    self.graze_in_stage,
+                    self.world.power as i64,
+                    self.point_items,
+                    self.lives as i64,
+                    self.bombs as i64,
+                    self.world.difficulty,
+                    self.starting_lives,
+                );
+                self.score += bonus;
+                self.clear_bonus = bonus;
+                // Gui adds the award to score; GameManager rolls guiScore and
+                // the displayed high score on subsequent calculations.
+                self.events
+                    .push(Event::SaveScore(self.hiscore.max(self.score)));
+            }
+            if let Some(runner) = &mut self.loading_runner {
+                runner.tick();
+                if runner.ended() {
+                    self.loading_runner = None;
+                }
+            }
+            if self.dialogue.active {
+                self.run_dialogue(input);
+            }
         }
 
         // Stage clear: timeline exhausted and field empty.
@@ -1798,10 +2188,8 @@ impl Stage {
             );
             self.score += bonus;
             self.clear_bonus = bonus;
-            if self.score > self.hiscore {
-                self.hiscore = self.score;
-            }
-            self.events.push(Event::SaveScore(self.hiscore));
+            self.events
+                .push(Event::SaveScore(self.hiscore.max(self.score)));
             self.state = PlayerState::Cleared(420);
         }
 
@@ -1813,6 +2201,15 @@ impl Stage {
     fn run_pause_menu(&mut self, input: &Input) {
         if input.pressed(Key::Pause) {
             self.pause_state = 3;
+            self.pause_timer = 0;
+            for runner in self.pause_runners.iter_mut().flatten() {
+                if runner.visible() {
+                    runner.interrupt(2);
+                }
+            }
+        }
+        if input.pressed(Key::Quit) {
+            self.pause_state = 6;
             self.pause_timer = 0;
             for runner in self.pause_runners.iter_mut().flatten() {
                 if runner.visible() {
@@ -2081,16 +2478,35 @@ impl Stage {
     /// Children reserve their original fixed slot before their initialization
     /// ECL runs, including nested ENEMYCREATE. Publish each initialized instance
     /// at that reserved index rather than allocating again after RunEcl.
-    fn insert_enemy(&mut self, enemy: Enemy) {
+    fn insert_enemy(&mut self, mut enemy: Enemy) {
         let index = enemy.pool_index;
         while self.enemies.len() <= index {
             self.enemies.push(Enemy::vacant());
             self.anims.push(None);
             self.sub_anims.push(Default::default());
         }
+        // SpawnEnemy executes its initial ECL, including SetAndExecuteScript,
+        // before EnemyManager's first Move/IsInBounds. Preserve that frame-zero
+        // sprite here: using an empty VM delays entry into bounds and misses
+        // damage from long player beams against enemies entering at y=-16.
+        let initialize = |script: i32, rng: &mut Rng| {
+            let mut runner = self
+                .enemy_scripts
+                .get(&script)
+                .map(|script| AnmRunner::new(script.instrs.clone()));
+            if let Some(vm) = &mut runner
+                && let Some((base, range)) = vm.take_pending_random()
+            {
+                vm.set_sprite(base + rng.u16_in_range(range) as u32);
+            }
+            runner
+        };
+        self.anims[index] = initialize(enemy.anm_script, &mut self.world.rng);
+        self.sub_anims[index] =
+            std::array::from_fn(|slot| initialize(enemy.sub_scripts[slot], &mut self.world.rng));
+        enemy.anm_dirty = false;
+        enemy.sub_dirty.fill(false);
         self.enemies[index] = enemy;
-        self.anims[index] = None;
-        self.sub_anims[index] = Default::default();
     }
 
     fn flush_spawns(&mut self) {
@@ -2226,7 +2642,18 @@ impl Stage {
                     }
                 }
             }
+            // ECL requests are immediate in EnemyManager::OnUpdate, before
+            // this enemy's hit/death sound can enter the three-voice queue.
+            // ECL's SpawnItem and bullet-cancel calls are immediate in the
+            // original. Allocating them after all deaths rotates fixed item
+            // slots whenever a later enemy dies in this same calculation.
+            self.drain_world_events();
             self.collide_enemy(i);
+            if self.enemies[i].is_boss && !self.dialogue.active {
+                let boss = &self.enemies[i];
+                self.boss_bar_target =
+                    (boss.life.max(0) as f32 / boss.max_life.max(1) as f32).clamp(0.0, 1.0);
+            }
             // Enemy::UpdateEffects and phaseTimer follow this enemy's damage
             // and death handling, before the next fixed slot runs its ECL.
             self.enemies[i].update_effects(&mut self.world);
@@ -2411,32 +2838,36 @@ impl Stage {
         if let PlayerState::Dead(elapsed) = self.state {
             if self.dying > 0 {
                 self.dying -= 1;
+                self.player_respawn_timer = self.dying;
                 if self.dying == 0 {
                     self.commit_death();
                 }
                 self.state = PlayerState::Dead(elapsed + 1);
             } else if elapsed >= 30 {
                 self.pos = [self.arcade[2] / 2.0, self.arcade[3] - 64.0];
+                self.world.player_z = 0.2;
                 self.invuln = 0;
                 self.set_player_script(0);
                 if self.lives <= 0 {
                     self.state = PlayerState::GameOver;
                     self.events.push(Event::GameOver(self.score));
-                    return true;
+                } else {
+                    self.lives -= 1;
+                    self.bombs = self.starting_bombs;
+                    self.state = PlayerState::Spawning(0);
                 }
-                self.lives -= 1;
-                self.bombs = self.starting_bombs;
-                self.state = PlayerState::Spawning(0);
             } else {
                 self.state = PlayerState::Dead(elapsed + 1);
             }
         }
         if let PlayerState::Spawning(elapsed) = self.state {
+            self.player_respawn_timer = 0;
             self.bullet_grace_period = 90;
             self.bomb_move_mult = 1.0;
             if elapsed >= 30 {
                 self.state = PlayerState::Alive;
                 self.invuln = 240;
+                self.player_respawn_timer = 6;
             } else {
                 self.state = PlayerState::Spawning(elapsed + 1);
             }
@@ -2445,8 +2876,18 @@ impl Stage {
             self.bullet_grace_period -= 1;
             self.world.despawn_all_bullets();
         }
+        if matches!(
+            self.state,
+            PlayerState::Alive | PlayerState::Results | PlayerState::Cleared(_)
+        ) {
+            if self.invuln > 0 {
+                self.invuln -= 1;
+                self.player_alive_timer = 0;
+            } else {
+                self.player_alive_timer = self.player_alive_timer.wrapping_add(1);
+            }
+        }
         if matches!(self.state, PlayerState::Alive) {
-            self.invuln = self.invuln.saturating_sub(1);
             self.update_player(input);
         }
         self.player_runner.tick();
@@ -2458,7 +2899,7 @@ impl Stage {
         }
         self.last_enemy_hit = None;
         self.update_player_fire(input);
-        false
+        matches!(self.state, PlayerState::GameOver)
     }
 
     /// Fire a bomb (Player::OnUpdate bomb branch): mark it in use, reset the
@@ -2838,7 +3279,10 @@ impl Stage {
         self.deaths += 1;
         self.spell_capturing = false;
         self.invuln = 0;
-        self.dying = DEATHBOMB_FRAMES;
+        // Die retains respawnTimer. A successful last-frame deathbomb leaves
+        // it at one until the next actual respawn resets it to six.
+        self.dying = self.player_respawn_timer;
+        self.laser_timers = [2; 2];
         self.state = PlayerState::Dead(0);
         let pos = [self.pos[0], self.pos[1], 0.0];
         self.world
@@ -3110,9 +3554,30 @@ impl Stage {
         // before a second nearby bullet reaches CheckGraze.
         let mut bullets = std::mem::take(&mut self.world.bullets);
         for bullet in &mut bullets {
+            // EX4 can redirect a30px animated knife to a32px color sprite.
+            // IsInBounds reads the current sprite, rather than its type's
+            // initial dimensions, on this same BulletManager callback.
+            let sprites = if bullet.type_index == 9 {
+                &self.eff_sprites
+            } else {
+                &self.bullet_sprites
+            };
+            if let Some(sprite) = sprites.get(&bullet.sprite) {
+                bullet.width = sprite.width;
+                bullet.height = sprite.height;
+            }
             if bullet.step(self.pos, [self.arcade[2], self.arcade[3]]) {
                 self.collide_bullet(bullet);
                 bullet.finish_fired_step();
+                let sprites = if bullet.type_index == 9 {
+                    &self.eff_sprites
+                } else {
+                    &self.bullet_sprites
+                };
+                if let Some(sprite) = sprites.get(&bullet.sprite) {
+                    bullet.width = sprite.width;
+                    bullet.height = sprite.height;
+                }
             }
         }
         bullets.retain(|bullet| bullet.oob_count < 256);
@@ -3360,6 +3825,12 @@ impl Stage {
             off,
             ..Default::default()
         };
+        if self.stage_num >= 6
+            && matches!(idx, 0 | 10)
+            && let Some(asset) = &self.late_spell_background
+        {
+            self.spell_background = Some(asset.clone());
+        }
         if self.stage_num == 7
             && matches!(idx, 0 | 10)
             && let Some(asset) = &self.extra_boss_portrait
@@ -3473,6 +3944,9 @@ impl Stage {
                 7 => {
                     // MUSIC: stage 1 track 1 is the boss theme.
                     let track = i.arg_i32(0);
+                    self.song_name_index = track.max(0) as usize;
+                    self.song_name_runner = (!self.song_name_script.is_empty())
+                        .then(|| AnmRunner::new(self.song_name_script.clone()));
                     self.boss_bgm_started = track == 1;
                     self.events.push(Event::Bgm(if track == 1 {
                         self.boss_bgm
@@ -3495,21 +3969,18 @@ impl Stage {
                     d.frames_pause = 0;
                 }
                 9 => {
-                    let bonus = stage_clear_bonus(
-                        self.stage_num,
-                        self.graze_in_stage,
-                        self.world.power as i64,
-                        self.point_items,
-                        self.lives as i64,
-                        self.bombs as i64,
-                        self.world.difficulty,
-                        self.starting_lives,
-                    );
-                    self.score += bonus;
-                    self.clear_bonus = bonus;
-                    self.hiscore = self.hiscore.max(self.score);
-                    self.events.push(Event::SaveScore(self.hiscore));
+                    self.clear_bonus_pending = true;
                     self.state = PlayerState::Results;
+                    if self.stage_num < 6 {
+                        self.loading_runner = self.loading_asset.as_ref().and_then(|asset| {
+                            asset
+                                .entry
+                                .scripts
+                                .iter()
+                                .find(|(id, _)| *id == 0)
+                                .map(|(_, script)| AnmRunner::new(script.clone()))
+                        });
+                    }
                     if self.stage_num >= 6 {
                         self.next_extend = EXTEND_SCORES.len();
                     }
@@ -3592,8 +4063,14 @@ impl Stage {
     }
 
     fn update_items(&mut self) {
+        let mut collected = false;
         let player = self.pos;
-        let alive = matches!(self.state, PlayerState::Alive);
+        // MSG9 changes Gui.finishedStage, not the original player's state.
+        // The bonus screen freezes movement but still permits item pickups.
+        let alive = matches!(
+            self.state,
+            PlayerState::Alive | PlayerState::Cleared(_) | PlayerState::Results
+        );
         // Visit original fixed slots in order. Items spawned by a full-power
         // pickup can themselves update later in this same ItemManager frame.
         for pool_index in 0..512 {
@@ -3645,9 +4122,13 @@ impl Stage {
             if alive && dx <= 20.0 && dy <= 20.0 {
                 let item = self.items.remove(index);
                 self.collect_item(item.kind, item.pos);
+                collected = true;
             } else {
                 item.timer += 1;
             }
+        }
+        if collected {
+            self.events.push(Event::SfxIdx(21));
         }
     }
 
@@ -3754,7 +4235,6 @@ impl Stage {
                 .spawn(true, pos, self.score - before_score, white),
             _ => {}
         }
-        self.events.push(Event::SfxIdx(21));
     }
 
     /// ItemManager power-item collection: below max, +`amount` power and +10
@@ -3818,6 +4298,7 @@ impl Stage {
                 }
                 WorldEvent::SpellcardStart(id, sprite, raw) => {
                     self.spell_active = true;
+                    self.reset_spell_background();
                     // Original Japanese name: pre-baked texture + decoded string.
                     self.spell_name = th06_engine::text::decode_shiftjis(&raw);
                     self.spell_name_cur = self.spell_name_tex.get(&id).copied();
@@ -3900,7 +4381,12 @@ impl Stage {
                         self.spawn_item(Item::homing(pos, 6));
                     }
                 }
-                WorldEvent::BossSet(_present) => {
+                WorldEvent::BossLifeCount(lives) => self.boss_lives = lives,
+                WorldEvent::BossSeconds(seconds) => self.spell_secs = seconds,
+                WorldEvent::BossSet(present) => {
+                    if present {
+                        self.boss_bar_target = 1.0;
+                    }
                     // Boss music is driven by the pre-boss dialogue, not here:
                     // BossSet also fires for the midboss, which keeps the stage
                     // theme.
@@ -3919,11 +4405,62 @@ impl Stage {
         }
     }
 
+    /// Rebase a canonical foreground projection into the original viewport.
+    /// `z` is explicitly supplied by each Draw2/Draw3 caller, never inferred
+    /// from the already projected depth. Ascii changes only the target viewport;
+    /// its camera matrix remains the one set by Stage::OnDrawLowPrio.
+    fn project_world_cmd(&self, mut cmd: DrawCmd, z: f32, target: [f32; 4]) -> DrawCmd {
+        let target = target.map(|value| value as u32 as f32);
+        cmd.clip = Some(target.map(|value| value as u32));
+        let camera = self.draw_arcade;
+        if camera[2] == 0.0 || camera[3] == 0.0 {
+            cmd.clip = Some([0; 4]);
+            return cmd;
+        }
+        if camera == [FIELD_X, FIELD_Y, FIELD_W, FIELD_H] && target == camera {
+            return cmd;
+        }
+        let tangent = (std::f32::consts::PI / 12.0).tan();
+        let old_distance = FIELD_H / 2.0 / tangent;
+        let distance = camera[3] / 2.0 / tangent;
+        let old_scale = old_distance / (old_distance + z);
+        let scale = distance / (distance + z);
+        let world_center = [
+            FIELD_W / 2.0
+                + (cmd.dst[0] + cmd.dst[2] / 2.0 - FIELD_X - 0.5 - FIELD_W / 2.0) / old_scale,
+            FIELD_H / 2.0
+                + (cmd.dst[1] + cmd.dst[3] / 2.0 - FIELD_Y - 0.5 - FIELD_H / 2.0) / old_scale,
+        ];
+        let ratios = [target[2] / camera[2], target[3] / camera[3]];
+        let width = cmd.dst[2] * (scale / old_scale) * ratios[0];
+        let height = cmd.dst[3] * (scale / old_scale) * ratios[1];
+        cmd.dst = [
+            target[0]
+                + 0.5
+                + (camera[2] / 2.0 + (world_center[0] - camera[2] / 2.0) * scale) * ratios[0]
+                - width / 2.0,
+            target[1]
+                + 0.5
+                + (camera[3] / 2.0 + (world_center[1] - camera[3] / 2.0) * scale) * ratios[1]
+                - height / 2.0,
+            width,
+            height,
+        ];
+        if let Some(depth) = &mut cmd.depth {
+            let camera_z = distance + z;
+            let q = 10000.0 / (10000.0 - 100.0);
+            depth.z = ((camera_z * q - 100.0 * q) / camera_z) * 0.5;
+        }
+        cmd
+    }
+
     fn player_sprite_cmd(
         &self,
         runner: &AnmRunner,
         pos: [f32; 2],
         rotation: f32,
+        world: bool,
+        z: f32,
     ) -> Option<DrawCmd> {
         if !runner.visible() {
             return None;
@@ -3940,14 +4477,23 @@ impl Stage {
         if runner.flip_y ^ (runner.scale[1] < 0.0) {
             std::mem::swap(&mut v0, &mut v1);
         }
-        Some(DrawCmd {
+        let mut geometry = if world {
+            crate::sprite_geometry::world(pos, [width, height], rotation, runner.corner, z)
+        } else {
+            crate::sprite_geometry::screen_rotated(
+                [self.arcade[0] + pos[0], self.arcade[1] + pos[1]],
+                [width, height],
+                rotation,
+                runner.corner,
+            )
+        };
+        if world {
+            geometry.dst[0] += FIELD_X;
+            geometry.dst[1] += FIELD_Y;
+        }
+        let cmd = DrawCmd {
             tex: self.player_tex,
-            dst: [
-                FIELD_X + pos[0] - if runner.corner { 0.0 } else { width / 2.0 },
-                FIELD_Y + pos[1] - if runner.corner { 0.0 } else { height / 2.0 },
-                width,
-                height,
-            ],
+            dst: geometry.dst,
             src: [u0, v0, u1, v1],
             tint: [
                 runner.color[0],
@@ -3956,9 +4502,24 @@ impl Stage {
                 runner.alpha,
             ],
             // Draw2/Draw3 work in D3D's Y-up world before its screen projection.
-            rot: -rotation,
+            rot: geometry.rotation,
             additive: runner.additive,
             color_add: false,
+            clip: None,
+            depth: Some(DepthState {
+                z: if world {
+                    crate::sprite_geometry::world_depth(z)
+                } else {
+                    crate::sprite_geometry::screen_depth(z)
+                },
+                test: DepthTest::LessEqual,
+                write: !runner.z_write_disable,
+            }),
+        };
+        Some(if world {
+            self.project_world_cmd(cmd, z, self.draw_arcade)
+        } else {
+            cmd
         })
     }
 
@@ -3969,7 +4530,14 @@ impl Stage {
             } else {
                 shot.runner.rotation
             };
-            if let Some(cmd) = self.player_sprite_cmd(&shot.runner, shot.pos, rotation) {
+            let z = if collided {
+                0.4
+            } else if shot.bt == 3 && shot.age > 0 {
+                0.44
+            } else {
+                0.495
+            };
+            if let Some(cmd) = self.player_sprite_cmd(&shot.runner, shot.pos, rotation, true, z) {
                 cmds.push(cmd);
             }
         }
@@ -4002,31 +4570,55 @@ impl Stage {
         }
         Some(DrawCmd {
             tex: self.player_tex,
-            dst: [cx - w / 2.0, cy - h / 2.0, w, h],
+            dst: crate::sprite_geometry::screen_rotated(
+                [cx + self.arcade[0] - FIELD_X, cy + self.arcade[1] - FIELD_Y],
+                [w, h],
+                rot,
+                r.corner,
+            )
+            .dst,
             src: [u0, sy / th, u1, (sy + sp.height) / th],
             tint: [r.color[0], r.color[1], r.color[2], r.alpha],
             rot: -rot,
             additive: r.additive,
             color_add: false,
+            clip: None,
+            depth: Some(DepthState {
+                z: 0.0,
+                test: DepthTest::LessEqual,
+                write: !r.z_write_disable,
+            }),
         })
     }
 
-    fn draw(&self) -> Vec<DrawCmd> {
+    pub(crate) fn draw(&self) -> Vec<DrawCmd> {
         let mut cmds = Vec::with_capacity(96 + self.world.bullets.len());
-        if self.background.is_some() {
-            // The 3D background fills the field; only dim it during spells.
-            if self.spell_active {
-                cmds.push(rect(
-                    [FIELD_X, FIELD_Y, FIELD_W, FIELD_H],
-                    [0.0, 0.0, 0.05, 0.45],
-                ));
-            }
-        } else {
-            let base = if self.spell_active { 0.02 } else { 0.07 };
+        if self.background.is_none() {
             cmds.push(rect(
                 [FIELD_X, FIELD_Y, FIELD_W, FIELD_H],
-                [base, base * 0.6, base * 0.9, 1.0],
+                [0.07, 0.042, 0.063, 1.0],
             ));
+        }
+        // Stage_OnDrawLowPrio fades the live 3D stage to black for60ticks,
+        // then draws the stage-specific effects ANM in the screen viewport.
+        if self.spell_active {
+            if self.spell_background_ticks <= 60 {
+                cmds.push(rect(
+                    [FIELD_X, FIELD_Y, FIELD_W, FIELD_H],
+                    [
+                        0.0,
+                        0.0,
+                        0.0,
+                        (self.spell_background_ticks * 255 / 60) as f32 / 255.0,
+                    ],
+                ));
+            }
+            if let Some(asset) = &self.spell_background
+                && let Some(runner) = &self.spell_background_runner
+                && let Some(command) = screen_asset_cmd(asset, runner)
+            {
+                cmds.push(command);
+            }
         }
 
         self.draw_player_shots(false, &mut cmds);
@@ -4181,12 +4773,12 @@ impl Stage {
                     && self.invuln % 8 < 2;
                 cmds.push(DrawCmd {
                     tex: self.player_tex,
-                    dst: [
-                        FIELD_X + self.pos[0] - sp.width * scale[0] / 2.0,
-                        FIELD_Y + self.pos[1] - sp.height * scale[1] / 2.0,
-                        sp.width * scale[0],
-                        sp.height * scale[1],
-                    ],
+                    dst: crate::sprite_geometry::screen(
+                        [self.arcade[0] + self.pos[0], self.arcade[1] + self.pos[1]],
+                        [sp.width * scale[0], sp.height * scale[1]],
+                        false,
+                    )
+                    .dst,
                     src: [u0, sp.y / pth, u1, (sp.y + sp.height) / pth],
                     tint: if flash {
                         [64.0 / 255.0, 64.0 / 255.0, 64.0 / 255.0, alpha]
@@ -4196,13 +4788,24 @@ impl Stage {
                     rot: 0.0,
                     additive,
                     color_add: flash,
+                    clip: None,
+                    depth: Some(DepthState {
+                        z: crate::sprite_geometry::screen_depth(0.49),
+                        test: DepthTest::LessEqual,
+                        write: !self.player_runner.z_write_disable,
+                    }),
                 });
             }
             if self.orb_state != OrbState::Hidden
-                && matches!(self.state, PlayerState::Alive | PlayerState::Cleared(_))
+                && matches!(
+                    self.state,
+                    PlayerState::Alive | PlayerState::Cleared(_) | PlayerState::Results
+                )
             {
                 for (orb, runner) in self.orb_positions().into_iter().zip(&self.orb_runners) {
-                    if let Some(cmd) = self.player_sprite_cmd(runner, orb, runner.rotation) {
+                    if let Some(cmd) =
+                        self.player_sprite_cmd(runner, orb, runner.rotation, false, 0.491)
+                    {
                         cmds.push(cmd);
                     }
                 }
@@ -4237,8 +4840,9 @@ impl Stage {
                     ey + sv.pos_offset[1],
                     rot,
                     sv.additive,
+                    0.495,
                 ) {
-                    cmds.push(cmd);
+                    cmds.push(self.project_world_cmd(cmd, 0.495, self.draw_arcade));
                 }
             };
             for s in 0..4 {
@@ -4256,8 +4860,9 @@ impl Stage {
                     ey + anim.pos_offset[1],
                     rot,
                     anim.additive,
+                    0.494,
                 ) {
-                    cmds.push(cmd);
+                    cmds.push(self.project_world_cmd(cmd, 0.494, self.draw_arcade));
                 }
             }
             for s in 4..8 {
@@ -4270,6 +4875,96 @@ impl Stage {
 
         self.draw_player_shots(true, &mut cmds);
 
+        // Particle effects (etama4) via each effect's ANM runner — death
+        // splashes, item-attract glows, etc., with original additive blending.
+        let [etw, eth] = self.eff_tex_size;
+        for e in self.world.effects.iter().flatten() {
+            let Some(idx) = e.runner.sprite else { continue };
+            let Some(sp) = self.eff_sprites.get(&idx) else {
+                continue;
+            };
+            let src = [
+                sp.x / etw,
+                sp.y / eth,
+                (sp.x + sp.width) / etw,
+                (sp.y + sp.height) / eth,
+            ];
+            let tint = [
+                e.runner.color[0],
+                e.runner.color[1],
+                e.runner.color[2],
+                e.runner.alpha,
+            ];
+            if e.spell_bubble {
+                // Draw3: the bubble lives at a 3D world point. Project its centre
+                // and a half-width/height offset through the stage camera, so the
+                // on-screen size carries the camera's perspective scale.
+                let hw_w = sp.width * e.runner.scale[0].abs() / 2.0;
+                let hh_w = sp.height * e.runner.scale[1].abs() / 2.0;
+                let (Some(c), Some(rx), Some(by)) = (
+                    Background::project_point(e.pos),
+                    Background::project_point([e.pos[0] + hw_w, e.pos[1], e.pos[2]]),
+                    Background::project_point([e.pos[0], e.pos[1] + hh_w, e.pos[2]]),
+                ) else {
+                    continue;
+                };
+                let hw = ((rx[0] - c[0]).powi(2) + (rx[1] - c[1]).powi(2)).sqrt();
+                let hh = ((by[0] - c[0]).powi(2) + (by[1] - c[1]).powi(2)).sqrt();
+                cmds.push(self.project_world_cmd(
+                    DrawCmd {
+                        tex: self.eff_tex,
+                        dst: [
+                            FIELD_X + c[0] + 0.5 - hw,
+                            FIELD_Y + c[1] + 0.5 - hh,
+                            hw * 2.0,
+                            hh * 2.0,
+                        ],
+                        src,
+                        tint,
+                        rot: -e.runner.rotation,
+                        additive: e.runner.additive,
+                        color_add: false,
+                        clip: None,
+                        depth: Some(DepthState {
+                            z: crate::sprite_geometry::world_depth(e.pos[2]),
+                            test: DepthTest::LessEqual,
+                            write: !e.runner.z_write_disable,
+                        }),
+                    },
+                    e.pos[2],
+                    self.draw_arcade,
+                ));
+                continue;
+            }
+            let w = sp.width * e.runner.scale[0].abs();
+            let h = sp.height * e.runner.scale[1].abs();
+            cmds.push(self.project_world_cmd(
+                DrawCmd {
+                    tex: self.eff_tex,
+                    dst: [
+                        FIELD_X + e.pos[0] + 0.5 - w / 2.0,
+                        FIELD_Y + e.pos[1] + 0.5 - h / 2.0,
+                        w,
+                        h,
+                    ],
+                    src,
+                    tint,
+                    rot: -e.runner.rotation,
+                    additive: e.runner.additive,
+                    color_add: false,
+                    clip: None,
+                    depth: Some(DepthState {
+                        z: crate::sprite_geometry::world_depth(e.pos[2]),
+                        test: DepthTest::LessEqual,
+                        write: !e.runner.z_write_disable,
+                    }),
+                },
+                e.pos[2],
+                self.draw_arcade,
+            ));
+        }
+
+        let laser_start = cmds.len();
         let [tw, th] = self.bullet_tex_size;
         // Laser ANM dimensions and state are computed before advancing the
         // clock, just as BulletManager::OnUpdate/OnDraw. The base glow remains
@@ -4299,6 +4994,12 @@ impl Stage {
                     rot: laser.angle - std::f32::consts::FRAC_PI_2,
                     additive: true,
                     color_add: false,
+                    clip: None,
+                    depth: Some(DepthState {
+                        z: crate::sprite_geometry::world_depth(0.0),
+                        test: DepthTest::Always,
+                        write: true,
+                    }),
                 });
             }
             if (laser.start_offset < 16.0 || laser.speed == 0.0)
@@ -4330,15 +5031,27 @@ impl Stage {
                     rot: 0.0,
                     additive: true,
                     color_add: false,
+                    clip: None,
+                    depth: Some(DepthState {
+                        z: crate::sprite_geometry::world_depth(0.0),
+                        test: DepthTest::Always,
+                        write: true,
+                    }),
                 });
             }
+        }
+
+        for command in &mut cmds[laser_start..] {
+            *command = self.project_world_cmd(*command, 0.0, self.draw_arcade);
         }
 
         // Items (etama3 sprites 0..6, index = item kind). Point-bullet items
         // (kind 6) fall back to the point-item sprite if the sheet lacks one.
         let [btw, bth] = self.bullet_tex_size;
         for it in &self.items {
-            let sp = match self.bullet_sprites.get(&(it.kind as u32)) {
+            let indicator = it.pos[1] < -8.0;
+            let index = it.kind as u32 + if indicator { 7 } else { 0 };
+            let sp = match self.bullet_sprites.get(&index) {
                 Some(sp) => sp,
                 None if it.kind == 6 => match self.bullet_sprites.get(&1) {
                     Some(sp) => sp,
@@ -4348,89 +5061,44 @@ impl Stage {
             };
             cmds.push(DrawCmd {
                 tex: TEX_BULLET,
-                dst: [
-                    FIELD_X + it.pos[0] - sp.width / 2.0,
-                    FIELD_Y + it.pos[1] - sp.height / 2.0,
-                    sp.width,
-                    sp.height,
-                ],
+                dst: crate::sprite_geometry::screen(
+                    [
+                        self.arcade[0] + it.pos[0],
+                        self.arcade[1] + if indicator { 8.0 } else { it.pos[1] },
+                    ],
+                    [sp.width, sp.height],
+                    false,
+                )
+                .dst,
                 src: [
                     sp.x / btw,
                     sp.y / bth,
                     (sp.x + sp.width) / btw,
                     (sp.y + sp.height) / bth,
                 ],
-                tint: [1.0, 1.0, 1.0, 1.0],
+                tint: [
+                    1.0,
+                    1.0,
+                    1.0,
+                    if indicator {
+                        (255 - ((8.0 - it.pos[1]) * 255.0 / 128.0) as i32).max(64) as f32 / 255.0
+                    } else {
+                        1.0
+                    },
+                ],
                 rot: 0.0,
                 additive: false,
                 color_add: false,
+                clip: None,
+                depth: Some(DepthState {
+                    z: crate::sprite_geometry::screen_depth(0.01),
+                    test: DepthTest::Always,
+                    write: true,
+                }),
             });
         }
 
-        // Particle effects (etama4) via each effect's ANM runner — death
-        // splashes, item-attract glows, etc., with original additive blending.
-        let [etw, eth] = self.eff_tex_size;
-        for e in self.world.effects.iter().flatten() {
-            let Some(idx) = e.runner.sprite else { continue };
-            let Some(sp) = self.eff_sprites.get(&idx) else {
-                continue;
-            };
-            let src = [
-                sp.x / etw,
-                sp.y / eth,
-                (sp.x + sp.width) / etw,
-                (sp.y + sp.height) / eth,
-            ];
-            let tint = [
-                e.color[0],
-                e.color[1],
-                e.color[2],
-                e.runner.alpha * e.color[3],
-            ];
-            if e.spell_bubble {
-                // Draw3: the bubble lives at a 3D world point. Project its centre
-                // and a half-width/height offset through the stage camera, so the
-                // on-screen size carries the camera's perspective scale.
-                let hw_w = sp.width * e.runner.scale[0].abs() / 2.0;
-                let hh_w = sp.height * e.runner.scale[1].abs() / 2.0;
-                let (Some(c), Some(rx), Some(by)) = (
-                    Background::project_point(e.pos),
-                    Background::project_point([e.pos[0] + hw_w, e.pos[1], e.pos[2]]),
-                    Background::project_point([e.pos[0], e.pos[1] + hh_w, e.pos[2]]),
-                ) else {
-                    continue;
-                };
-                let hw = ((rx[0] - c[0]).powi(2) + (rx[1] - c[1]).powi(2)).sqrt();
-                let hh = ((by[0] - c[0]).powi(2) + (by[1] - c[1]).powi(2)).sqrt();
-                cmds.push(DrawCmd {
-                    tex: self.eff_tex,
-                    dst: [FIELD_X + c[0] - hw, FIELD_Y + c[1] - hh, hw * 2.0, hh * 2.0],
-                    src,
-                    tint,
-                    rot: e.runner.rotation,
-                    additive: e.runner.additive,
-                    color_add: false,
-                });
-                continue;
-            }
-            let w = sp.width * e.runner.scale[0].abs();
-            let h = sp.height * e.runner.scale[1].abs();
-            cmds.push(DrawCmd {
-                tex: self.eff_tex,
-                dst: [
-                    FIELD_X + e.pos[0] - w / 2.0,
-                    FIELD_Y + e.pos[1] - h / 2.0,
-                    w,
-                    h,
-                ],
-                src,
-                tint,
-                rot: e.runner.rotation,
-                additive: e.runner.additive,
-                color_add: false,
-            });
-        }
-
+        let bullet_start = cmds.len();
         // BulletManager draws the original size/type groups in four passes.
         // Spawn and cancellation states select their own ANM, not the bullet's
         // normal sprite; huge bubbles use etama4 rather than etama3.
@@ -4490,52 +5158,74 @@ impl Stage {
                 }
                 cmds.push(DrawCmd {
                     tex,
-                    dst: [
-                        FIELD_X + bullet.pos[0] - width / 2.0,
-                        FIELD_Y + bullet.pos[1] - height / 2.0,
-                        width,
-                        height,
-                    ],
+                    dst: {
+                        let mut dst = crate::sprite_geometry::world(
+                            bullet.pos,
+                            [width, height],
+                            -rotation,
+                            false,
+                            0.0,
+                        )
+                        .dst;
+                        dst[0] += FIELD_X;
+                        dst[1] += FIELD_Y;
+                        dst
+                    },
                     src,
                     tint: [1.0, 1.0, 1.0, visual.map_or(1.0, |runner| runner.alpha)],
                     rot: rotation,
                     additive: visual.is_some_and(|runner| runner.additive),
                     color_add: false,
+                    clip: None,
+                    depth: Some(DepthState {
+                        z: crate::sprite_geometry::world_depth(0.0),
+                        test: DepthTest::Always,
+                        write: !visual.is_some_and(|runner| runner.z_write_disable),
+                    }),
                 });
             }
         }
 
+        for command in &mut cmds[bullet_start..] {
+            *command = self.project_world_cmd(*command, 0.0, self.draw_arcade);
+        }
+        // RHW and absolute stage sprites share the old viewport's clipping,
+        // even though RHW positions already include the newer arcade origin.
+        for command in &mut cmds {
+            command.clip = Some(self.draw_arcade.map(|value| value as u32));
+        }
+
+        // AsciiManager::DrawPopupsWithHwVertexProcessing resets the viewport
+        // to the current arcade region without rebuilding the neutral camera.
+        let gui_start = cmds.len();
         if let Some(asset) = &self.pause_asset {
             self.score_popups
                 .draw(&mut cmds, &asset.entry, asset.tex, [FIELD_X, FIELD_Y]);
         }
+        for command in &mut cmds[gui_start..] {
+            *command = self.project_world_cmd(*command, 0.1, self.arcade);
+        }
 
+        // Queued ASCII (isGui=0) is later drawn fullscreen, unlike the nearby
+        // portrait/name VMs which inherit Ascii's current arcade viewport.
+        let boss_timer_start = cmds.len();
         // Boss attack timer at the field top-right, "%.2d" coloured by seconds
         // left (Gui.cpp:1007-1037, COLOR1-4).
-        if let Some(secs) = self
-            .enemies
-            .iter()
-            .find(|e| e.is_boss && e.occupied)
-            .and_then(|e| e.spell_seconds_left())
-        {
-            let secs = secs.min(99);
-            let tint = if secs >= 20 {
+        if self.boss_ui_visible() {
+            let secs = self.spell_secs.min(99);
+            let mut tint = if self.spell_secs >= 20 {
                 [0.627, 0.816, 1.0, 1.0] // COLOR1 0xa0d0ff
-            } else if secs >= 10 {
+            } else if self.spell_secs >= 10 {
                 [0.627, 0.502, 1.0, 1.0] // COLOR2 0xa080ff
-            } else if secs >= 5 {
+            } else if self.spell_secs >= 5 {
                 [0.878, 0.502, 0.753, 1.0] // COLOR3 0xe080c0
             } else {
                 [1.0, 0.251, 0.251, 1.0] // COLOR4 0xff4040
             };
-            draw_text(
-                &mut cmds,
-                [FIELD_X + FIELD_W - 28.0, FIELD_Y + 8.0],
-                16.0,
-                tint,
-                &format!("{secs:02}"),
-            );
+            tint[3] = self.hud.boss_opacity();
+            draw_text(&mut cmds, [384.0, 16.0], 16.0, tint, &format!("{secs:02}"));
         }
+        let boss_timer_end = cmds.len();
 
         if let Some(banner) = &self.bomb_banner
             && let Some(runner) = &banner.portrait
@@ -4562,23 +5252,88 @@ impl Stage {
             self.draw_spell_banner(runner, tex, self.spell_name_byte_len, false, &mut cmds);
         }
 
-        // Stage-name intro (text.anm script 0): the STD stage title, lower-left,
-        // fading with the VM. The VM pos is playfield-relative; y follows it.
+        // Gui::DrawStageElements draws the fixed text sprite through Draw2,
+        // then queues the ASCII stage label at absolute screen coordinates.
+        let mut stage_label_range = 0..0;
         if let Some(r) = &self.stage_name_runner
             && r.visible()
             && let Some((slot, tw, th)) = self.stage_name_tex
         {
-            let x = FIELD_X + 24.0;
-            let y = FIELD_Y + r.pos[1].max(0.0);
-            cmds.push(DrawCmd {
-                tex: slot,
-                dst: [x, y, tw, th],
-                src: [0.0, 0.0, 1.0, 1.0],
-                tint: [1.0, 1.0, 1.0, r.alpha],
-                rot: 0.0,
-                additive: false,
-                color_add: false,
-            });
+            let geometry = crate::sprite_geometry::world(
+                [r.pos[0] + r.pos_offset[0], r.pos[1] + r.pos_offset[1]],
+                [tw * r.scale[0], th * r.scale[1]],
+                r.rotation,
+                r.corner,
+                0.0,
+            );
+            let mut dst = geometry.dst;
+            dst[0] += FIELD_X;
+            dst[1] += FIELD_Y;
+            if !self.attract_demo {
+                cmds.push(self.project_world_cmd(
+                    DrawCmd {
+                        tex: slot,
+                        dst,
+                        src: [0.0, 0.0, 1.0, 1.0],
+                        tint: [1.0, 1.0, 1.0, r.alpha],
+                        rot: geometry.rotation,
+                        additive: r.additive,
+                        color_add: r.color_add,
+                        clip: None,
+                        depth: None,
+                    },
+                    0.0,
+                    self.arcade,
+                ));
+            }
+            let (x, label) = if self.attract_demo {
+                (136.0, " DEMO PLAY".to_string())
+            } else {
+                match self.stage_num {
+                    6 => (136.0, "FINAL STAGE".to_string()),
+                    7 => (136.0, "EXTRA STAGE".to_string()),
+                    stage => (168.0, format!("STAGE {stage}")),
+                }
+            };
+            stage_label_range.start = cmds.len();
+            draw_num(
+                &mut cmds,
+                [x, 198.0],
+                [1.0, 1.0, 64.0 / 255.0, r.alpha],
+                &label,
+            );
+            stage_label_range.end = cmds.len();
+        }
+        if let Some(r) = &self.song_name_runner
+            && !self.attract_demo
+            && r.visible()
+            && let Some(&(slot, tw, th)) = self.song_name_tex.get(self.song_name_index)
+        {
+            let geometry = crate::sprite_geometry::world(
+                [r.pos[0] + r.pos_offset[0], r.pos[1] + r.pos_offset[1]],
+                [tw * r.scale[0], th * r.scale[1]],
+                r.rotation,
+                r.corner,
+                0.0,
+            );
+            let mut dst = geometry.dst;
+            dst[0] += FIELD_X;
+            dst[1] += FIELD_Y;
+            cmds.push(self.project_world_cmd(
+                DrawCmd {
+                    tex: slot,
+                    dst,
+                    src: [0.0, 0.0, 1.0, 1.0],
+                    tint: [1.0, 1.0, 1.0, r.alpha],
+                    rot: geometry.rotation,
+                    additive: r.additive,
+                    color_add: r.color_add,
+                    clip: None,
+                    depth: None,
+                },
+                0.0,
+                self.arcade,
+            ));
         }
 
         // Gui draws the original portrait VMs and the dialogue box even before
@@ -4593,7 +5348,12 @@ impl Stage {
             for y in 0..height.ceil() as u32 {
                 let alpha = (208.0 - 64.0 * y as f32 / height.max(1.0)) / 255.0;
                 cmds.push(rect(
-                    [80.0, 384.0 + y as f32, 288.0, 1.0f32.min(height - y as f32)],
+                    [
+                        self.arcade[0] + (self.arcade[2] - 256.0) / 2.0 - 16.0,
+                        384.0 + y as f32,
+                        288.0,
+                        1.0f32.min(height - y as f32),
+                    ],
                     [0.0, 0.0, 0.0, alpha],
                 ));
             }
@@ -4617,16 +5377,26 @@ impl Stage {
             }
         }
 
-        // ScreenEffect shake: the 2D playfield rides the arcade region's
-        // top-left (a translate). Everything pushed so far is field-relative;
-        // the HUD (draw_hud, absolute 640x480) is appended after and stays put.
-        let dx = self.arcade[0] - FIELD_X;
-        let dy = self.arcade[1] - FIELD_Y;
-        if dx != 0.0 || dy != 0.0 {
-            for c in &mut cmds {
-                c.dst[0] += dx;
-                c.dst[1] += dy;
-            }
+        // Gui::DrawStageElements draws loading.anm after portraits and names.
+        // Once it stops, the stage chain leaves the existing color buffer intact.
+        if let Some(asset) = &self.loading_asset
+            && let Some(runner) = &self.loading_runner
+            && let Some(command) = screen_asset_cmd(asset, runner)
+        {
+            cmds.push(command);
+        }
+
+        // Portraits, names, loading and dialogue use absolute RHW positions.
+        // Gui::DrawGameScene later resets the viewport to the full screen.
+        for command in &mut cmds[gui_start..] {
+            command.clip = Some(self.arcade.map(|value| value as u32));
+        }
+        // AsciiManager::OnDraw changes viewport per queued string.isGui.
+        for command in &mut cmds[boss_timer_start..boss_timer_end] {
+            command.clip = None;
+        }
+        for command in &mut cmds[stage_label_range] {
+            command.clip = None;
         }
 
         self.draw_hud(&mut cmds);
@@ -4667,7 +5437,7 @@ impl Stage {
         {
             if self.lives < 8 {
                 self.lives += 1;
-                self.events.push(Event::SfxIdx(28));
+                self.events.push(Event::ScoreExtend);
             }
             self.next_extend += 1;
             self.world.increase_subrank(200);
@@ -4678,30 +5448,41 @@ impl Stage {
     /// Ease the boss health bar toward the boss's life fraction (Gui
     /// bossHealthBar2 toward bossHealthBar1): up 0.01/frame, down 0.02/frame.
     fn roll_boss_bar(&mut self) {
-        let target = self
-            .enemies
-            .iter()
-            .find(|e| e.is_boss && e.occupied)
-            .map(|b| (b.life.max(0) as f32 / b.max_life.max(1) as f32).clamp(0.0, 1.0));
-        match target {
-            Some(t) => {
-                if self.boss_bar < t {
-                    self.boss_bar = (self.boss_bar + 0.01).min(t);
-                } else if self.boss_bar > t {
-                    self.boss_bar = (self.boss_bar - 0.02).max(t);
-                }
+        if self.hud.boss_state() == 0 {
+            self.boss_bar = 0.0;
+        } else if self.hud.boss_state() >= 2 && !self.dialogue.active {
+            let target = self.boss_bar_target;
+            if self.boss_bar < target {
+                self.boss_bar = (self.boss_bar + 0.01).min(target);
+            } else if self.boss_bar > target {
+                self.boss_bar = (self.boss_bar - 0.02).max(target);
             }
-            None => self.boss_bar = 0.0,
         }
+    }
+
+    fn boss_ui_visible(&self) -> bool {
+        !self.dialogue.active && (self.world.boss_present || self.hud.boss_state() != 0)
     }
 
     /// Boss UI over the field (Gui::DrawGameScene): the front.anm health bar,
     /// the remaining-attack count, the spellcard timer, and the spell name.
-    /// Positions are the decomp's arcade-region coords plus the field origin.
+    /// These GUI sprites use absolute XYZRHW screen coordinates, even while
+    /// the foreground viewport is active; its origin must not be added again.
+    /// Gui::DrawGameScene requests the warning once when its displayed second
+    /// changes below ten. Keep this on the single pre-calculation draw pass.
+    pub fn take_draw_sound(&mut self) -> Option<u8> {
+        if !self.boss_ui_visible() {
+            return None;
+        }
+        let warning = self.spell_secs < 10 && self.last_drawn_spell_secs != self.spell_secs;
+        self.last_drawn_spell_secs = self.spell_secs;
+        warning.then_some(29)
+    }
+
     fn draw_boss_ui(&self, cmds: &mut Vec<DrawCmd>) {
-        let Some(boss) = self.enemies.iter().find(|e| e.is_boss && e.occupied) else {
+        if !self.boss_ui_visible() {
             return;
-        };
+        }
 
         let ts = self.hud.tex_size();
 
@@ -4710,8 +5491,8 @@ impl Stage {
             cmds.push(DrawCmd {
                 tex: self.hud.tex(),
                 dst: [
-                    FIELD_X + pos[0] - sw * scale[0] / 2.0,
-                    FIELD_Y + pos[1] - sh * scale[1] / 2.0,
+                    pos[0] - sw * scale[0] / 2.0,
+                    pos[1] - sh * scale[1] / 2.0,
                     sw * scale[0],
                     sh * scale[1],
                 ],
@@ -4720,40 +5501,36 @@ impl Stage {
                 rot: 0.0,
                 additive: false,
                 color_add: false,
+                clip: Some(self.arcade.map(|value| value as u32)),
+                depth: None,
             });
         }
 
-        // Health bar (script 21): top-left anchored at field (96, 24), width
+        // Health bar (script 21): top-left anchored at screen (96, 24), width
         // `bossHealthBar2 * 288` (the decomp's scaleX*14), keeping the script's
         // own scaleY (0.3 -> ~4px tall) and fade-in alpha.
         if let Some(([sx, sy, sw, sh], _, scale, alpha)) = self.hud.script_state(21) {
             cmds.push(DrawCmd {
                 tex: self.hud.tex(),
-                dst: [
-                    FIELD_X + 96.0,
-                    FIELD_Y + 24.0,
-                    self.boss_bar * 288.0,
-                    sh * scale[1],
-                ],
+                dst: [96.0, 24.0, self.boss_bar * 288.0, sh * scale[1]],
                 src: [sx / ts, sy / ts, (sx + sw) / ts, (sy + sh) / ts],
                 tint: [1.0, 1.0, 1.0, alpha],
                 rot: 0.0,
                 additive: false,
                 color_add: false,
+                clip: Some(self.arcade.map(|value| value as u32)),
+                depth: None,
             });
         }
 
-        // Remaining-attack count (eclSetLives) at field (80, 16), yellow.
+        // Remaining-attack count (eclSetLives) at screen (80, 16), yellow.
         // (The spell timer and name banner are drawn by the field pass.)
-        if boss.spell_count > 0 {
-            draw_text(
-                cmds,
-                [FIELD_X + 76.0, FIELD_Y + 12.0],
-                14.0,
-                [1.0, 1.0, 0.5, 1.0],
-                &boss.spell_count.to_string(),
-            );
-        }
+        draw_num(
+            cmds,
+            [80.0, 16.0],
+            [1.0, 1.0, 128.0 / 255.0, self.hud.boss_opacity()],
+            &self.boss_lives.to_string(),
+        );
     }
 
     fn draw_hud(&self, cmds: &mut Vec<DrawCmd>) {
@@ -4808,7 +5585,7 @@ impl Stage {
         }
 
         // Power bar: the decomp's gradient quad, width = currentPower px
-        // (Gui.cpp:1152-1198), 0xe0e0e0 -> 0x80e0e0. Drawn as the 2x1 gradient
+        // (Gui.cpp:1152-1198), ARGB 0xe0e0e0ff -> 0x80e0e0ff. Drawn as the 2x1 gradient
         // texture sampled at its texel centres (0.25..0.75) so the endpoints are
         // exact and the GPU linearly interpolates between them. Then the MAX
         // sprite (vms[18]) at full, else the numeric value, both at (496,186).
@@ -4822,6 +5599,8 @@ impl Stage {
                 rot: 0.0,
                 additive: false,
                 color_add: false,
+                clip: None,
+                depth: None,
             });
         }
         if power >= 128 {
@@ -4834,6 +5613,7 @@ impl Stage {
         draw_num(cmds, [vx, 206.0], val, &format!("{}", self.graze));
         draw_num(cmds, [vx, 226.0], val, &format!("{}", self.point_items));
 
+        let clipped_popup_start = cmds.len();
         // "Full Power Mode!!" popup (Gui.cpp:185-190,908-922): pale blue, slides
         // in from the right edge to x=104 over 30 frames, shown 180 frames.
         if self.full_power_timer > 0 {
@@ -4884,6 +5664,11 @@ impl Stage {
             );
         }
 
+        // Gui::OnDraw marks these popup strings isGui=1; AsciiManager clips
+        // them to arcadeRegion. Ordinary HUD/boss/results strings stay full.
+        for command in &mut cmds[clipped_popup_start..] {
+            command.clip = Some(self.arcade.map(|value| value as u32));
+        }
         self.draw_boss_ui(cmds);
 
         match self.state {
@@ -4909,7 +5694,11 @@ impl Stage {
                     cmds,
                     [x, FIELD_Y + 112.0],
                     [1.0, 1.0, 0.251, 1.0],
-                    "Stage Clear",
+                    if self.stage_num >= 6 {
+                        "All Clear!"
+                    } else {
+                        "Stage Clear"
+                    },
                 );
                 draw_num(
                     cmds,
@@ -4935,15 +5724,40 @@ impl Stage {
                     [1.0, 0.502, 0.502, 1.0],
                     &format!("    * Point Item {:3}", self.point_items),
                 );
+                // Gui::OnDraw uses the one-based currentStage >= 6 for the
+                // final stock bonus rows; finishedStage leaves Player alive.
+                let mut rank_y = FIELD_Y + 224.0;
+                if self.stage_num >= 6 {
+                    draw_num(
+                        cmds,
+                        [x, FIELD_Y + 208.0],
+                        [1.0, 1.0, 128.0 / 255.0, 1.0],
+                        &format!("Player    = {:8}", self.lives as i64 * 3_000_000),
+                    );
+                    draw_num(
+                        cmds,
+                        [x, FIELD_Y + 224.0],
+                        [1.0, 1.0, 128.0 / 255.0, 1.0],
+                        &format!("Bomb      = {:8}", self.bombs as i64 * 1_000_000),
+                    );
+                    rank_y += 32.0;
+                }
+                draw_num(cmds, [x, rank_y], [1.0, 0.502, 0.502, 1.0], diff_text);
+                let mut total_y = rank_y + 16.0;
+                if self.world.difficulty < Difficulty::Extra as u8 && !self.practice {
+                    let penalty = match self.starting_lives {
+                        3 => Some("Player Penalty * 0.5"),
+                        4 => Some("Player Penalty * 0.2"),
+                        _ => None,
+                    };
+                    if let Some(penalty) = penalty {
+                        draw_num(cmds, [x, total_y], [1.0, 0.502, 0.502, 1.0], penalty);
+                        total_y += 16.0;
+                    }
+                }
                 draw_num(
                     cmds,
-                    [x, FIELD_Y + 224.0],
-                    [1.0, 0.502, 0.502, 1.0],
-                    diff_text,
-                );
-                draw_num(
-                    cmds,
-                    [x, FIELD_Y + 240.0],
+                    [x, total_y],
                     [1.0, 1.0, 1.0, 1.0],
                     &format!("Total     = {:8}", self.clear_bonus),
                 );
@@ -4990,6 +5804,8 @@ impl Stage {
                     rot: 0.0,
                     additive: false,
                     color_add: false,
+                    clip: None,
+                    depth: None,
                 });
             }
         }
@@ -5039,7 +5855,7 @@ fn stage_clear_bonus(
     s - s % 10
 }
 
-/// Draw HUD numbers/text with the original AsciiManager metrics: a 15px glyph
+/// Draw HUD numbers/text with the original AsciiManager metrics: a 16px glyph
 /// advancing 14px per character (`charWidth = 14 * scale.x`, AsciiManager.cpp).
 fn draw_num(cmds: &mut Vec<DrawCmd>, pos: [f32; 2], tint: [f32; 4], text: &str) {
     draw_num_scaled(cmds, pos, 1.0, tint, text);
@@ -5054,20 +5870,26 @@ fn draw_num_scaled(cmds: &mut Vec<DrawCmd>, pos: [f32; 2], scale: f32, tint: [f3
         if (0x21..=0x7e).contains(&c) {
             let idx = c - 0x20;
             let (col, row) = ((idx % 16) as f32, (idx / 16 + 2) as f32);
-            let e = 0.5 / 256.0;
             cmds.push(DrawCmd {
                 tex: TEX_ASCII,
-                dst: [x.round(), pos[1].round(), 15.0 * scale, 15.0 * scale],
+                dst: [
+                    x.round_ties_even(),
+                    pos[1].round_ties_even(),
+                    16.0 * scale,
+                    16.0 * scale,
+                ],
                 src: [
-                    col * 16.0 / 256.0 + e,
-                    row * 16.0 / 256.0 + e,
-                    (col + 1.0) * 16.0 / 256.0 - e,
-                    (row + 1.0) * 16.0 / 256.0 - e,
+                    col * 16.0 / 256.0,
+                    row * 16.0 / 256.0,
+                    (col + 1.0) * 16.0 / 256.0,
+                    (row + 1.0) * 16.0 / 256.0,
                 ],
                 tint,
                 rot: 0.0,
                 additive: false,
                 color_add: false,
+                clip: None,
+                depth: None,
             });
         }
         x += 14.0 * scale;
@@ -5084,25 +5906,24 @@ pub fn draw_text(cmds: &mut Vec<DrawCmd>, pos: [f32; 2], size: f32, tint: [f32; 
             // Glyph grid: rows 0-1 hold kanji counters/labels, ASCII printable
             // starts at row 2 (space at 0x20).
             let (col, row) = ((idx % 16) as f32, (idx / 16 + 2) as f32);
-            // Inset by half a texel so linear filtering does not bleed the
-            // neighbouring glyph cell at the exact boundary.
-            let e = 0.5 / 256.0;
             cmds.push(DrawCmd {
                 tex: TEX_ASCII,
-                dst: [x.round(), pos[1].round(), size, size],
+                dst: [x.round_ties_even(), pos[1].round_ties_even(), size, size],
                 src: [
-                    col * 16.0 / 256.0 + e,
-                    row * 16.0 / 256.0 + e,
-                    (col + 1.0) * 16.0 / 256.0 - e,
-                    (row + 1.0) * 16.0 / 256.0 - e,
+                    col * 16.0 / 256.0,
+                    row * 16.0 / 256.0,
+                    (col + 1.0) * 16.0 / 256.0,
+                    (row + 1.0) * 16.0 / 256.0,
                 ],
                 tint,
                 rot: 0.0,
                 additive: false,
                 color_add: false,
+                clip: None,
+                depth: None,
             });
         }
-        x += size * 0.75;
+        x += size * 14.0 / 16.0;
     }
 }
 
@@ -5115,12 +5936,293 @@ fn rect(dst: [f32; 4], tint: [f32; 4]) -> DrawCmd {
         rot: 0.0,
         additive: false,
         color_add: false,
+        clip: None,
+        depth: None,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bomb_portrait_created_by_player_ticks_in_same_calculation_gui_phase() {
+        let mut s = stage(Difficulty::Normal, false, 1, 3);
+        s.state = PlayerState::Alive;
+        s.player_sprites.insert(
+            0,
+            Sprite {
+                index: 0,
+                x: 0.0,
+                y: 0.0,
+                width: 32.0,
+                height: 32.0,
+            },
+        );
+        let script = vec![
+            AnmInstr {
+                time: 0,
+                opcode: 1,
+                args: 0_u32.to_le_bytes().to_vec(),
+                offset: 0,
+            },
+            AnmInstr {
+                time: 1,
+                opcode: 11,
+                args: [0.25_f32.to_le_bytes(), 0.25_f32.to_le_bytes()].concat(),
+                offset: 8,
+            },
+        ];
+        s.bomb_banner = Some(BombBanner {
+            name_script: script.clone(),
+            portrait_script: script,
+            textures: [(0, 0); 4],
+            name: None,
+            portrait: None,
+        });
+        s.update(&Input::from_buttons(2, 0));
+        let portrait = s.bomb_banner.as_ref().unwrap().portrait.as_ref().unwrap();
+        assert_eq!(portrait.scale, [1.25; 2]);
+        assert_eq!(s.bombs_used, 1);
+    }
+
+    #[test]
+    fn screen_shake_latches_projected_viewport_but_rhw_and_gui_keep_source_spaces() {
+        let mut s = stage(Difficulty::Normal, false, 6, 3);
+        s.state = PlayerState::Alive;
+        s.player_sprites.insert(
+            0,
+            Sprite {
+                index: 0,
+                x: 0.0,
+                y: 0.0,
+                width: 32.0,
+                height: 32.0,
+            },
+        );
+        let mut name = AnmRunner::new(vec![AnmInstr {
+            time: 0,
+            opcode: 1,
+            args: 0_u32.to_le_bytes().to_vec(),
+            offset: 0,
+        }]);
+        name.pos = [224.0, 80.0];
+        s.stage_name_runner = Some(name.clone());
+        s.stage_name_tex = Some((998, 256.0, 16.0));
+        s.world.boss_present = true;
+        s.full_power_timer = 180;
+        s.spell_name_runner = Some(name);
+        s.spell_name_cur = Some((999, 256.0, 16.0));
+        s.spell_name_byte_len = 12;
+        s.prepare_draw_camera();
+        // The next ScreenEffect callback shifts/shrinks arcadeRegion. Source
+        // GameManager's earlier viewport is DWORD, Player RHW positions are
+        // rounded after adding the new floating origin, and Gui's name is
+        // absolute (Gui::DrawStageElements), with Ascii's new viewport clip.
+        s.arcade = [51.75, 35.75, 364.25, 428.25];
+        let commands = s.draw();
+        let player = commands
+            .iter()
+            .find(|cmd| {
+                cmd.depth
+                    .is_some_and(|d| d.z == crate::sprite_geometry::screen_depth(0.49))
+            })
+            .unwrap();
+        assert_eq!(player.dst, [228.0, 404.0, 32.0, 32.0]);
+        assert_eq!(player.clip, Some([32, 16, 384, 448]));
+        let name = commands.iter().find(|cmd| cmd.tex == 999).unwrap();
+        assert_eq!(name.dst, [96.0, 72.0, 256.0, 16.0]);
+        assert_eq!(name.clip, Some([51, 35, 364, 428]));
+        let fullscreen_ascii: Vec<_> = commands
+            .iter()
+            .filter(|cmd| cmd.tex == TEX_ASCII && (cmd.dst[1] == 16.0 || cmd.dst[1] == 198.0))
+            .collect();
+        assert!(fullscreen_ascii.len() >= 3);
+        assert!(fullscreen_ascii.iter().all(|cmd| cmd.clip.is_none()));
+        let popup = commands
+            .iter()
+            .find(|cmd| cmd.tex == TEX_ASCII && cmd.dst[0] == 640.0 && cmd.dst[1] == 232.0)
+            .unwrap();
+        assert_eq!(popup.clip, Some([51, 35, 364, 428]));
+        let world = s.project_world_cmd(
+            rect([124.0, 208.0, 16.0, 16.0], [1.0; 4]),
+            0.0,
+            s.draw_arcade,
+        );
+        assert_eq!(world.dst, [124.0, 208.0, 16.0, 16.0]);
+        // The following GameManager calculation latches that shake, before
+        // ScreenEffect ends it. Draw2 now keeps the old shifted viewport even
+        // though Player/GUI have returned to the baseline arcade region.
+        s.prepare_draw_camera();
+        s.arcade = [FIELD_X, FIELD_Y, FIELD_W, FIELD_H];
+        let world = s.project_world_cmd(
+            rect([124.0, 208.0, 16.0, 16.0], [1.0; 4]),
+            0.0,
+            s.draw_arcade,
+        );
+        assert_eq!(world.dst, [143.0, 227.0, 16.0, 16.0]);
+        assert_eq!(world.clip, Some([51, 35, 364, 428]));
+        let commands = s.draw();
+        let player = commands
+            .iter()
+            .find(|cmd| {
+                cmd.depth
+                    .is_some_and(|d| d.z == crate::sprite_geometry::screen_depth(0.49))
+            })
+            .unwrap();
+        assert_eq!(player.dst, [208.0, 384.0, 32.0, 32.0]);
+        assert_eq!(player.clip, Some([51, 35, 364, 428]));
+        let name = commands.iter().find(|cmd| cmd.tex == 999).unwrap();
+        assert_eq!(name.dst, [96.0, 72.0, 256.0, 16.0]);
+        assert_eq!(name.clip, Some([32, 16, 384, 448]));
+    }
+
+    #[test]
+    fn clear_award_saves_real_score_without_advancing_displayed_high_score() {
+        let mut s = stage(Difficulty::Lunatic, false, 6, 2);
+        s.state = PlayerState::Results;
+        s.score = 100;
+        s.gui_score = 100;
+        s.hiscore = 100;
+        s.lives = 3;
+        s.bombs = 0;
+        s.clear_bonus_pending = true;
+        s.player_sprites.insert(
+            0,
+            Sprite {
+                index: 0,
+                x: 0.0,
+                y: 0.0,
+                width: 32.0,
+                height: 32.0,
+            },
+        );
+        s.update(&Input::default());
+        assert!(s.score > 100);
+        assert_eq!(s.gui_score, 100);
+        assert_eq!(s.hiscore, 100);
+        assert!(
+            s.events
+                .iter()
+                .any(|event| matches!(event, Event::SaveScore(value) if *value == s.score))
+        );
+        s.update(&Input::default());
+        assert!(s.gui_score > 100 && s.gui_score < s.score);
+        assert_eq!(s.hiscore, s.gui_score);
+    }
+
+    #[test]
+    fn final_results_show_original_stock_penalty_rows_and_player_options() {
+        let mut s = stage(Difficulty::Lunatic, false, 6, 4);
+        s.state = PlayerState::Results;
+        s.lives = 3;
+        s.bombs = 0;
+        s.clear_bonus = 123456;
+        s.player_sprites.insert(
+            0,
+            Sprite {
+                index: 0,
+                x: 0.0,
+                y: 0.0,
+                width: 32.0,
+                height: 32.0,
+            },
+        );
+        s.orb_state = OrbState::Unfocused;
+        for orb in &mut s.orb_runners {
+            *orb = AnmRunner::new(vec![
+                AnmInstr {
+                    time: 0,
+                    opcode: 1,
+                    args: 0_u32.to_le_bytes().to_vec(),
+                    offset: 0,
+                },
+                AnmInstr {
+                    time: 0,
+                    opcode: 15,
+                    args: Vec::new(),
+                    offset: 8,
+                },
+            ]);
+        }
+        let commands = s.draw();
+        // Decode emitted ascii glyphs, independently checking the source's
+        // published strings and row positions rather than just a helper.
+        let row = |y: f32| -> String {
+            commands
+                .iter()
+                .filter(|cmd| {
+                    cmd.tex == TEX_ASCII
+                        && cmd.dst[1] == y
+                        && cmd.dst[0] >= 74.0
+                        && cmd.dst[0] < 488.0
+                })
+                .map(|cmd| {
+                    let col = (cmd.src[0] * 16.0) as u32;
+                    let row = (cmd.src[1] * 16.0) as u32;
+                    char::from_u32((row - 2) * 16 + col + 0x20).unwrap()
+                })
+                .collect()
+        };
+        assert_eq!(row(128.0), "AllClear!");
+        assert_eq!(row(224.0), "Player=9000000");
+        assert_eq!(row(240.0), "Bomb=0");
+        assert_eq!(row(272.0), "LunaticRank*1.5");
+        assert_eq!(row(288.0), "PlayerPenalty*0.5");
+        assert_eq!(row(304.0), "Total=123456");
+        assert_eq!(
+            commands
+                .iter()
+                .filter(|cmd| cmd
+                    .depth
+                    .is_some_and(|d| d.z == crate::sprite_geometry::screen_depth(0.491)))
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn boss_ui_and_warning_survive_enemy_removal_even_with_empty_health_bar() {
+        let mut s = stage(Difficulty::Normal, false, 1, 3);
+        let instr = |time, opcode, args: Vec<u8>| th06_formats::anm0::Instr {
+            time,
+            opcode,
+            args,
+            offset: 0,
+        };
+        let front = Entry {
+            width: 256,
+            height: 256,
+            format: 1,
+            name: String::new(),
+            alpha_name: None,
+            sprites: Vec::new(),
+            scripts: vec![
+                (19, vec![instr(61, 15, Vec::new())]),
+                (20, vec![instr(61, 15, Vec::new())]),
+            ],
+        };
+        s.hud = Hud::new(&front, 0);
+        s.world.boss_present = true;
+        s.hud.tick_boss(true, false);
+        s.world.events.push(WorldEvent::BossLifeCount(0));
+        s.drain_world_events();
+        assert_eq!(s.boss_lives, 0);
+        s.world.boss_present = false;
+        s.enemies.clear();
+        s.boss_bar = 0.0;
+        s.hud.tick_boss(false, false);
+        s.spell_secs = 8;
+        assert!(s.boss_ui_visible());
+        assert_eq!(s.take_draw_sound(), Some(29));
+        assert_eq!(s.take_draw_sound(), None);
+        for _ in 0..60 {
+            s.hud.tick_boss(false, false);
+        }
+        assert!(!s.boss_ui_visible());
+        s.spell_secs = 7;
+        assert_eq!(s.take_draw_sound(), None);
+    }
 
     fn stage(difficulty: Difficulty, practice: bool, number: i32, lives: i32) -> Stage {
         let entry = Entry {
@@ -5630,6 +6732,21 @@ mod tests {
     }
 
     #[test]
+    fn stage_bonus_display_keeps_item_pickup_active() {
+        let mut s = stage(Difficulty::Normal, false, 1, 3);
+        s.state = PlayerState::Results;
+        s.spawn_item(Item::homing(s.pos, 6));
+        s.update_items();
+        assert!(s.items.is_empty());
+        assert!(s.score > 0);
+        assert!(matches!(s.state, PlayerState::Results));
+        s.state = PlayerState::Dead(0);
+        s.spawn_item(Item::fall(s.pos, 1));
+        s.update_items();
+        assert_eq!(s.items.len(), 1, "dead players still cannot collect");
+    }
+
+    #[test]
     fn cropped_shake_region_removes_missed_item_at_sixteen_pixel_margin() {
         let mut s = stage(Difficulty::Normal, false, 1, 3);
         s.arcade[3] = 442.0;
@@ -5707,6 +6824,76 @@ mod tests {
             }
         }
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn spawned_enemy_primary_sprite_is_available_before_first_bounds_and_beam_damage() {
+        // Real Extra/MarisaB replay frame3741: a32px enemy enters at y=-14.
+        // Original SpawnEnemy already executed ANMSETMAIN, so both long beams
+        // touch its hitbox on this first EnemyManager callback (+20score).
+        let mut s = stage(Difficulty::Extra, false, 7, 3);
+        s.ecl.data = [
+            10000i32.to_le_bytes().to_vec(),
+            0i16.to_le_bytes().to_vec(),
+            12i16.to_le_bytes().to_vec(),
+            vec![0; 4],
+        ]
+        .concat();
+        s.enemy_scripts.insert(
+            0,
+            ScriptRef {
+                tex: 0,
+                tex_size: [32.0; 2],
+                instrs: vec![
+                    AnmInstr {
+                        time: 0,
+                        opcode: 1,
+                        args: 0u32.to_le_bytes().to_vec(),
+                        offset: 0,
+                    },
+                    AnmInstr {
+                        time: 0,
+                        opcode: 21,
+                        args: Vec::new(),
+                        offset: 8,
+                    },
+                ],
+                sprites: HashMap::from([(
+                    0,
+                    Sprite {
+                        index: 0,
+                        x: 0.0,
+                        y: 0.0,
+                        width: 32.0,
+                        height: 32.0,
+                    },
+                )]),
+            },
+        );
+        let mut enemy = Enemy::default();
+        enemy.pool_index = 0;
+        enemy.pos = [192.0, -14.0, 0.0];
+        enemy.anm_script = 0;
+        enemy.anm_dirty = true;
+        enemy.hitbox = [28.0; 2]; // Extra sub4 ECL opcode103
+        enemy.damageable = false;
+        enemy.life = 500;
+        s.insert_enemy(enemy);
+        for (slot, x) in [184.75, 200.75].into_iter().enumerate() {
+            let mut shot = attack_shot();
+            shot.pool_index = slot;
+            shot.pos = [x, 173.0];
+            shot.size = [20.0, 352.0];
+            shot.bt = 3;
+            shot.damage = 6;
+            s.shots.push(shot);
+        }
+        assert_eq!(s.anims[0].as_ref().unwrap().sprite, Some(0));
+        s.update_enemies();
+        assert_eq!(s.enemies[0].pos[1], -14.0);
+        assert_eq!(s.enemies[0].life, 500);
+        assert_eq!(s.score, 20);
+        assert_eq!(s.player_particle_timer, 2);
     }
 
     #[test]
@@ -5885,6 +7072,49 @@ mod tests {
                 .iter()
                 .any(|event| matches!(event, Event::GameOver(_)))
         );
+    }
+
+    #[test]
+    fn last_frame_deathbomb_retains_short_window_until_a_real_respawn() {
+        // Real Lunatic replay: bomb296 retains respawnTimer1; the next hit696
+        // commits the death697, rather than starting another six-frame window.
+        let mut s = stage(Difficulty::Lunatic, false, 1, 3);
+        s.update_player_lifecycle(&Input::default());
+        s.invuln = 0;
+        s.register_hit();
+        for _ in 0..5 {
+            s.update_player_lifecycle(&Input::default());
+        }
+        assert_eq!(s.player_respawn_timer, 1);
+        s.update_player_lifecycle(&Input::from_buttons(2, 0));
+        assert_eq!(s.player_respawn_timer, 1);
+        assert!(matches!(s.state, PlayerState::Alive));
+        s.end_bomb();
+        s.invuln = 0;
+        s.world.power = 32;
+        s.register_hit();
+        assert_eq!((s.dying, s.player_respawn_timer), (1, 1));
+        assert_eq!(s.laser_timers, [2; 2]);
+        s.update_player_lifecycle(&Input::default());
+        assert_eq!((s.dying, s.world.power, s.items.len()), (0, 16, 6));
+    }
+
+    #[test]
+    fn game_over_trigger_finishes_player_shot_callback() {
+        // Player::OnUpdate sets isInRetryMenu but returns CONTINUE, including
+        // its remaining shot/ANM work. The real frame1074 pools separately
+        // verify that EnemyManager also finishes this calculation chain.
+        let mut s = stage(Difficulty::Lunatic, false, 1, 1);
+        s.state = PlayerState::Dead(30);
+        s.dying = 0;
+        s.player_respawn_timer = 0;
+        let mut shot = attack_shot();
+        shot.pos = [300.0; 2];
+        s.shots.push(shot);
+        assert!(s.update_player_lifecycle(&Input::default()));
+        assert!(matches!(s.state, PlayerState::GameOver));
+        assert_eq!(s.shots[0].age, 1);
+        assert_eq!(s.shots[0].pos, [302.0, 288.0]);
     }
 
     #[test]
@@ -6157,6 +7387,45 @@ mod tests {
         assert_eq!(points.len(), 5);
         assert_eq!(bonus, 2000);
         assert_eq!(s.world.bullets[0].despawn_timer, 5);
+
+        // Original DespawnBullets allocates origin/segments for each laser
+        // before visiting the next one. This affects ItemManager fixed slots.
+        s.world.lasers[0].state = 1;
+        s.world.lasers.push(Laser {
+            in_use: true,
+            pos: [200.0, 300.0],
+            start_offset: 0.0,
+            end_offset: 33.0,
+            state: 1,
+            angle: 0.0,
+            speed: 0.0,
+            start_length: 33.0,
+            width: 8.0,
+            start_time: 0,
+            duration: 20,
+            despawn_duration: 16,
+            hitbox_start: 0,
+            hitbox_end: 0,
+            flags: 0,
+            script: 9,
+            draw_width: 8.0,
+            draw_alpha: 1.0,
+            timer: 0,
+            color: 0,
+        });
+        let (points, _) = s.world.despawn_bullets_for_bonus(true);
+        assert_eq!(
+            &points[1..],
+            &[
+                [10.0, 20.0],
+                [26.0, 20.0],
+                [58.0, 20.0],
+                [90.0, 20.0],
+                [200.0, 300.0],
+                [200.0, 300.0],
+                [232.0, 300.0],
+            ]
+        );
     }
 
     #[test]
@@ -6542,6 +7811,22 @@ mod tests {
                         stages: std::array::from_fn(|_| None),
                     };
                     replay.stages[(number - 1) as usize] = Some(initial);
+                    if let Some(directory) = std::env::var_os("TH06_SCENARIO_OUTPUT") {
+                        let path = std::path::Path::new(&directory)
+                            .join(format!("replay-c{shot}-d{}-s{number}", difficulty as u8));
+                        std::fs::create_dir_all(&path).unwrap();
+                        std::fs::write(path.join("input.rpy"), replay.encode()).unwrap();
+                        // This records an automated test with Die disabled, not
+                        // a human run. The original executable must independently
+                        // accept this T6RP and reach its MSG end before comparison
+                        // can certify any reference coverage.
+                        let state = replay.stages[(number - 1) as usize].as_ref().unwrap();
+                        std::fs::write(path.join("input-provenance.json"), format!(
+                            "{{\"id\":\"replay-c{shot}-d{}-s{number}\",\"kind\":\"synthetic-original-format-replay\",\"god\":true,\"stage\":{number},\"character\":{shot},\"difficulty\":{},\"generator_frames\":{},\"seed\":{},\"power\":{},\"lives\":{},\"bombs\":{},\"rank\":{},\"expected_checkpoint\":\"original-msg-stage-end\"}}\n",
+                            difficulty as u8, difficulty as u8, traces.len(), state.random_seed,
+                            state.power, state.lives, state.bombs, state.rank,
+                        )).unwrap();
+                    }
                     let roundtrip = Replay::parse(&replay.encode()).unwrap();
                     let state = roundtrip.stages[(number - 1) as usize].as_ref().unwrap();
                     let mut playback = original_stage(&base, difficulty, number, character);
@@ -6885,5 +8170,19 @@ mod tests {
         extra.gui_score = 9_999_990;
         extra.roll_gui_score();
         assert_eq!(extra.lives, 2);
+    }
+
+    #[test]
+    fn score_extend_and_item_life_have_distinct_callback_tags() {
+        let mut s = stage(Difficulty::Normal, false, 1, 3);
+        s.events.clear(); // Exclude the separate stage-entry BGM request.
+        s.score = 10_000_000;
+        s.gui_score = 9_999_990;
+        s.roll_gui_score();
+        s.collect_item(5, [192.0, 384.0]);
+        assert!(matches!(
+            s.events.as_slice(),
+            [Event::ScoreExtend, Event::SfxIdx(28)]
+        ));
     }
 }
