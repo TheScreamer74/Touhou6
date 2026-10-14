@@ -1,0 +1,297 @@
+{
+  "publication": {
+    "status": "published",
+    "version": "community-20261014-747d6d7cbed0",
+    "code_commit": "352966da3d33fab59913dc0fdd7caac401220e25",
+    "release": "/home/ubuntu/touhou6-web/releases/community-20261014-747d6d7cbed0",
+    "previous_release": "/home/ubuntu/touhou6-web/releases/fidelity-20261014-autostart-0cb6025d5b09",
+    "public_symlink": "/home/ubuntu/Touhou6-Mac/web/th06",
+    "checksums": {
+      "assets.json": "fc984c13068f28eb52f8ac51e3e0d1517b6dcc5a691eb2ecbcb7e850120b9ca9",
+      "build.json": "9a1fbab66ca7b16e3dfa5d606ba1e618668efb4555d6a33de4d71731dac48fef",
+      "index.html": "0560bd846c232d2f9e6b0ee6d56091ee7e4e560bfa236b983a44a66a26d0e619",
+      "midi-worklet.js": "5e77d3d3f65a0b1efb2af6fa1eb5203fafca92cee8157c4e14cfa094598bd39b",
+      "pkg/th06.js": "0f23f49855875a141dc4e74ce68343ba2b386f6c104185e2df41df1797e91b26",
+      "pkg/th06_bg.wasm": "747d6d7cbed03bed4cf7c78666c44da20d869d9fceb7127d900d399cf2ab1b69"
+    },
+    "archive_sha256": "8ed6e1d14fc9cd7afc1b85748c9c8fcef689f8d2d833b7416e7f8e80cd2fb13d",
+    "source_archive": "/home/ubuntu/touhou6-web/source/touhou6-352966da3d33-source.tar.gz",
+    "source_archive_sha256": "2916c92013579297db38d003d8cce0a73bb7fc5f9a502f416b7bb596661cfa68",
+    "assets_reused_from": "/home/ubuntu/touhou6-web/releases/fidelity-20261012-3ac820702f24/assets",
+    "staged_utc": "2026-10-14T13:49:18.346620+00:00",
+    "published_utc": "2026-10-14T13:58:04.907644+00:00",
+    "publication": "atomic symlink replacement; previous release retained"
+  },
+  "https_verification": {
+    "observed_utc": "2026-10-14T13:59:07.395152+00:00",
+    "passed": true,
+    "tls_verification": "certifi CA bundle; certificate and hostname validation enabled",
+    "requests": [
+      {
+        "path": "/th06/assets.json",
+        "method": "GET",
+        "status": 200,
+        "content_type": "application/json",
+        "content_length": "977",
+        "bytes": 977,
+        "sha256": "fc984c13068f28eb52f8ac51e3e0d1517b6dcc5a691eb2ecbcb7e850120b9ca9"
+      },
+      {
+        "path": "/th06/build.json",
+        "method": "GET",
+        "status": 200,
+        "content_type": "application/json",
+        "content_length": "379",
+        "bytes": 379,
+        "sha256": "9a1fbab66ca7b16e3dfa5d606ba1e618668efb4555d6a33de4d71731dac48fef"
+      },
+      {
+        "path": "/th06/",
+        "method": "GET",
+        "status": 200,
+        "content_type": "text/html",
+        "content_length": "16781",
+        "bytes": 16781,
+        "sha256": "0560bd846c232d2f9e6b0ee6d56091ee7e4e560bfa236b983a44a66a26d0e619"
+      },
+      {
+        "path": "/th06/midi-worklet.js?v=community-20261014-747d6d7cbed0",
+        "method": "GET",
+        "status": 200,
+        "content_type": "text/javascript",
+        "content_length": "4873",
+        "bytes": 4873,
+        "sha256": "5e77d3d3f65a0b1efb2af6fa1eb5203fafca92cee8157c4e14cfa094598bd39b"
+      },
+      {
+        "path": "/th06/pkg/th06.js?v=community-20261014-747d6d7cbed0",
+        "method": "GET",
+        "status": 200,
+        "content_type": "text/javascript",
+        "content_length": "144405",
+        "bytes": 144405,
+        "sha256": "0f23f49855875a141dc4e74ce68343ba2b386f6c104185e2df41df1797e91b26"
+      },
+      {
+        "path": "/th06/pkg/th06_bg.wasm?v=community-20261014-747d6d7cbed0",
+        "method": "GET",
+        "status": 200,
+        "content_type": "application/wasm",
+        "content_length": "10181205",
+        "bytes": 10181205,
+        "sha256": "747d6d7cbed03bed4cf7c78666c44da20d869d9fceb7127d900d399cf2ab1b69"
+      },
+      {
+        "path": "/th06/assets/TL.DAT",
+        "method": "HEAD",
+        "status": 200,
+        "content_type": "application/octet-stream",
+        "content_length": "1040706"
+      },
+      {
+        "path": "/th06/assets/CM.DAT",
+        "method": "HEAD",
+        "status": 200,
+        "content_type": "application/octet-stream",
+        "content_length": "935275"
+      },
+      {
+        "path": "/th06/assets/ST.DAT",
+        "method": "HEAD",
+        "status": 200,
+        "content_type": "application/octet-stream",
+        "content_length": "2964458"
+      },
+      {
+        "path": "/th06/assets/IN.DAT",
+        "method": "HEAD",
+        "status": 200,
+        "content_type": "application/octet-stream",
+        "content_length": "760223"
+      },
+      {
+        "path": "/th06/assets/ED.DAT",
+        "method": "HEAD",
+        "status": 200,
+        "content_type": "application/octet-stream",
+        "content_length": "2017777"
+      },
+      {
+        "path": "/th06/assets/MD.DAT",
+        "method": "HEAD",
+        "status": 200,
+        "content_type": "application/octet-stream",
+        "content_length": "306003"
+      },
+      {
+        "path": "/th06/assets/th06e_ST.DAT",
+        "method": "HEAD",
+        "status": 200,
+        "content_type": "application/octet-stream",
+        "content_length": "2966623"
+      },
+      {
+        "path": "/th06/assets/th06_01.ogg",
+        "method": "HEAD",
+        "status": 200,
+        "content_type": "audio/ogg",
+        "content_length": "1426998"
+      },
+      {
+        "path": "/th06/assets/th06_02.ogg",
+        "method": "HEAD",
+        "status": 200,
+        "content_type": "audio/ogg",
+        "content_length": "1894069"
+      },
+      {
+        "path": "/th06/assets/th06_03.ogg",
+        "method": "HEAD",
+        "status": 200,
+        "content_type": "audio/ogg",
+        "content_length": "1241998"
+      },
+      {
+        "path": "/th06/assets/th06_04.ogg",
+        "method": "HEAD",
+        "status": 200,
+        "content_type": "audio/ogg",
+        "content_length": "1837627"
+      },
+      {
+        "path": "/th06/assets/th06_05.ogg",
+        "method": "HEAD",
+        "status": 200,
+        "content_type": "audio/ogg",
+        "content_length": "1895712"
+      },
+      {
+        "path": "/th06/assets/th06_06.ogg",
+        "method": "HEAD",
+        "status": 200,
+        "content_type": "audio/ogg",
+        "content_length": "2997905"
+      },
+      {
+        "path": "/th06/assets/th06_07.ogg",
+        "method": "HEAD",
+        "status": 200,
+        "content_type": "audio/ogg",
+        "content_length": "2276786"
+      },
+      {
+        "path": "/th06/assets/th06_08.ogg",
+        "method": "HEAD",
+        "status": 200,
+        "content_type": "audio/ogg",
+        "content_length": "2558014"
+      },
+      {
+        "path": "/th06/assets/th06_09.ogg",
+        "method": "HEAD",
+        "status": 200,
+        "content_type": "audio/ogg",
+        "content_length": "2960106"
+      },
+      {
+        "path": "/th06/assets/th06_10.ogg",
+        "method": "HEAD",
+        "status": 200,
+        "content_type": "audio/ogg",
+        "content_length": "3815498"
+      },
+      {
+        "path": "/th06/assets/th06_11.ogg",
+        "method": "HEAD",
+        "status": 200,
+        "content_type": "audio/ogg",
+        "content_length": "1872080"
+      },
+      {
+        "path": "/th06/assets/th06_12.ogg",
+        "method": "HEAD",
+        "status": 200,
+        "content_type": "audio/ogg",
+        "content_length": "1221653"
+      },
+      {
+        "path": "/th06/assets/th06_13.ogg",
+        "method": "HEAD",
+        "status": 200,
+        "content_type": "audio/ogg",
+        "content_length": "3586160"
+      },
+      {
+        "path": "/th06/assets/th06_14.ogg",
+        "method": "HEAD",
+        "status": 200,
+        "content_type": "audio/ogg",
+        "content_length": "3533892"
+      },
+      {
+        "path": "/th06/assets/th06_15.ogg",
+        "method": "HEAD",
+        "status": 200,
+        "content_type": "audio/ogg",
+        "content_length": "2918100"
+      },
+      {
+        "path": "/th06/assets/th06_16.ogg",
+        "method": "HEAD",
+        "status": 200,
+        "content_type": "audio/ogg",
+        "content_length": "1124706"
+      },
+      {
+        "path": "/th06/assets/th06_17.ogg",
+        "method": "HEAD",
+        "status": 200,
+        "content_type": "audio/ogg",
+        "content_length": "2390664"
+      },
+      {
+        "path": "/th06/assets/gm.sf2",
+        "method": "HEAD",
+        "status": 200,
+        "content_type": "application/octet-stream",
+        "content_length": "5969788"
+      },
+      {
+        "path": "/th04/",
+        "method": "HEAD",
+        "status": 200,
+        "content_type": "text/html",
+        "content_length": "7128"
+      },
+      {
+        "path": "/",
+        "method": "HEAD",
+        "status": 200,
+        "content_type": "text/html",
+        "content_length": "4097"
+      }
+    ],
+    "metadata": {
+      "version": "community-20261014-747d6d7cbed0",
+      "code_commit": "352966da3d33fab59913dc0fdd7caac401220e25",
+      "runtime_source_sha256": "6228662cfa1e48c3be9fd7ce5ae91817dcf66a8ff5ecd544bba9d1fe9a2b8d19",
+      "native_sha256": "a3d609cf1ed745fe92e662906bd085d46c1725c467034169a96a4338dbfd24bd",
+      "wasm_sha256": "747d6d7cbed03bed4cf7c78666c44da20d869d9fceb7127d900d399cf2ab1b69"
+    }
+  },
+  "firefox_game_smoke": {
+    "passed": true,
+    "url": "https://games.blackoutburst.com/th06/",
+    "browser": "Firefox native via CUA",
+    "automatic_launch_and_attract_gameplay": true,
+    "title_seven_entries_without_exit": true,
+    "title_text_legible": true,
+    "saved_original_language_preference_preserved": true,
+    "saves_cleared": false,
+    "preferences_changed": false,
+    "console_dom_inspected": false,
+    "full_game_playthrough": false,
+    "published_tab_left_open": true,
+    "temporary_preview_closed_and_server_stopped": true
+  }
+}

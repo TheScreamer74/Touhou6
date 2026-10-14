@@ -4,7 +4,16 @@ The port uses the original game data and matching decompilation as its source
 of behavior. Focused binary observations, reference comparisons and runtime
 checks have different scopes; none is a whole-game equivalence proof.
 
-## Final frozen-build validation — 2026-10-14
+## Current port extensions — 2026-10-14
+
+The published extension build uses runtime commit `352966da`, native `a3d609cf`
+and WASM `747d6d7c`. Its language, hitbox, text-composition and browser-menu
+checks are recorded separately in the
+[extension receipt](extension-validation-2026-10-14.json). It has not rerun the
+complete original-executable campaign below. That campaign's passing simulation
+and audio results, and failing strict image results, retain their earlier hashes.
+
+## Earlier frozen fidelity campaign — 2026-10-14
 
 The final native binary `33050887`, WASM `0cb6025d` and source manifest
 `b94dcce4` share the full hashes recorded in the

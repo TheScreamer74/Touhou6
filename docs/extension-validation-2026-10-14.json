@@ -1,0 +1,256 @@
+{
+  "schema": 1,
+  "observed_utc": "2026-10-14T14:03:46.861618+00:00",
+  "build": {
+    "version": "community-20261014-747d6d7cbed0",
+    "code_commit": "352966da3d33fab59913dc0fdd7caac401220e25",
+    "runtime_source_sha256": "6228662cfa1e48c3be9fd7ce5ae91817dcf66a8ff5ecd544bba9d1fe9a2b8d19",
+    "native_sha256": "a3d609cf1ed745fe92e662906bd085d46c1725c467034169a96a4338dbfd24bd",
+    "wasm_sha256": "747d6d7cbed03bed4cf7c78666c44da20d869d9fceb7127d900d399cf2ab1b69"
+  },
+  "scope": "Requested port extensions; bounded game checks, not a new whole-game original-executable or strict pixel/PCM equivalence campaign.",
+  "source_provenance": {
+    "runtime_files_match_final_manifest": 73,
+    "manifest": "extension-runtime-sources-2026-10-14.json",
+    "runtime_source_unchanged_since_build": true,
+    "test_log_sha256": {
+      "final-exit-font-tests.log": "ffe2b0d6461fb632a14ab0b48dc6ec84a373bd7aa9183384aed18c91cf2cdacb",
+      "final-python-tests.log": "cba1e464149f41fe537af74ca09c0ac2b954f1e32d1fb5ee497baa686aa7bfb9",
+      "final-clippy.log": "3bcb25c8c2c713cf6aab456985cc37137b689458f5acb090d722182539d003fa",
+      "final-fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "checks": {
+    "rust": {
+      "passed": 154,
+      "ignored": 30,
+      "failed": 0,
+      "command": "cargo test --workspace"
+    },
+    "python": {
+      "passed": 82,
+      "failed": 0,
+      "command": "python3 -m unittest discover -s scripts -p 'test_*.py'"
+    },
+    "clippy": {
+      "passed": true,
+      "command": "cargo clippy --workspace --all-targets -- -D warnings"
+    },
+    "format": {
+      "passed": true,
+      "command": "cargo fmt --all -- --check"
+    },
+    "localization": {
+      "receipt": "localization-reference-2026-10-14.json",
+      "current_catalog_hashes_match": true,
+      "required_unique_keys": 1386,
+      "catalog_keys_per_language": 1535,
+      "languages": [
+        "fr",
+        "en",
+        "de",
+        "nl"
+      ],
+      "missing": 0,
+      "invalid_utf8": 0
+    }
+  },
+  "native_options": {
+    "binary_sha256": "a3d609cf1ed745fe92e662906bd085d46c1725c467034169a96a4338dbfd24bd",
+    "updates": 520,
+    "screenshots": 12,
+    "languages": [
+      "ja",
+      "fr",
+      "en",
+      "de",
+      "nl"
+    ],
+    "hitbox_modes": [
+      "off",
+      "focus",
+      "always"
+    ],
+    "original_preferences_preserved": true,
+    "native_title_retains_exit": true
+  },
+  "native_stage_probes": {
+    "stage": 1,
+    "updates_per_probe": 120,
+    "seed": "0x1234",
+    "focus_held": true,
+    "probes": 6,
+    "hitbox_differences": [
+      {
+        "compared_with_off": "focus",
+        "difference_bbox": [
+          220,
+          396,
+          228,
+          404
+        ]
+      },
+      {
+        "compared_with_off": "always",
+        "difference_bbox": [
+          220,
+          396,
+          228,
+          404
+        ]
+      }
+    ],
+    "scope": "Six bounded stage-1 probes; not six complete stage playthroughs."
+  },
+  "native_capture_sha256": [
+    {
+      "case": "release-options",
+      "file": "update_frame000040.png",
+      "sha256": "9dc3244338489c5ac7d9221eef18986fa5876ff237860a6dfcf6b5cee7339c18"
+    },
+    {
+      "case": "release-options",
+      "file": "update_frame000095.png",
+      "sha256": "dd527e38a501f235a52cfb7ed6550307b156942d4d79595edc3c1b2e372068e3"
+    },
+    {
+      "case": "release-options",
+      "file": "update_frame000185.png",
+      "sha256": "0bc3f7e31fca29fd89d9377847cff80a88ee7f5c79d9b6aecf4dd3e81aa1457e"
+    },
+    {
+      "case": "release-options",
+      "file": "update_frame000215.png",
+      "sha256": "a8987fae096e2cc19f760abd66aa5877dce084bc486220ea504e9e371892ac7c"
+    },
+    {
+      "case": "release-options",
+      "file": "update_frame000245.png",
+      "sha256": "57209ec8d341732ab7e0bed9e87783ac4aaed48e3677e6ab6162cec2337a3f19"
+    },
+    {
+      "case": "release-options",
+      "file": "update_frame000275.png",
+      "sha256": "975911dc969fc58a4ace7de2279e35872d8b5504c10eecf780350b14e1e2660a"
+    },
+    {
+      "case": "release-options",
+      "file": "update_frame000305.png",
+      "sha256": "0e0e9d473872bca60b6082a897cad1f621a1fdca059b729ea13eda440af05fdb"
+    },
+    {
+      "case": "release-options",
+      "file": "update_frame000335.png",
+      "sha256": "0bc3f7e31fca29fd89d9377847cff80a88ee7f5c79d9b6aecf4dd3e81aa1457e"
+    },
+    {
+      "case": "release-options",
+      "file": "update_frame000385.png",
+      "sha256": "393b9bc666021466fe907bb361311cd3894c027fdfb96679f3bcc615a9f794e4"
+    },
+    {
+      "case": "release-options",
+      "file": "update_frame000415.png",
+      "sha256": "fec41ac7d6dd7492ac4551fc779974dc3e9eba8b1e2052a5c61192a6720c539c"
+    },
+    {
+      "case": "release-options",
+      "file": "update_frame000445.png",
+      "sha256": "552c6d128605e4a35863dab0d4a7d7dd33e73f804ff090d853333ef442a1b26d"
+    },
+    {
+      "case": "release-options",
+      "file": "update_frame000505.png",
+      "sha256": "ebb71eba3ca31bf472211a5b8c71e9c241e183b4f456572a798675d34756b12b"
+    },
+    {
+      "case": "release-stage-fr-off",
+      "file": "update_frame000120.png",
+      "sha256": "0b757db420729fa0ede3c7397c4a5dc59177e1b4dce45471b3f91c188727c049"
+    },
+    {
+      "case": "release-stage-fr-focus",
+      "file": "update_frame000120.png",
+      "sha256": "962be86736287c655b99d02a303ea8d82f96ada1f8b070f060f0c2dbfa492df6"
+    },
+    {
+      "case": "release-stage-fr-always",
+      "file": "update_frame000120.png",
+      "sha256": "962be86736287c655b99d02a303ea8d82f96ada1f8b070f060f0c2dbfa492df6"
+    },
+    {
+      "case": "release-stage-en-always",
+      "file": "update_frame000120.png",
+      "sha256": "666d02872b87326a7ca09d74e42a3944bb7cb5932a9ff977e9ed6c23aa207b1f"
+    },
+    {
+      "case": "release-stage-de-always",
+      "file": "update_frame000120.png",
+      "sha256": "a7f549c54b9492efe11dad65c2d85bedf1eec1f910ef4cffed05962b68039819"
+    },
+    {
+      "case": "release-stage-nl-always",
+      "file": "update_frame000120.png",
+      "sha256": "9f7bb10eee78dc1df1d762735dd300197a8f5680922dc28ec6ec74bf69c35797"
+    }
+  ],
+  "ending_localization": {
+    "receipt": "ending-localization-validation-2026-10-14.json",
+    "tool_sha256": "1b2d6df0087f852e96f417a6534928e815d2101b3792135f76bee37d92c2d7d9",
+    "cases": 30,
+    "scripts": 6,
+    "languages": 5,
+    "control": "direct END entry, already seen, Z+Skip",
+    "state_music_fade_terminal_equal_to_japanese_port": true,
+    "screenshots": 90,
+    "music_requests": 60,
+    "fade_requests": 60,
+    "scope": "Port language comparison; no new original-executable comparison or PCM capture."
+  },
+  "ending_french_normal_confirmation": {
+    "updates_to_terminal": 31621,
+    "screenshots": 53,
+    "music_requests": 2,
+    "fade_requests": 2,
+    "control": "direct END entry, Z confirmation without Skip",
+    "files": {
+      "state.csv": "9167d709d8ab1b88377eacd7ffdd98458ddfb7e2790e53831b23781c05a4d613",
+      "events.csv": "d1c6a4f5e266775982b945ac0bbff790ed0695c7d2135a5c8351948d0a5ed508",
+      "terminal.txt": "1f1f1177c9d36b2a0fd02ee274b084c7d51d50697e1a85543f7edda29530a488"
+    }
+  },
+  "firefox_game_preview": {
+    "passed": true,
+    "browser": "Firefox native via CUA",
+    "wasm_sha256": "747d6d7cbed03bed4cf7c78666c44da20d869d9fceb7127d900d399cf2ab1b69",
+    "title_seven_entries_without_exit": true,
+    "title_q_and_escape_keep_game_alive": true,
+    "options_keyboard_navigation": true,
+    "corrected_french_and_german_options_visually_legible": true,
+    "external_window_close_restores_canvas_keyboard": true,
+    "native_browser_dom_console_inspected": false,
+    "full_game_browser_playthrough": false
+  },
+  "limitations": [
+    "Catalog coverage is not human linguistic review or an all-frame layout proof.",
+    "Original font rasterization and Windows GS MIDI timbre remain different without user-provided system resources.",
+    "Historical 96-case simulation/audio and failing strict image results retain their own earlier build hashes.",
+    "The conditional external-WAV PCM test can return early without TH06_AUDIO_REFERENCE_DIR; the unit total alone is not a new 34-file PCM proof.",
+    "Ending traces enter END directly and do not prove preceding campaign, result submission or saves."
+  ],
+  "firefox_public_game": {
+    "passed": true,
+    "url": "https://games.blackoutburst.com/th06/",
+    "browser": "Firefox native via CUA",
+    "automatic_launch_and_attract_gameplay": true,
+    "title_seven_entries_without_exit": true,
+    "title_text_legible": true,
+    "saved_original_language_preference_preserved": true,
+    "saves_cleared": false,
+    "preferences_changed": false,
+    "console_dom_inspected": false,
+    "full_game_playthrough": false,
+    "published_tab_left_open": true,
+    "temporary_preview_closed_and_server_stopped": true
+  }
+}

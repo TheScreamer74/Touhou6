@@ -1,0 +1,367 @@
+{
+  "pass_all": true,
+  "scope": "30 ending executions: control states, ordered music/fade events and terminal equal across five port languages; this is not a new original-executable comparison",
+  "ending_tool_sha256": "1b2d6df0087f852e96f417a6534928e815d2101b3792135f76bee37d92c2d7d9",
+  "cases": [
+    {
+      "language": "ja",
+      "shot": 0,
+      "difficulty": 0,
+      "files": {
+        "state.csv": "7436f8cea51fa856f8a023715eea6409a17de7a6ac07351c1adc9653b98c5d27",
+        "events.csv": "c402d2fa8fad01f6e46b4b1f071cc3216098a6869b0eb97da5dfa0c76c6a0872",
+        "terminal.txt": "68ee85f02e72a1d9d2c22581d0083b0ad8209ab8c33a95963374bebab6d16b79"
+      },
+      "terminal": 1470,
+      "images": 3
+    },
+    {
+      "language": "ja",
+      "shot": 2,
+      "difficulty": 0,
+      "files": {
+        "state.csv": "7a66edd9845f124ee5ae10ab364e914e4db5182c9a342b3e575d1ef1e9491233",
+        "events.csv": "c402d2fa8fad01f6e46b4b1f071cc3216098a6869b0eb97da5dfa0c76c6a0872",
+        "terminal.txt": "68ee85f02e72a1d9d2c22581d0083b0ad8209ab8c33a95963374bebab6d16b79"
+      },
+      "terminal": 1470,
+      "images": 3
+    },
+    {
+      "language": "ja",
+      "shot": 0,
+      "difficulty": 1,
+      "files": {
+        "state.csv": "819ae51122cd5155620e488821e125dc22d9f25be7621943b38ed53a5e4ecb91",
+        "events.csv": "b4f12d5c55435be9e7f243e4fa20e41fb475c49a42332c2e9fe2e5fb88be1dd3",
+        "terminal.txt": "bd6b18bf2ee7fb7156a9847953a0ec30d02800d3006431379dbe31044b866a89"
+      },
+      "terminal": 1545,
+      "images": 3
+    },
+    {
+      "language": "ja",
+      "shot": 1,
+      "difficulty": 1,
+      "files": {
+        "state.csv": "9512736b4cba5249117fb52b307aefb1df642a5208a643a7bbe93c30c95eb89c",
+        "events.csv": "32ae383194da02c12bebad63907164bbd6c9aae0a1088ff0942ea8f300414c18",
+        "terminal.txt": "ddfb443c14cd261b21f7ec25ae89ccf648af93164e559af5be9bdd798bf2a4aa"
+      },
+      "terminal": 1544,
+      "images": 3
+    },
+    {
+      "language": "ja",
+      "shot": 2,
+      "difficulty": 1,
+      "files": {
+        "state.csv": "e69a58a8a67e5466613e8cbbbdbcaaf5a0f404bbdb18af199b330d990561db9c",
+        "events.csv": "0f2379722ef56cf025606cfa7c3ae9f11512989e9bca78bc598f1d30a94d79cb",
+        "terminal.txt": "41cdf517e65893586c5d62c62930cc85aea5f1f2294e4cdc5bb846b75e8d7bef"
+      },
+      "terminal": 1567,
+      "images": 3
+    },
+    {
+      "language": "ja",
+      "shot": 3,
+      "difficulty": 1,
+      "files": {
+        "state.csv": "a89a0ba18757e93a4b06d73c8b574d3b0846aec61db387f81fb3844c84db2f58",
+        "events.csv": "cfa50b75b0786af692543bffa68bc51ff90d564bd7307aecfd5f5ddd5c687ec5",
+        "terminal.txt": "b6d22c49b2e4949f904e203ca8461b4c26936aecf511747d8bd530b5a41fd892"
+      },
+      "terminal": 1575,
+      "images": 3
+    },
+    {
+      "language": "fr",
+      "shot": 0,
+      "difficulty": 0,
+      "files": {
+        "state.csv": "7436f8cea51fa856f8a023715eea6409a17de7a6ac07351c1adc9653b98c5d27",
+        "events.csv": "c402d2fa8fad01f6e46b4b1f071cc3216098a6869b0eb97da5dfa0c76c6a0872",
+        "terminal.txt": "68ee85f02e72a1d9d2c22581d0083b0ad8209ab8c33a95963374bebab6d16b79"
+      },
+      "terminal": 1470,
+      "images": 3
+    },
+    {
+      "language": "fr",
+      "shot": 2,
+      "difficulty": 0,
+      "files": {
+        "state.csv": "7a66edd9845f124ee5ae10ab364e914e4db5182c9a342b3e575d1ef1e9491233",
+        "events.csv": "c402d2fa8fad01f6e46b4b1f071cc3216098a6869b0eb97da5dfa0c76c6a0872",
+        "terminal.txt": "68ee85f02e72a1d9d2c22581d0083b0ad8209ab8c33a95963374bebab6d16b79"
+      },
+      "terminal": 1470,
+      "images": 3
+    },
+    {
+      "language": "fr",
+      "shot": 0,
+      "difficulty": 1,
+      "files": {
+        "state.csv": "819ae51122cd5155620e488821e125dc22d9f25be7621943b38ed53a5e4ecb91",
+        "events.csv": "b4f12d5c55435be9e7f243e4fa20e41fb475c49a42332c2e9fe2e5fb88be1dd3",
+        "terminal.txt": "bd6b18bf2ee7fb7156a9847953a0ec30d02800d3006431379dbe31044b866a89"
+      },
+      "terminal": 1545,
+      "images": 3
+    },
+    {
+      "language": "fr",
+      "shot": 1,
+      "difficulty": 1,
+      "files": {
+        "state.csv": "9512736b4cba5249117fb52b307aefb1df642a5208a643a7bbe93c30c95eb89c",
+        "events.csv": "32ae383194da02c12bebad63907164bbd6c9aae0a1088ff0942ea8f300414c18",
+        "terminal.txt": "ddfb443c14cd261b21f7ec25ae89ccf648af93164e559af5be9bdd798bf2a4aa"
+      },
+      "terminal": 1544,
+      "images": 3
+    },
+    {
+      "language": "fr",
+      "shot": 2,
+      "difficulty": 1,
+      "files": {
+        "state.csv": "e69a58a8a67e5466613e8cbbbdbcaaf5a0f404bbdb18af199b330d990561db9c",
+        "events.csv": "0f2379722ef56cf025606cfa7c3ae9f11512989e9bca78bc598f1d30a94d79cb",
+        "terminal.txt": "41cdf517e65893586c5d62c62930cc85aea5f1f2294e4cdc5bb846b75e8d7bef"
+      },
+      "terminal": 1567,
+      "images": 3
+    },
+    {
+      "language": "fr",
+      "shot": 3,
+      "difficulty": 1,
+      "files": {
+        "state.csv": "a89a0ba18757e93a4b06d73c8b574d3b0846aec61db387f81fb3844c84db2f58",
+        "events.csv": "cfa50b75b0786af692543bffa68bc51ff90d564bd7307aecfd5f5ddd5c687ec5",
+        "terminal.txt": "b6d22c49b2e4949f904e203ca8461b4c26936aecf511747d8bd530b5a41fd892"
+      },
+      "terminal": 1575,
+      "images": 3
+    },
+    {
+      "language": "en",
+      "shot": 0,
+      "difficulty": 0,
+      "files": {
+        "state.csv": "7436f8cea51fa856f8a023715eea6409a17de7a6ac07351c1adc9653b98c5d27",
+        "events.csv": "c402d2fa8fad01f6e46b4b1f071cc3216098a6869b0eb97da5dfa0c76c6a0872",
+        "terminal.txt": "68ee85f02e72a1d9d2c22581d0083b0ad8209ab8c33a95963374bebab6d16b79"
+      },
+      "terminal": 1470,
+      "images": 3
+    },
+    {
+      "language": "en",
+      "shot": 2,
+      "difficulty": 0,
+      "files": {
+        "state.csv": "7a66edd9845f124ee5ae10ab364e914e4db5182c9a342b3e575d1ef1e9491233",
+        "events.csv": "c402d2fa8fad01f6e46b4b1f071cc3216098a6869b0eb97da5dfa0c76c6a0872",
+        "terminal.txt": "68ee85f02e72a1d9d2c22581d0083b0ad8209ab8c33a95963374bebab6d16b79"
+      },
+      "terminal": 1470,
+      "images": 3
+    },
+    {
+      "language": "en",
+      "shot": 0,
+      "difficulty": 1,
+      "files": {
+        "state.csv": "819ae51122cd5155620e488821e125dc22d9f25be7621943b38ed53a5e4ecb91",
+        "events.csv": "b4f12d5c55435be9e7f243e4fa20e41fb475c49a42332c2e9fe2e5fb88be1dd3",
+        "terminal.txt": "bd6b18bf2ee7fb7156a9847953a0ec30d02800d3006431379dbe31044b866a89"
+      },
+      "terminal": 1545,
+      "images": 3
+    },
+    {
+      "language": "en",
+      "shot": 1,
+      "difficulty": 1,
+      "files": {
+        "state.csv": "9512736b4cba5249117fb52b307aefb1df642a5208a643a7bbe93c30c95eb89c",
+        "events.csv": "32ae383194da02c12bebad63907164bbd6c9aae0a1088ff0942ea8f300414c18",
+        "terminal.txt": "ddfb443c14cd261b21f7ec25ae89ccf648af93164e559af5be9bdd798bf2a4aa"
+      },
+      "terminal": 1544,
+      "images": 3
+    },
+    {
+      "language": "en",
+      "shot": 2,
+      "difficulty": 1,
+      "files": {
+        "state.csv": "e69a58a8a67e5466613e8cbbbdbcaaf5a0f404bbdb18af199b330d990561db9c",
+        "events.csv": "0f2379722ef56cf025606cfa7c3ae9f11512989e9bca78bc598f1d30a94d79cb",
+        "terminal.txt": "41cdf517e65893586c5d62c62930cc85aea5f1f2294e4cdc5bb846b75e8d7bef"
+      },
+      "terminal": 1567,
+      "images": 3
+    },
+    {
+      "language": "en",
+      "shot": 3,
+      "difficulty": 1,
+      "files": {
+        "state.csv": "a89a0ba18757e93a4b06d73c8b574d3b0846aec61db387f81fb3844c84db2f58",
+        "events.csv": "cfa50b75b0786af692543bffa68bc51ff90d564bd7307aecfd5f5ddd5c687ec5",
+        "terminal.txt": "b6d22c49b2e4949f904e203ca8461b4c26936aecf511747d8bd530b5a41fd892"
+      },
+      "terminal": 1575,
+      "images": 3
+    },
+    {
+      "language": "de",
+      "shot": 0,
+      "difficulty": 0,
+      "files": {
+        "state.csv": "7436f8cea51fa856f8a023715eea6409a17de7a6ac07351c1adc9653b98c5d27",
+        "events.csv": "c402d2fa8fad01f6e46b4b1f071cc3216098a6869b0eb97da5dfa0c76c6a0872",
+        "terminal.txt": "68ee85f02e72a1d9d2c22581d0083b0ad8209ab8c33a95963374bebab6d16b79"
+      },
+      "terminal": 1470,
+      "images": 3
+    },
+    {
+      "language": "de",
+      "shot": 2,
+      "difficulty": 0,
+      "files": {
+        "state.csv": "7a66edd9845f124ee5ae10ab364e914e4db5182c9a342b3e575d1ef1e9491233",
+        "events.csv": "c402d2fa8fad01f6e46b4b1f071cc3216098a6869b0eb97da5dfa0c76c6a0872",
+        "terminal.txt": "68ee85f02e72a1d9d2c22581d0083b0ad8209ab8c33a95963374bebab6d16b79"
+      },
+      "terminal": 1470,
+      "images": 3
+    },
+    {
+      "language": "de",
+      "shot": 0,
+      "difficulty": 1,
+      "files": {
+        "state.csv": "819ae51122cd5155620e488821e125dc22d9f25be7621943b38ed53a5e4ecb91",
+        "events.csv": "b4f12d5c55435be9e7f243e4fa20e41fb475c49a42332c2e9fe2e5fb88be1dd3",
+        "terminal.txt": "bd6b18bf2ee7fb7156a9847953a0ec30d02800d3006431379dbe31044b866a89"
+      },
+      "terminal": 1545,
+      "images": 3
+    },
+    {
+      "language": "de",
+      "shot": 1,
+      "difficulty": 1,
+      "files": {
+        "state.csv": "9512736b4cba5249117fb52b307aefb1df642a5208a643a7bbe93c30c95eb89c",
+        "events.csv": "32ae383194da02c12bebad63907164bbd6c9aae0a1088ff0942ea8f300414c18",
+        "terminal.txt": "ddfb443c14cd261b21f7ec25ae89ccf648af93164e559af5be9bdd798bf2a4aa"
+      },
+      "terminal": 1544,
+      "images": 3
+    },
+    {
+      "language": "de",
+      "shot": 2,
+      "difficulty": 1,
+      "files": {
+        "state.csv": "e69a58a8a67e5466613e8cbbbdbcaaf5a0f404bbdb18af199b330d990561db9c",
+        "events.csv": "0f2379722ef56cf025606cfa7c3ae9f11512989e9bca78bc598f1d30a94d79cb",
+        "terminal.txt": "41cdf517e65893586c5d62c62930cc85aea5f1f2294e4cdc5bb846b75e8d7bef"
+      },
+      "terminal": 1567,
+      "images": 3
+    },
+    {
+      "language": "de",
+      "shot": 3,
+      "difficulty": 1,
+      "files": {
+        "state.csv": "a89a0ba18757e93a4b06d73c8b574d3b0846aec61db387f81fb3844c84db2f58",
+        "events.csv": "cfa50b75b0786af692543bffa68bc51ff90d564bd7307aecfd5f5ddd5c687ec5",
+        "terminal.txt": "b6d22c49b2e4949f904e203ca8461b4c26936aecf511747d8bd530b5a41fd892"
+      },
+      "terminal": 1575,
+      "images": 3
+    },
+    {
+      "language": "nl",
+      "shot": 0,
+      "difficulty": 0,
+      "files": {
+        "state.csv": "7436f8cea51fa856f8a023715eea6409a17de7a6ac07351c1adc9653b98c5d27",
+        "events.csv": "c402d2fa8fad01f6e46b4b1f071cc3216098a6869b0eb97da5dfa0c76c6a0872",
+        "terminal.txt": "68ee85f02e72a1d9d2c22581d0083b0ad8209ab8c33a95963374bebab6d16b79"
+      },
+      "terminal": 1470,
+      "images": 3
+    },
+    {
+      "language": "nl",
+      "shot": 2,
+      "difficulty": 0,
+      "files": {
+        "state.csv": "7a66edd9845f124ee5ae10ab364e914e4db5182c9a342b3e575d1ef1e9491233",
+        "events.csv": "c402d2fa8fad01f6e46b4b1f071cc3216098a6869b0eb97da5dfa0c76c6a0872",
+        "terminal.txt": "68ee85f02e72a1d9d2c22581d0083b0ad8209ab8c33a95963374bebab6d16b79"
+      },
+      "terminal": 1470,
+      "images": 3
+    },
+    {
+      "language": "nl",
+      "shot": 0,
+      "difficulty": 1,
+      "files": {
+        "state.csv": "819ae51122cd5155620e488821e125dc22d9f25be7621943b38ed53a5e4ecb91",
+        "events.csv": "b4f12d5c55435be9e7f243e4fa20e41fb475c49a42332c2e9fe2e5fb88be1dd3",
+        "terminal.txt": "bd6b18bf2ee7fb7156a9847953a0ec30d02800d3006431379dbe31044b866a89"
+      },
+      "terminal": 1545,
+      "images": 3
+    },
+    {
+      "language": "nl",
+      "shot": 1,
+      "difficulty": 1,
+      "files": {
+        "state.csv": "9512736b4cba5249117fb52b307aefb1df642a5208a643a7bbe93c30c95eb89c",
+        "events.csv": "32ae383194da02c12bebad63907164bbd6c9aae0a1088ff0942ea8f300414c18",
+        "terminal.txt": "ddfb443c14cd261b21f7ec25ae89ccf648af93164e559af5be9bdd798bf2a4aa"
+      },
+      "terminal": 1544,
+      "images": 3
+    },
+    {
+      "language": "nl",
+      "shot": 2,
+      "difficulty": 1,
+      "files": {
+        "state.csv": "e69a58a8a67e5466613e8cbbbdbcaaf5a0f404bbdb18af199b330d990561db9c",
+        "events.csv": "0f2379722ef56cf025606cfa7c3ae9f11512989e9bca78bc598f1d30a94d79cb",
+        "terminal.txt": "41cdf517e65893586c5d62c62930cc85aea5f1f2294e4cdc5bb846b75e8d7bef"
+      },
+      "terminal": 1567,
+      "images": 3
+    },
+    {
+      "language": "nl",
+      "shot": 3,
+      "difficulty": 1,
+      "files": {
+        "state.csv": "a89a0ba18757e93a4b06d73c8b574d3b0846aec61db387f81fb3844c84db2f58",
+        "events.csv": "cfa50b75b0786af692543bffa68bc51ff90d564bd7307aecfd5f5ddd5c687ec5",
+        "terminal.txt": "b6d22c49b2e4949f904e203ca8461b4c26936aecf511747d8bd530b5a41fd892"
+      },
+      "terminal": 1575,
+      "images": 3
+    }
+  ]
+}
