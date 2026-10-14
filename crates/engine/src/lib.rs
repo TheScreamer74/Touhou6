@@ -45,6 +45,40 @@ pub fn set_suspended(value: bool) {
 }
 thread_local! {static WINDOWED_REQUEST:std::cell::Cell<Option<bool>>=const {std::cell::Cell::new(None)};}
 thread_local! {static COLOR_16BIT:std::cell::Cell<bool>=const {std::cell::Cell::new(false)};}
+struct TextureReplacement {
+    rgba: Vec<u8>,
+    width: u32,
+    height: u32,
+    format: u32,
+}
+thread_local! {
+    static TEXTURE_REPLACEMENTS: std::cell::RefCell<std::collections::BTreeMap<usize, TextureReplacement>> = const {std::cell::RefCell::new(std::collections::BTreeMap::new())};
+}
+/// Queue a presentation-only texture update on the rendering thread. Repeated
+/// changes to one slot before the next draw replace the pending update.
+pub fn queue_texture_replacement(slot: usize, rgba: Vec<u8>, width: u32, height: u32, format: u32) {
+    assert!(width > 0 && height > 0);
+    assert_eq!(
+        Some(rgba.len()),
+        (width as usize)
+            .checked_mul(height as usize)
+            .and_then(|n| n.checked_mul(4))
+    );
+    TEXTURE_REPLACEMENTS.with(|pending| {
+        pending.borrow_mut().insert(
+            slot,
+            TextureReplacement {
+                rgba,
+                width,
+                height,
+                format,
+            },
+        );
+    });
+}
+pub fn clear_texture_replacements() {
+    TEXTURE_REPLACEMENTS.with(|pending| pending.borrow_mut().clear());
+}
 /// Original R5G6B5 back buffer and original ANM 16-bit texture formats.
 pub fn set_color_16bit(value: bool) {
     COLOR_16BIT.with(|flag| flag.set(value));
@@ -734,6 +768,23 @@ impl Engine {
 
     pub fn create_texture(&self, rgba: &[u8], width: u32, height: u32) -> Texture {
         self.create_texture_with_format(rgba, width, height, 1)
+    }
+
+    /// Apply queued text translations without retaining a texture set for each
+    /// language. Capture callers may apply this before an offscreen draw too.
+    pub fn apply_texture_replacements(&self, textures: &mut [Texture]) {
+        let updates =
+            TEXTURE_REPLACEMENTS.with(|pending| std::mem::take(&mut *pending.borrow_mut()));
+        for (slot, update) in updates {
+            if let Some(texture) = textures.get_mut(slot) {
+                *texture = self.create_texture_with_format(
+                    &update.rgba,
+                    update.width,
+                    update.height,
+                    update.format,
+                );
+            }
+        }
     }
 
     /// A procedural diffuse-color lookup, not an original ANM texture.
@@ -1488,6 +1539,7 @@ impl ApplicationHandler for App {
                         .held
                         .extend(self.input.pressed.iter().copied());
                     let frame = (self.update)(&sampled_input);
+                    self.engine.apply_texture_replacements(&mut self.textures);
                     if let Some(windowed) = take_windowed_request()
                         && let Some(window) = &self.window
                     {

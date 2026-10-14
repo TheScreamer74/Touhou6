@@ -1,6 +1,25 @@
 //! MainMenu::OnUpdateOptionsMenu and ColorMenuItem, using the original sprites.
+use crate::localization::Language;
 use crate::menu_art::{MenuArt, MenuInput};
 use th06_engine::{DrawCmd, Input, Key};
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Hitbox {
+    Off = 0,
+    #[default]
+    Focus = 1,
+    Always = 2,
+}
+impl Hitbox {
+    pub fn from_u8(value: u8) -> Option<Self> {
+        [Self::Off, Self::Focus, Self::Always]
+            .get(value as usize)
+            .copied()
+    }
+    fn cycle(self, delta: i32) -> Self {
+        Self::from_u8((self as i32 + delta).rem_euclid(3) as u8).unwrap()
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Options {
     pub life_count: u8,
@@ -13,6 +32,8 @@ pub struct Options {
     /// Inverse of original cfg.opts.useSwTextureBlending (default: true).
     /// Advanced configuration, preserved by the main menu's Restore Defaults.
     pub hardware_texture_blending: bool,
+    pub language: Language,
+    pub hitbox: Hitbox,
 }
 impl Default for Options {
     fn default() -> Self {
@@ -25,13 +46,15 @@ impl Default for Options {
             windowed: false,
             default_difficulty: 1,
             hardware_texture_blending: false,
+            language: Language::Original,
+            hitbox: Hitbox::Focus,
         }
     }
 }
 impl Options {
     pub fn encode(&self) -> Vec<u8> {
         vec![
-            2,
+            3,
             self.life_count,
             self.bomb_count,
             self.color_16bit as u8,
@@ -40,12 +63,16 @@ impl Options {
             self.windowed as u8,
             self.default_difficulty,
             self.hardware_texture_blending as u8,
+            self.language as u8,
+            self.hitbox as u8,
         ]
     }
     pub fn parse(b: &[u8]) -> Option<Self> {
-        let legacy = b.len() == 8 && b[0] == 1;
-        let current = b.len() == 9 && b[0] == 2 && b[8] <= 1;
-        if (!legacy && !current) || b[1] > 4 || b[2] > 3 || b[4] > 2 || b[7] > 3 {
+        let legacy = b.len() == 8 && b.first() == Some(&1);
+        let previous = b.len() == 9 && b.first() == Some(&2) && b[8] <= 1;
+        let current =
+            b.len() == 11 && b.first() == Some(&3) && b[8] <= 1 && b[9] <= 4 && b[10] <= 2;
+        if (!legacy && !previous && !current) || b[1] > 4 || b[2] > 3 || b[4] > 2 || b[7] > 3 {
             return None;
         }
         Some(Self {
@@ -56,7 +83,17 @@ impl Options {
             play_sounds: b[5] != 0,
             windowed: b[6] != 0,
             default_difficulty: b[7],
-            hardware_texture_blending: current && b[8] != 0,
+            hardware_texture_blending: (previous || current) && b[8] != 0,
+            language: if current {
+                Language::from_u8(b[9])?
+            } else {
+                Language::Original
+            },
+            hitbox: if current {
+                Hitbox::from_u8(b[10])?
+            } else {
+                Hitbox::Focus
+            },
         })
     }
 }
@@ -138,10 +175,10 @@ impl OptionsMenu {
         }
         if self.input.pressed(input, Key::Up) {
             self.art.sound("select00");
-            self.cursor = (self.cursor + 8) % 9;
+            self.cursor = (self.cursor + 10) % 11;
         } else if self.input.pressed(input, Key::Down) {
             self.art.sound("select00");
-            self.cursor = (self.cursor + 1) % 9;
+            self.cursor = (self.cursor + 1) % 11;
         }
         // OnUpdateOptionsMenu colors the VMs before changing settings. The
         // next Draw observes those colors, even when this tick restores them.
@@ -158,7 +195,7 @@ impl OptionsMenu {
         // those requests even when the final setting equals its old value.
         for direction in 0..2 {
             if direction == 1 && (input.pressed(Key::Bomb) || input.pressed(Key::Pause)) {
-                self.cursor = 8;
+                self.cursor = 10;
                 self.art.sound("cancel00");
             }
             if !(if direction == 0 { left } else { right }) {
@@ -178,6 +215,8 @@ impl OptionsMenu {
                 }
                 4 => options.play_sounds = !options.play_sounds,
                 5 => options.windowed = !options.windowed,
+                8 => options.language = options.language.cycle(delta),
+                9 => options.hitbox = options.hitbox.cycle(delta),
                 _ => continue,
             }
             self.art.sound("select00");
@@ -206,7 +245,16 @@ impl OptionsMenu {
                     self.key_config = Some(crate::key_config::KeyConfig::begin(&mut self.art));
                     return OptionsAction::None;
                 }
-                8 => {
+                8 | 9 => {
+                    if self.cursor == 8 {
+                        options.language = options.language.cycle(1);
+                    } else {
+                        options.hitbox = options.hitbox.cycle(1);
+                    }
+                    self.art.sound("select00");
+                    return OptionsAction::Changed;
+                }
+                10 => {
                     self.art.sound("cancel00");
                     return OptionsAction::Back;
                 }
@@ -239,49 +287,92 @@ impl OptionsMenu {
             return config.draw(&mut self.art);
         }
         let options = self.presentation_options.as_ref().unwrap_or(options);
-        let cursor = self.presentation_cursor;
-        // The original has six title01 label VMs and three title04 label VMs.
-        let labels = [8, 9, 10, 11, 12, 72, 73, 74, 13];
-        let mut selection = std::collections::HashMap::new();
-        for (row, idx) in labels.iter().enumerate() {
-            selection.insert(*idx, (row, row == cursor));
-        }
-        for (row, start, count, selected) in [
-            (0, 14, 5, options.life_count as usize),
-            (1, 19, 4, options.bomb_count as usize),
-            (2, 23, 2, options.color_16bit as usize),
-            (4, 25, 2, options.play_sounds as usize),
-            (5, 75, 2, options.windowed as usize),
-            (3, 77, 3, options.music_mode as usize),
-        ] {
-            for n in 0..count {
-                selection.insert(start + n, (row, n == selected));
+        self.draw_port_options(options)
+    }
+    fn draw_port_options(&self, options: &Options) -> Vec<DrawCmd> {
+        use crate::localization::ui;
+        let mut cmds = self.art.draw(|_| None);
+        self.art.text(
+            &mut cmds,
+            [80.0, 54.0],
+            1.6,
+            [1.0; 4],
+            &ui("menu.options", "Options"),
+            480.0,
+        );
+        let labels = [
+            ui("options.lives", "Lives"),
+            ui("options.bombs", "Bombs"),
+            ui("options.color", "Color depth"),
+            ui("options.music", "Music"),
+            ui("options.sounds", "Sound effects"),
+            ui("options.window", "Display"),
+            ui("options.defaults", "Restore defaults"),
+            ui("options.controller", "Controller"),
+            ui("ui.language", "Language"),
+            ui("ui.hitbox", "Hitbox"),
+            ui("menu.back", "Back"),
+        ];
+        let values = [
+            (options.life_count + 1).to_string(),
+            options.bomb_count.to_string(),
+            if options.color_16bit {
+                "16 bit"
+            } else {
+                "32 bit"
             }
-        }
-        for idx in 0..80 {
+            .into(),
+            [ui("options.off", "Off"), "WAV / Ogg".into(), "MIDI".into()]
+                [options.music_mode as usize]
+                .clone(),
+            if options.play_sounds {
+                ui("options.on", "On")
+            } else {
+                ui("options.off", "Off")
+            },
+            if options.windowed {
+                ui("options.windowed", "Windowed")
+            } else {
+                ui("options.fullscreen", "Fullscreen")
+            },
+            String::new(),
+            String::new(),
+            options.language.label().into(),
+            [
+                ui("hitbox.off", "Off"),
+                ui("hitbox.focus", "Focus only"),
+                ui("hitbox.always", "Always"),
+            ][options.hitbox as usize]
+                .clone(),
+            String::new(),
+        ];
+        for row in 0..11 {
+            let tint = if row == self.presentation_cursor {
+                [1.0, 0.80, 0.85, 1.0]
+            } else {
+                [0.85, 0.88, 1.0, 0.8]
+            };
+            let y = 110.0 + row as f32 * 25.0;
+            if row == self.presentation_cursor {
+                self.art.text(&mut cmds, [57.0, y], 1.0, tint, "›", 20.0);
+            }
             self.art
-                .highlight(idx, selection.get(&idx).map(|v| v.1).unwrap_or(false));
+                .text(&mut cmds, [80.0, y], 1.0, tint, &labels[row], 265.0);
+            self.art
+                .text(&mut cmds, [366.0, y], 1.0, tint, &values[row], 205.0);
         }
-        self.art.draw(|idx| {
-            let mut offset = [0.0, 0.0];
-            let mut alpha = 1.0;
-            if let Some(&(row, selected)) = selection.get(&idx) {
-                if selected {
-                    offset = [-2.0, -2.0];
-                }
-                if row == cursor {
-                    offset[0] -= 4.0;
-                    offset[1] -= 4.0;
-                } else {
-                    alpha = 128.0 / 255.0;
-                }
-            }
-            if idx == 79 && !self.midi_available {
-                offset = [0.0; 2];
-                alpha = 96.0 / 255.0;
-            }
-            Some((offset, [1.0, 1.0, 1.0, alpha]))
-        })
+        self.art.text(
+            &mut cmds,
+            [80.0, 410.0],
+            0.85,
+            [0.75, 0.80, 0.9, 1.0],
+            &ui(
+                "options.help",
+                "↑↓ Select   ←→ Change   Z / Enter Confirm   X Back",
+            ),
+            490.0,
+        );
+        cmds
     }
     pub fn take_sounds(&mut self) -> Vec<&'static str> {
         self.art.take_sounds()
@@ -322,5 +413,39 @@ mod tests {
         };
         assert_eq!(Options::parse(&options.encode()), Some(options));
         assert!(Options::parse(&[]).is_none());
+    }
+    #[test]
+    fn previous_options_migrate_without_losing_original_preferences() {
+        let v2 = [2, 4, 0, 1, 2, 0, 1, 3, 1];
+        let migrated = Options::parse(&v2).unwrap();
+        assert_eq!(
+            (
+                migrated.life_count,
+                migrated.bomb_count,
+                migrated.music_mode
+            ),
+            (4, 0, 2)
+        );
+        assert!(migrated.hardware_texture_blending);
+        assert_eq!(
+            (migrated.language, migrated.hitbox),
+            (Language::Original, Hitbox::Focus)
+        );
+        for language in Language::ALL {
+            for hitbox in [Hitbox::Off, Hitbox::Focus, Hitbox::Always] {
+                let current = Options {
+                    language,
+                    hitbox,
+                    ..migrated.clone()
+                };
+                assert_eq!(Options::parse(&current.encode()), Some(current));
+            }
+        }
+        let mut invalid = migrated.encode();
+        invalid[9] = 5;
+        assert!(Options::parse(&invalid).is_none());
+        invalid[9] = 1;
+        invalid[10] = 3;
+        assert!(Options::parse(&invalid).is_none());
     }
 }

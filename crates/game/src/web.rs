@@ -1,7 +1,5 @@
-//! Web entry point. The browser uploads the player's own game folder; the
-//! bytes never leave their machine. JS hands us a `{ filename: Uint8Array }`
-//! object, we extract the PBG3 archives in-memory and run the game on a
-//! canvas. Game data is supplied by the player or the hosting page.
+//! Web entry point. The hosting page supplies a `{ filename: Uint8Array }`
+//! object. Archives are extracted in memory and the game runs on a canvas.
 
 use std::collections::HashMap;
 
@@ -74,8 +72,8 @@ fn extract(raw: &[u8]) -> Result<HashMap<String, Vec<u8>>, String> {
     Ok(out)
 }
 
-/// Entry point invoked from JS once the player has selected their game
-/// folder. `files` is a plain object mapping each file's basename to a
+/// Entry point invoked once the hosting page has loaded the game resources.
+/// `files` is a plain object mapping each file's basename to a
 /// `Uint8Array` of its bytes. Returns a Promise (async).
 #[wasm_bindgen]
 pub async fn start_game(files: js_sys::Object) -> Result<(), JsValue> {
@@ -223,7 +221,15 @@ pub async fn start_game(files: js_sys::Object) -> Result<(), JsValue> {
             return Err(JsValue::from_str(&error));
         }
     };
+    let initial_options = crate::save::load_bytes("th06-options.bin")
+        .and_then(|bytes| crate::options::Options::parse(&bytes))
+        .unwrap_or_else(|| crate::options::Options {
+            language: crate::localization::Language::French,
+            ..Default::default()
+        });
+    crate::localization::set_language(initial_options.language);
     let (textures, mut game) = build_game(&engine, &game_files, true);
+    game.options = initial_options;
     game.configure_storage("");
     if crate::save::load_bytes("score.dat").is_none()
         && let Some(bytes) = raw.get("score.dat")
@@ -245,6 +251,7 @@ pub async fn start_game(files: js_sys::Object) -> Result<(), JsValue> {
     game.prepare_audio().await;
     game.start_title_bgm();
     let mut displayed_error = None;
+    let mut displayed_language = None;
     let display_canvas = canvas.clone();
     engine.run_game_web(canvas, surface, "Touhou 6 ~ EoSD", textures, move |input| {
         IMPORTS.with(|queue| {
@@ -259,6 +266,24 @@ pub async fn start_game(files: js_sys::Object) -> Result<(), JsValue> {
         }
         game.options.windowed = document.fullscreen_element().is_none();
         let frame = game.update(input);
+        if displayed_language != Some(game.options.language) {
+            displayed_language = Some(game.options.language);
+            if let Some(window) = web_sys::window() {
+                let code = JsValue::from_str(game.options.language.code());
+                let _ = js_sys::Reflect::set(window.as_ref(), &JsValue::from_str("__th06GameLanguage"), &code);
+                if let Ok(hook) = js_sys::Reflect::get(window.as_ref(), &JsValue::from_str("__th06OnLanguageChanged"))
+                    .and_then(|value| value.dyn_into::<js_sys::Function>()) {
+                    let _ = hook.call1(&JsValue::NULL, &code);
+                }
+            }
+        }
+        if let Some(window) = web_sys::window()
+            && let Ok(hook) = js_sys::Reflect::get(window.as_ref(), &JsValue::from_str("__th06SubmitScore"))
+                .and_then(|value| value.dyn_into::<js_sys::Function>()) {
+            for result in game.take_community_results() {
+                let _ = hook.call1(&JsValue::NULL, &JsValue::from_str(&result.to_string()));
+            }
+        }
         if let Some(windowed) = th06_engine::take_windowed_request() {
             let promise = if windowed {
                 document.exit_fullscreen();

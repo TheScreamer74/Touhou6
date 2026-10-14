@@ -204,7 +204,12 @@ impl ReplayMenu {
                     r.name,
                     r.date,
                     CHARACTERS[r.character as usize],
-                    DIFFICULTIES[r.difficulty as usize]
+                    if crate::localization::language() == crate::localization::Language::Original {
+                        DIFFICULTIES[r.difficulty as usize].to_owned()
+                    } else {
+                        crate::localization::translate(DIFFICULTIES[r.difficulty as usize].trim())
+                            .into_owned()
+                    }
                 ),
             );
         }
@@ -241,7 +246,19 @@ impl ReplayMenu {
                         0xff808080
                     }),
                     false,
-                    &format!("{} {}", label, value),
+                    &format!(
+                        "{} {}",
+                        if crate::localization::language()
+                            == crate::localization::Language::Original
+                        {
+                            (*label).to_owned()
+                        } else if stage < 6 {
+                            format!("{}{}", crate::localization::translate("Stage"), stage + 1)
+                        } else {
+                            crate::localization::translate("Extra").into_owned()
+                        },
+                        value
+                    ),
                 );
             }
         }

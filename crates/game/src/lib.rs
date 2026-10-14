@@ -5,10 +5,12 @@
 
 pub mod anm_vm;
 pub mod background;
+pub mod community;
 pub mod ecl_vm;
 pub mod ending;
 pub mod hud;
 pub mod key_config;
+pub mod localization;
 pub mod menu_art;
 pub mod music_room;
 pub mod options;
@@ -483,6 +485,8 @@ pub struct Game {
     pending_stats: Option<result::RunStats>,
     result_stats: Option<result::RunStats>,
     active_frames: u32,
+    community_run_open: bool,
+    community_results: Vec<serde_json::Value>,
     fps_counter: hud::FpsCounter,
     draw_serial: u64,
     diagnostic_draw_millis: Option<u32>,
@@ -518,6 +522,7 @@ pub struct Game {
 /// Build the full set of GPU textures and a `Game` at the title screen.
 /// `with_audio` lets headless/screenshot callers skip audio device setup.
 pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<Texture>, Game) {
+    localization::begin_textures();
     if let Err(error) = th06_engine::text::set_font(files.text_font.clone()) {
         eprintln!("{error}; using bundled font");
     }
@@ -654,10 +659,17 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
     ]
     .map(|name| {
         let (bytes, _, _) = encoding_rs::SHIFT_JIS.encode(name);
-        let img =
-            th06_engine::text::render_sprite_shiftjis(&bytes, 256, 16, false, [240, 240, 255]);
-        let slot = textures.len();
-        textures.push(engine.create_texture(&img.rgba, img.width, img.height));
+        let (slot, _, _) = localization::bake_sprite_shiftjis_aligned(
+            engine,
+            &mut textures,
+            &bytes,
+            256,
+            16,
+            15,
+            th06_engine::text::SpriteTextAlign::Left,
+            [240, 240, 255],
+            1,
+        );
         (slot, bytes.len())
     });
     const BOSS_PORTRAITS: [&[&str]; TOTAL_STAGES] = [
@@ -726,11 +738,18 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
                 if raw.is_empty() || spell_name_tex.contains_key(&id) {
                     continue;
                 }
-                let img =
-                    th06_engine::text::render_sprite_shiftjis(&raw, 256, 16, true, [255, 240, 240]);
-                let slot = textures.len();
-                textures.push(engine.create_texture(&img.rgba, img.width, img.height));
-                spell_name_tex.insert(id, (slot, img.width as f32, img.height as f32));
+                let texture = localization::bake_sprite_shiftjis_aligned(
+                    engine,
+                    &mut textures,
+                    &raw,
+                    256,
+                    16,
+                    15,
+                    th06_engine::text::SpriteTextAlign::Right,
+                    [255, 240, 240],
+                    1,
+                );
+                spell_name_tex.insert(id, texture);
             }
         }
         // Original Japanese dialogue lives in ST.DAT (the port previously used the
@@ -748,15 +767,16 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
                 }
                 // White text + black shadow; the line colour (player/boss) is a
                 // draw-time tint (Gui line_colors), so keep the bake neutral.
-                let img = th06_engine::text::render_shiftjis(
+                let texture = localization::bake_shiftjis(
+                    engine,
+                    &mut textures,
                     &raw,
                     16.0,
-                    [255, 255, 255],
-                    Some([0, 0, 0]),
+                    [255; 3],
+                    Some([0; 3]),
+                    [256, 18],
                 );
-                let slot = textures.len();
-                textures.push(engine.create_texture(&img.rgba, img.width, img.height));
-                dialogue_tex.insert(off, (slot, img.width as f32, img.height as f32));
+                dialogue_tex.insert(off, texture);
             }
         }
         // Stage name: STD header name[128] at offset 0x10 (Gui.cpp:438 uses
@@ -767,17 +787,17 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
             if end == 0 {
                 return None;
             }
-            let img = th06_engine::text::render_sprite_shiftjis_aligned(
+            Some(localization::bake_sprite_shiftjis_aligned(
+                engine,
+                &mut textures,
                 &nm[..end],
                 256,
                 16,
                 15,
                 th06_engine::text::SpriteTextAlign::Center,
                 [224, 255, 255],
-            );
-            let slot = textures.len();
-            textures.push(engine.create_texture_with_format(&img.rgba, img.width, img.height, 5));
-            Some((slot, img.width as f32, img.height as f32))
+                5,
+            ))
         });
         let song_name_tex = (0..4)
             .map(|song| {
@@ -785,18 +805,17 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
                 let end = raw.iter().position(|&c| c == 0).unwrap_or(raw.len());
                 let mut name = vec![0x81, 0xf4]; // Shift-JIS ♪, TH_SONG_NAME
                 name.extend_from_slice(&raw[..end]);
-                let img = th06_engine::text::render_sprite_shiftjis_aligned(
+                localization::bake_sprite_shiftjis_aligned(
+                    engine,
+                    &mut textures,
                     &name,
                     256,
                     16,
                     16,
                     th06_engine::text::SpriteTextAlign::Right,
                     [224, 255, 255],
-                );
-                let slot = textures.len();
-                textures
-                    .push(engine.create_texture_with_format(&img.rgba, img.width, img.height, 5));
-                (slot, img.width as f32, img.height as f32)
+                    5,
+                )
             })
             .collect();
         stages.push(StageData {
@@ -993,6 +1012,8 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
         pending_stats: None,
         result_stats: None,
         active_frames: 0,
+        community_run_open: false,
+        community_results: Vec::new(),
         fps_counter: hud::FpsCounter::default(),
         draw_serial: 0,
         diagnostic_draw_millis: None,
@@ -1104,6 +1125,7 @@ impl Game {
         index: usize,
         attract_demo: bool,
     ) -> Result<(), String> {
+        self.community_run_open = false;
         if index >= TOTAL_STAGES || data.stages[index].is_none() {
             return Err("Replay has no data for this stage".into());
         }
@@ -1386,8 +1408,8 @@ impl Game {
                 .max(1_000_000)
         };
     }
-    fn prepare_result(&mut self, carry: &stage::Carry, completed: bool) {
-        self.pending_stats = Some(result::RunStats {
+    fn run_stats(&self, carry: &stage::Carry, completed: bool) -> result::RunStats {
+        result::RunStats {
             character: CHARACTERS
                 .iter()
                 .position(|&c| c == self.character)
@@ -1405,7 +1427,29 @@ impl Game {
             frames: self.active_frames,
             slowdown: 0.0,
             date: replay::date(),
-        });
+        }
+    }
+    fn prepare_result(&mut self, carry: &stage::Carry, completed: bool) {
+        let stats = self.run_stats(carry, completed);
+        if completed {
+            self.queue_community_result(&stats);
+        }
+        self.pending_stats = Some(stats);
+    }
+    fn queue_community_result(&mut self, stats: &result::RunStats) {
+        if self.community_run_open {
+            self.community_run_open = false;
+            if self.diagnostic_stage_seed.is_none()
+                && self.diagnostic_draw_millis.is_none()
+                && std::env::var_os("TH06_GOD").is_none()
+                && let Some(payload) = community::result_payload(stats, self.mode)
+            {
+                self.community_results.push(payload);
+            }
+        }
+    }
+    pub fn take_community_results(&mut self) -> Vec<serde_json::Value> {
+        std::mem::take(&mut self.community_results)
     }
     fn finish_run(&mut self, score: i64) {
         let stats = self.pending_stats.take().unwrap_or(result::RunStats {
@@ -1420,6 +1464,7 @@ impl Game {
             .is_some_and(|session| !session.is_playback());
         self.replay_slots = replay::load_slots(&self.replay_directory);
         self.result_stats = Some(stats.clone());
+        self.queue_community_result(&stats);
         self.result.begin_run(stats, &self.progress, available);
         self.scene = Scene::Result;
     }
@@ -1675,6 +1720,8 @@ impl Game {
     }
 
     pub fn update(&mut self, input: &Input) -> Frame {
+        localization::set_language(self.options.language);
+        localization::refresh();
         self.draw_serial = self.draw_serial.wrapping_add(1);
         if let Some((milliseconds, presentations)) = self
             .diagnostic_draw_millis
@@ -1754,7 +1801,10 @@ impl Game {
                         .set_extra_unlocked(self.extra_unlocked().iter().any(|&value| value));
                     (self.title.draw(), None)
                 }
-                Scene::Stage(stage) => (stage.draw(), stage.background_scene()),
+                Scene::Stage(stage) => {
+                    stage.set_hitbox_mode(self.options.hitbox);
+                    (stage.draw(), stage.background_scene())
+                }
                 Scene::Continue { frozen, stage, .. } => {
                     let mut cmds = frozen.clone();
                     cmds.extend(self.retry_menu.draw());
@@ -2159,6 +2209,7 @@ impl Game {
                     stage,
                     mode,
                 } => {
+                    self.community_run_open = true;
                     self.active_frames = 0;
                     self.character = character;
                     self.difficulty = difficulty;
@@ -2452,6 +2503,7 @@ impl Game {
                 }
                 if let Some(score) = game_over {
                     if self.mode == RunMode::Practice {
+                        self.queue_community_result(&self.run_stats(&carry, false));
                         let character = CHARACTERS
                             .iter()
                             .position(|&v| v == self.character)
@@ -2514,6 +2566,7 @@ impl Game {
                 }
                 if next_stage && !applying_transition {
                     if self.mode == RunMode::Practice {
+                        self.queue_community_result(&self.run_stats(&carry, true));
                         // Gui::MSG_OPCODE_STAGEEND requests ResultFromGame
                         // directly; practice has no retry prompt on a clear.
                         let character = CHARACTERS

@@ -936,14 +936,20 @@ fn score_table(
     scores
 }
 fn bake(engine: &Engine, textures: &mut Vec<Texture>, text: &str) -> TextSprite {
-    let image = th06_engine::text::render(text, 15.0, [255; 3], Some([0; 3]));
-    let tex = textures.len();
-    textures.push(engine.create_texture(&image.rgba, image.width, image.height));
-    TextSprite {
-        tex,
-        w: image.width as f32,
-        h: image.height as f32,
-    }
+    let (_, height) = {
+        let image = th06_engine::text::render(text, 15.0, [255; 3], Some([0; 3]));
+        (image.width, image.height)
+    };
+    let (tex, w, h) = crate::localization::bake_text(
+        engine,
+        textures,
+        text,
+        15.0,
+        [255; 3],
+        Some([0; 3]),
+        [256, height],
+    );
+    TextSprite { tex, w, h }
 }
 fn draw_text_sprite(cmds: &mut Vec<DrawCmd>, sprite: &TextSprite, pos: [f32; 2], alpha: f32) {
     cmds.push(DrawCmd {

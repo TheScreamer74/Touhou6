@@ -83,6 +83,7 @@ enum Action {
         slot: usize,
         bytes: Vec<u8>,
         color: u32,
+        source_key: String,
     },
     Clear,
     Event(EndingEvent),
@@ -280,6 +281,7 @@ impl EndVm {
             slot,
             bytes,
             color: self.text_color,
+            source_key: format!("end:{}:{}", self.file, self.pc),
         });
         Ok(())
     }
@@ -481,9 +483,11 @@ struct Image {
 struct SpriteImage {
     sprite: Sprite,
     image: Image,
+    localized_texture: Option<usize>,
 }
 #[derive(Hash, PartialEq, Eq)]
 struct TextKey {
+    source_key: String,
     bytes: Vec<u8>,
     color: u32,
     width: u32,
@@ -582,20 +586,24 @@ impl EndingAssets {
             .filter(|(id, _)| **id >= TEXT_BASE)
             .map(|(_, image)| (image.sprite.width as u32, image.sprite.height as u32))
             .collect();
-        for bytes in chunks {
+        for (source_key, bytes) in chunks {
             for &color in &colors {
                 for &(width, height) in &dimensions {
                     if width == 0 || height == 0 {
                         return Err(invalid("text.anm contains an empty text sprite"));
                     }
-                    let tex = textures.len();
-                    textures.push(engine.create_texture(
-                        &raster_text(&bytes, color, width, height),
-                        width,
-                        height,
-                    ));
+                    let (tex, _, _) = crate::localization::bake_custom_key(
+                        engine,
+                        textures,
+                        &bytes,
+                        &source_key,
+                        color,
+                        [width, height],
+                        raster_localized_text,
+                    );
                     resources.text.insert(
                         TextKey {
+                            source_key: source_key.clone(),
                             bytes: bytes.clone(),
                             color,
                             width,
@@ -669,10 +677,29 @@ fn load_anm(
         let tex = textures.len();
         textures.push(engine.create_texture_with_format(&rgba, width, height, entry.format));
         for sprite in entry.sprites {
+            let id = base + sprite.index;
+            let localized_texture = if let Some(key) = credit_key(id) {
+                let cropped = crop_staff_sprite(&rgba, width, height, &sprite)?;
+                Some(
+                    crate::localization::bake_custom_key(
+                        engine,
+                        textures,
+                        &cropped,
+                        key,
+                        id,
+                        [sprite.width as u32, sprite.height as u32],
+                        raster_staff,
+                    )
+                    .0,
+                )
+            } else {
+                None
+            };
             resources.sprites.insert(
-                base + sprite.index,
+                id,
                 SpriteImage {
                     sprite,
+                    localized_texture,
                     image: Image {
                         tex,
                         width: width as f32,
@@ -694,7 +721,110 @@ fn load_anm(
     Ok(())
 }
 
-type Inventory = (HashSet<Vec<u8>>, HashSet<u32>, HashSet<String>);
+// These IDs are the original staff01/02/03.anm sprite indices, with the
+// 0/7/14 offsets used by Ending_AddedCallback. Branding, version/date and
+// proper-name-only sprites keep their supplied artwork in every language.
+fn credit_key(sprite: u32) -> Option<&'static str> {
+    Some(match sprite {
+        4 => "credits.staff",
+        5 => "credits.programmer",
+        6 => "credits.program_support",
+        7 => "credits.graphic_designer",
+        8 => "credits.music_composer",
+        9 => "credits.special_thanks",
+        12 => "credits.test_players",
+        13 => "credits.and_you",
+        14 => "credits.extra_stage",
+        16 => "credits.extra_challenge",
+        _ => return None,
+    })
+}
+
+fn crop_staff_sprite(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    sprite: &Sprite,
+) -> Result<Vec<u8>, EndingError> {
+    let [x, y, w, h] = [sprite.x, sprite.y, sprite.width, sprite.height];
+    if [x, y, w, h]
+        .iter()
+        .any(|value| !value.is_finite() || *value < 0.0 || value.fract() != 0.0)
+        || w == 0.0
+        || h == 0.0
+        || x + w > width as f32
+        || y + h > height as f32
+        || rgba.len() != width as usize * height as usize * 4
+    {
+        return Err(invalid("staff ANM sprite is outside its texture"));
+    }
+    let (x, y, w, h) = (x as usize, y as usize, w as usize, h as usize);
+    let mut cropped = Vec::with_capacity(w * h * 4);
+    for row in y..y + h {
+        let start = (row * width as usize + x) * 4;
+        cropped.extend_from_slice(&rgba[start..start + w * 4]);
+    }
+    Ok(cropped)
+}
+
+fn raster_staff(
+    original: &[u8],
+    source_key: &str,
+    sprite: u32,
+    width: u32,
+    height: u32,
+    language: crate::localization::Language,
+) -> Vec<u8> {
+    if language == crate::localization::Language::Original {
+        return original.to_vec();
+    }
+    let Some(translated) = crate::localization::lookup_in(language, source_key) else {
+        return original.to_vec();
+    };
+    // staff01/02 have black ink; staff03 has green ink. Preserve the supplied
+    // ink color instead of introducing a new credit-screen palette.
+    let color = original
+        .chunks_exact(4)
+        .max_by_key(|pixel| pixel[3])
+        .map(|pixel| [pixel[0], pixel[1], pixel[2]])
+        .unwrap_or([0; 3]);
+    let mut rgba = vec![0; (width * height * 4) as usize];
+    // The final handwritten phrase in staff03 is not unambiguously readable.
+    // Its original last 32 rows remain intact; only the confirmed two-line
+    // challenge instruction above it is translated.
+    let translated_height = if sprite == 16 {
+        height.saturating_sub(32)
+    } else {
+        height
+    };
+    if sprite == 16 {
+        let start = (width * translated_height * 4) as usize;
+        if original.len() == rgba.len() {
+            rgba[start..].copy_from_slice(&original[start..]);
+        }
+    }
+    let lines: Vec<_> = translated.lines().collect();
+    let band = translated_height / lines.len().max(1) as u32;
+    for (index, line) in lines.iter().enumerate() {
+        let image = text::render(line, 16.0, color, None);
+        let image_height = image.height.min(band);
+        let centered = crate::localization::canvas_image(
+            image,
+            [width, image_height],
+            text::SpriteTextAlign::Center,
+        );
+        let top = index as u32 * band + band.saturating_sub(image_height) / 2;
+        for row in 0..image_height {
+            let src = (row * width * 4) as usize;
+            let dst = ((top + row) * width * 4) as usize;
+            rgba[dst..dst + (width * 4) as usize]
+                .copy_from_slice(&centered.rgba[src..src + (width * 4) as usize]);
+        }
+    }
+    rgba
+}
+
+type Inventory = (HashSet<(String, Vec<u8>)>, HashSet<u32>, HashSet<String>);
 fn inventory(files: &HashMap<String, Arc<[u8]>>) -> Result<Inventory, EndingError> {
     let mut chunks = HashSet::new();
     let mut colors = HashSet::from([0]);
@@ -731,11 +861,14 @@ fn inventory(files: &HashMap<String, Arc<[u8]>>) -> Result<Inventory, EndingErro
                         bytes.extend_from_slice(pair);
                         vm.pc += 2;
                         if bytes.len() == 32 {
-                            chunks.insert(std::mem::take(&mut bytes));
+                            chunks.insert((
+                                format!("end:{filename}:{}", vm.pc),
+                                std::mem::take(&mut bytes),
+                            ));
                         }
                     }
                     if !bytes.is_empty() {
-                        chunks.insert(bytes);
+                        chunks.insert((format!("end:{filename}:{}", vm.pc), bytes));
                     }
                 }
             }
@@ -784,6 +917,30 @@ fn raster_text(bytes: &[u8], color: u32, width: u32, height: u32) -> Vec<u8> {
         }
     }
     rgba
+}
+
+fn raster_localized_text(
+    bytes: &[u8],
+    source_key: &str,
+    color: u32,
+    width: u32,
+    height: u32,
+    language: crate::localization::Language,
+) -> Vec<u8> {
+    if language == crate::localization::Language::Original {
+        return raster_text(bytes, color, width, height);
+    }
+    let source = text::decode_shiftjis(bytes);
+    let translated = crate::localization::lookup_in(language, source_key)
+        .map(std::borrow::Cow::Borrowed)
+        .unwrap_or_else(|| crate::localization::translate_in(language, &source));
+    let image = text::render(
+        &translated,
+        15.0,
+        [color as u8, (color >> 8) as u8, (color >> 16) as u8],
+        Some([208, 208, 192]),
+    );
+    crate::localization::canvas_image(image, [width, height], text::SpriteTextAlign::Left).rgba
 }
 
 struct Slot {
@@ -875,7 +1032,12 @@ impl EndingPlayer {
                         text_texture: None,
                     });
                 }
-                Action::Text { slot, bytes, color } => {
+                Action::Text {
+                    slot,
+                    bytes,
+                    color,
+                    source_key,
+                } => {
                     let script = ENDING_TEXT_SCRIPT + slot as u32;
                     let instructions = self.resources.scripts.get(&script).ok_or_else(|| {
                         invalid(format!("text.anm: missing script {}", script - TEXT_BASE))
@@ -886,6 +1048,7 @@ impl EndingPlayer {
                         .and_then(|id| self.resources.sprites.get(&id))
                         .ok_or_else(|| invalid("ending text script has no sprite"))?;
                     let key = TextKey {
+                        source_key,
                         bytes,
                         color,
                         width: sprite.sprite.width as u32,
@@ -961,7 +1124,8 @@ impl EndingPlayer {
                 [width, height],
                 runner.corner,
             );
-            let mut src = if slot.text_texture.is_some() {
+            let texture = slot.text_texture.or(sprite.localized_texture);
+            let mut src = if texture.is_some() {
                 [0.0, 0.0, 1.0, 1.0]
             } else {
                 [
@@ -979,7 +1143,7 @@ impl EndingPlayer {
             }
             cmds.push(DrawCmd {
                 clip: None,
-                tex: slot.text_texture.unwrap_or(sprite.image.tex),
+                tex: texture.unwrap_or(sprite.image.tex),
                 dst: geometry.dst,
                 src,
                 tint: [
@@ -1109,7 +1273,8 @@ mod tests {
             Action::Text {
                 slot: 0,
                 bytes: [0x82, 0xa0].repeat(16),
-                color: 0
+                color: 0,
+                source_key: "end:test.end:40".into(),
             }
         );
         assert_eq!(
@@ -1117,14 +1282,94 @@ mod tests {
             Action::Text {
                 slot: 1,
                 bytes: [0x82, 0xa0].repeat(16),
-                color: 0
+                color: 0,
+                source_key: "end:test.end:72".into(),
             }
+        );
+        let (inventoried, _, _) = inventory(&vm.files).unwrap();
+        let emitted = actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::Text {
+                    bytes, source_key, ..
+                } => Some((source_key.clone(), bytes.clone())),
+                _ => None,
+            })
+            .collect::<HashSet<_>>();
+        assert_eq!(
+            inventoried, emitted,
+            "END inventory and playback must identify the same chunks"
         );
         assert_eq!(vm.text_line, 0); // 64-byte flush yields before the newline.
         vm.update(Controls::default()).unwrap();
         assert_eq!(vm.text_line, 1);
         vm.update(Controls::default()).unwrap();
         assert!(vm.finished);
+    }
+
+    #[test]
+    fn staff_original_pixels_and_unreadable_final_phrase_are_preserved() {
+        use crate::localization::Language;
+        let original = (0..256 * 80 * 4)
+            .map(|index| (index % 251) as u8)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            raster_staff(
+                &original,
+                "credits.extra_challenge",
+                16,
+                256,
+                80,
+                Language::Original
+            ),
+            original
+        );
+        for language in &Language::ALL[1..] {
+            let rendered =
+                raster_staff(&original, "credits.extra_challenge", 16, 256, 80, *language);
+            assert_eq!(rendered.len(), original.len());
+            assert_eq!(&rendered[256 * 48 * 4..], &original[256 * 48 * 4..]);
+            assert_ne!(&rendered[..256 * 48 * 4], &original[..256 * 48 * 4]);
+        }
+    }
+
+    #[test]
+    fn staff_translations_fit_the_original_sprite_rectangles_at_16_pixels() {
+        use crate::localization::{Language, lookup_in};
+        for sprite in 0..=16 {
+            let Some(key) = credit_key(sprite) else {
+                continue;
+            };
+            for language in &Language::ALL[1..] {
+                let translated = lookup_in(*language, key).expect("credit translation");
+                let lines = translated.lines().collect::<Vec<_>>();
+                assert_eq!(lines.len(), if sprite == 16 { 2 } else { 1 });
+                for line in lines {
+                    let image = text::render(line, 16.0, [0; 3], None);
+                    assert!(image.width <= 256, "{} {key}: {line}", language.code());
+                    assert!(image.height <= if sprite == 16 { 24 } else { 32 });
+                }
+            }
+        }
+        for branded_or_name in [0, 1, 2, 3, 10, 11, 15] {
+            assert!(credit_key(branded_or_name).is_none());
+        }
+    }
+
+    #[test]
+    fn staff_crop_preserves_the_original_texels_and_checks_bounds() {
+        let rgba = (0..4 * 4 * 4).map(|index| index as u8).collect::<Vec<_>>();
+        let mut sprite = Sprite {
+            index: 0,
+            x: 1.0,
+            y: 1.0,
+            width: 2.0,
+            height: 2.0,
+        };
+        let cropped = crop_staff_sprite(&rgba, 4, 4, &sprite).unwrap();
+        assert_eq!(cropped, [&rgba[20..28], &rgba[36..44]].concat());
+        sprite.x = 3.0;
+        assert!(crop_staff_sprite(&rgba, 4, 4, &sprite).is_err());
     }
 
     #[test]

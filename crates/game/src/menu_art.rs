@@ -1,5 +1,6 @@
 //! Original ANM menu assets, with file-local script and sprite indices.
 use crate::anm_vm::AnmRunner;
+use crate::localization::{self, Language, LatinFont};
 use std::collections::{BTreeMap, HashMap};
 use th06_engine::{DrawCmd, Engine, Texture, compose_rgba};
 use th06_formats::anm0::{Anm0, Sprite};
@@ -14,6 +15,7 @@ struct Vm {
     script: Vec<th06_formats::anm0::Instr>,
     highlight_tex: Option<usize>,
     highlighted: bool,
+    sheet_name: String,
 }
 
 /// AsciiManager::DrawStrings: ANM glyph geometry, 14-pixel advance and
@@ -21,6 +23,7 @@ struct Vm {
 pub struct MenuFont {
     normal: FontSheet,
     selected: FontSheet,
+    latin: LatinFont,
 }
 struct FontSheet {
     tex: usize,
@@ -52,7 +55,12 @@ impl MenuFont {
         };
         let normal = sheet("ascii.anm");
         let selected = sheet("asciis.anm");
-        Self { normal, selected }
+        let latin = LatinFont::load(engine, textures);
+        Self {
+            normal,
+            selected,
+            latin,
+        }
     }
     pub fn text(
         &self,
@@ -63,6 +71,20 @@ impl MenuFont {
         selected: bool,
         text: &str,
     ) {
+        if let Some(translated) = localization::lookup_in(localization::language(), text)
+            .or_else(|| localization::lookup_in(localization::language(), text.trim()))
+        {
+            let fit = ((640.0 - pos[0] - 4.0).max(1.0)
+                / (self.latin.measure(translated) * scale[0]).max(1.0))
+            .min(1.0);
+            self.latin
+                .draw(cmds, pos, [scale[0] * fit, scale[1]], color, translated);
+            return;
+        }
+        if localization::language() != Language::Original && !text.is_ascii() {
+            self.latin.draw(cmds, pos, scale, color, text);
+            return;
+        }
         let bytes: Vec<u8> = text
             .chars()
             .map(|c| {
@@ -175,6 +197,7 @@ pub struct MenuArt {
     pub background: usize,
     vms: BTreeMap<usize, Vm>,
     sounds: Vec<&'static str>,
+    latin: LatinFont,
 }
 
 impl MenuArt {
@@ -233,16 +256,33 @@ impl MenuArt {
                             script,
                             highlight_tex,
                             highlighted: false,
+                            sheet_name: name.to_string(),
                         },
                     );
                 }
             }
         }
+        let latin = LatinFont::load(engine, textures);
         Self {
             background,
             vms,
             sounds: Vec::new(),
+            latin,
         }
+    }
+    /// Port feature text uses Unicode glyphs, including Western accents.
+    pub fn text(
+        &self,
+        cmds: &mut Vec<DrawCmd>,
+        pos: [f32; 2],
+        scale: f32,
+        tint: [f32; 4],
+        source: &str,
+        max_width: f32,
+    ) {
+        let width = self.latin.measure(source) * scale;
+        let sx = scale * (max_width / width.max(1.0)).min(1.0);
+        self.latin.draw(cmds, pos, [sx, scale], tint, source);
     }
 
     /// SoundPlayer's menu cues, drained once after updating the active scene.
@@ -323,12 +363,14 @@ impl MenuArt {
             source.tex,
             source.size,
             source.highlight_tex,
+            source.sheet_name.clone(),
         );
         if let Some(target) = self.vms.get_mut(&dst) {
             target.sprites = sheet.0;
             target.tex = sheet.1;
             target.size = sheet.2;
             target.highlight_tex = sheet.3;
+            target.sheet_name = sheet.4;
         }
     }
     pub fn extra_sprite(
@@ -398,6 +440,48 @@ impl MenuArt {
             ];
             let geometry =
                 crate::sprite_geometry::screen_rotated(pos, [w, h], r.rotation, r.corner);
+            if localization::language() != Language::Original
+                && let Some((key, fallback)) = translated_sprite_label(&vm.sheet_name, sp.index)
+            {
+                let label = localization::ui(key, fallback);
+                let lines: Vec<_> = label.lines().collect();
+                if vm.sheet_name == "result03.png" {
+                    for (line, source) in lines.iter().enumerate() {
+                        self.text(
+                            &mut cmds,
+                            [
+                                geometry.dst[0],
+                                geometry.dst[1]
+                                    + if line == 0 {
+                                        0.0
+                                    } else {
+                                        32.0 + (line - 1) as f32 * 22.0
+                                    },
+                            ],
+                            if line == 0 { 1.3 } else { 1.0 },
+                            [tint[0], tint[1], tint[2], tint[3] * r.alpha],
+                            source,
+                            if line == 0 { 256.0 } else { 220.0 },
+                        );
+                    }
+                    continue;
+                }
+                let nominal = (h / (lines.len().max(1) as f32 * 22.0)).clamp(0.65, 1.6);
+                for (line, source) in lines.iter().enumerate() {
+                    self.text(
+                        &mut cmds,
+                        [
+                            geometry.dst[0],
+                            geometry.dst[1] + line as f32 * 22.0 * nominal,
+                        ],
+                        nominal,
+                        [tint[0], tint[1], tint[2], tint[3] * r.alpha],
+                        source,
+                        w,
+                    );
+                }
+                continue;
+            }
             let (u0, u1) = if r.flip_x {
                 ((sp.x + sp.width) / tw, sp.x / tw)
             } else {
@@ -423,9 +507,211 @@ impl MenuArt {
                 color_add: false,
                 depth: None,
             });
+            if localization::language() != Language::Original
+                && (vm.sheet_name == "slpl00b.png" || vm.sheet_name == "slpl01b.png")
+            {
+                let original = cmds.pop().expect("character portrait command");
+                let mut upper = original;
+                upper.dst[3] = 94.0 * r.scale[1];
+                upper.src[3] = (sp.y + 94.0) / th;
+                cmds.push(upper);
+                let mut ratings = original;
+                ratings.dst = [
+                    geometry.dst[0] + 176.0 * r.scale[0],
+                    geometry.dst[1] + 148.0 * r.scale[1],
+                    80.0 * r.scale[0],
+                    62.0 * r.scale[1],
+                ];
+                ratings.src = [
+                    (sp.x + 176.0) / tw,
+                    (sp.y + 148.0) / th,
+                    (sp.x + 256.0) / tw,
+                    (sp.y + 210.0) / th,
+                ];
+                cmds.push(ratings);
+                let marisa = vm.sheet_name == "slpl01b.png";
+                let labels = [
+                    localization::ui(
+                        if marisa {
+                            "character.marisa_title"
+                        } else {
+                            "character.reimu_title"
+                        },
+                        if marisa {
+                            "Ordinary magician"
+                        } else {
+                            "Shrine maiden of Hakurei"
+                        },
+                    ),
+                    localization::ui(
+                        if marisa {
+                            "character.marisa"
+                        } else {
+                            "character.reimu"
+                        },
+                        if marisa {
+                            "Marisa Kirisame"
+                        } else {
+                            "Reimu Hakurei"
+                        },
+                    ),
+                    localization::ui("character.speed", "Speed"),
+                    localization::ui("character.range", "Attack range"),
+                    localization::ui("character.power", "Attack power"),
+                ];
+                for (line, source) in labels.iter().enumerate() {
+                    let y = [96.0, 122.0, 150.0, 168.0, 186.0][line];
+                    self.text(
+                        &mut cmds,
+                        [
+                            geometry.dst[0] + 38.0 * r.scale[0],
+                            geometry.dst[1] + y * r.scale[1],
+                        ],
+                        if line < 2 {
+                            r.scale[0]
+                        } else {
+                            0.85 * r.scale[0]
+                        },
+                        [tint[0], tint[1], tint[2], tint[3] * r.alpha],
+                        source,
+                        if line < 2 {
+                            210.0 * r.scale[0]
+                        } else {
+                            136.0 * r.scale[0]
+                        },
+                    );
+                }
+            }
         }
         cmds
     }
+}
+
+/// These are text-only sprites. Portraits, emblems and decorative art retain
+/// their original images; every replacement follows its source ANM VM.
+fn translated_sprite_label(sheet: &str, sprite: u32) -> Option<(&'static str, &'static str)> {
+    let labels: &[(&str, &str)] = match sheet {
+        "title01.png" => {
+            return match sprite {
+                10 => Some(("menu.start", "Start")),
+                11 => Some(("menu.extra", "Extra")),
+                12 => Some(("menu.replay", "Replays")),
+                13 => Some(("menu.score", "Records")),
+                14 => Some(("menu.quit", "Quit")),
+                15 => Some(("menu.options", "Options")),
+                25 => Some(("menu.music", "Music Room")),
+                26 => Some(("menu.practice", "Practice")),
+                _ => None,
+            };
+        }
+        "title04.png" => &[
+            ("controller.shoot", "Shoot / Confirm"),
+            ("controller.bomb", "Bomb / Cancel"),
+            ("controller.focus", "Focus"),
+            ("controller.up", "Up"),
+            ("controller.down", "Down"),
+            ("controller.left", "Left"),
+            ("controller.right", "Right"),
+            ("controller.button", "Button"),
+            ("menu.back", "Back"),
+            ("controller.pause", "Pause"),
+            ("options.defaults", "Restore defaults"),
+            ("options.off", "Off"),
+            ("options.window", "Display"),
+            ("options.fullscreen", "Fullscreen"),
+            ("options.windowed", "Windowed"),
+            ("options.wav", "WAV"),
+            ("options.midi", "MIDI"),
+            ("options.controller", "Controller"),
+            ("controller.skip", "Skip"),
+        ],
+        "select01.png" => &[
+            ("difficulty.easy_card", "Easy\nFor new players"),
+            ("difficulty.normal_card", "Normal\nThe standard challenge"),
+            ("selection.mode", "Select difficulty"),
+        ],
+        "select02.png" => &[
+            ("difficulty.hard_card", "Hard\nArcade difficulty"),
+            ("difficulty.lunatic_card", "Lunatic\nFor the fearless"),
+        ],
+        "select05.png" => &[("difficulty.extra_card", "Extra\nA special challenge")],
+        "select03.png" => &[
+            ("selection.player", "Select player"),
+            ("selection.shot", "Select shot type"),
+        ],
+        "select04.png" => &[
+            ("shot.reimu_a", "Spirit: Homing Amulet\nBomb: Fantasy Seal"),
+            (
+                "shot.reimu_b",
+                "Dream: Persuasion Needle\nBomb: Evil-Sealing Circle",
+            ),
+            (
+                "shot.marisa_a",
+                "Magic: Magic Missile\nBomb: Stardust Reverie",
+            ),
+            ("shot.marisa_b", "Love: Illusion Laser\nBomb: Master Spark"),
+        ],
+        "result00.png" => &[
+            ("result.records", "Score and spell card records"),
+            ("result.easy", "Easy records"),
+            ("result.normal", "Normal records"),
+            ("result.hard", "Hard records"),
+            ("result.lunatic", "Lunatic records"),
+            ("result.extra", "Extra records"),
+            ("result.spells", "Spell card records"),
+            ("menu.back", "Back"),
+        ],
+        "result01.png" => &[
+            ("difficulty.easy", "Easy"),
+            ("difficulty.normal", "Normal"),
+            ("difficulty.hard", "Hard"),
+            ("difficulty.lunatic", "Lunatic"),
+            ("difficulty.extra", "Extra"),
+            ("result.spells", "Spell cards"),
+        ],
+        "result02.png" => &[
+            ("result.save_replay", "Save this replay?"),
+            ("ui.yes", "Yes"),
+            ("ui.no", "No"),
+            (
+                "result.continue_no_replay",
+                "A replay cannot be saved\nafter using a continue.",
+            ),
+            (
+                "result.refresh_no_replay",
+                "A replay cannot be saved\nabove 60 Hz.",
+            ),
+            ("result.overwrite", "Overwrite this replay?"),
+        ],
+        "result03.png" => &[(
+            "result.stats",
+            "Your results\nFinal score\nDifficulty\nGame completed\nContinues used\nMisses\nBombs used\nSpell cards captured\nSlowdown rate",
+        )],
+        "music00.png" => &[("menu.music", "Music Room")],
+        "replay00.png" => &[
+            ("replay.title", "Watch your replays"),
+            ("replay.stage", "Stage"),
+            ("difficulty.easy", "Easy"),
+            ("difficulty.normal", "Normal"),
+            ("difficulty.hard", "Hard"),
+            ("difficulty.lunatic", "Lunatic"),
+            ("difficulty.extra", "Extra"),
+            ("result.score", "Final score"),
+            ("result.score", "Score"),
+            ("result.slowdown", "Slowdown rate"),
+        ],
+        "ascii.png" => {
+            return match sprite {
+                115 => Some(("ui.yes", "Yes")),
+                116 => Some(("ui.no", "No")),
+                117 => Some(("retry.continue", "Continue?")),
+                118 => Some(("retry.remaining", "Remaining")),
+                _ => None,
+            };
+        }
+        _ => return None,
+    };
+    labels.get(sprite as usize).copied()
 }
 
 #[cfg(test)]
@@ -453,6 +739,7 @@ mod tests {
             background: 0,
             vms: BTreeMap::new(),
             sounds: Vec::new(),
+            latin: LatinFont::default(),
         };
         art.sound("select00");
         art.sound("cancel00");
@@ -467,6 +754,7 @@ mod tests {
             background: 0,
             vms: BTreeMap::new(),
             sounds: Vec::new(),
+            latin: LatinFont::default(),
         };
         let mut title = crate::title::Title::new(art);
         title.reset(5);
@@ -491,6 +779,7 @@ mod tests {
                 background: 0,
                 vms: BTreeMap::new(),
                 sounds: Vec::new(),
+                latin: LatinFont::default(),
             };
             let font = MenuFont {
                 normal: FontSheet {
@@ -503,6 +792,7 @@ mod tests {
                     size: [1.0; 2],
                     sprites: HashMap::new(),
                 },
+                latin: LatinFont::default(),
             };
             let mut selection = Selection::new(art, font);
             selection.begin(mode, 2);
@@ -544,6 +834,7 @@ mod tests {
                 background: 0,
                 vms: BTreeMap::new(),
                 sounds: Vec::new(),
+                latin: LatinFont::default(),
             };
             let sheet = || FontSheet {
                 tex: 0,
@@ -556,6 +847,7 @@ mod tests {
                 MenuFont {
                     normal: sheet(),
                     selected: sheet(),
+                    latin: LatinFont::default(),
                 },
             );
             let mut in_selection = false;
@@ -616,6 +908,7 @@ mod tests {
             background: 0,
             vms: BTreeMap::new(),
             sounds: Vec::new(),
+            latin: LatinFont::default(),
         };
         let mut menu = OptionsMenu::new(art);
         menu.midi_available = true;
@@ -629,6 +922,7 @@ mod tests {
             windowed: true,
             default_difficulty: 3,
             hardware_texture_blending: true,
+            ..Options::default()
         };
         for _ in 0..32 {
             menu.update(&Input::default(), &mut options);
@@ -667,6 +961,7 @@ mod tests {
             background: 0,
             vms: BTreeMap::new(),
             sounds: Vec::new(),
+            latin: LatinFont::default(),
         };
         let mut menu = OptionsMenu::new(art);
         menu.midi_available = true;
@@ -708,6 +1003,7 @@ mod tests {
             background: 0,
             vms: BTreeMap::new(),
             sounds: Vec::new(),
+            latin: LatinFont::default(),
         };
         let mut menu = OptionsMenu::new(art);
         menu.midi_available = true;
@@ -750,6 +1046,7 @@ mod tests {
             background: 0,
             vms: BTreeMap::new(),
             sounds: Vec::new(),
+            latin: LatinFont::default(),
         };
         let mut title = Title::new(art);
         // The first confirm dismisses PRE_INPUT. Selection begins only after

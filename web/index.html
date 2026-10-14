@@ -71,26 +71,39 @@
   <h1>東方紅魔郷 <span style="color:#b3123a">·</span> Embodiment of Scarlet Devil</h1>
   <div id="status" role="status" aria-live="polite"></div>
   <div id="error" class="err" role="alert"></div>
-  <button id="retry" class="hidden">Réessayer</button>
+  <button id="retry" class="hidden" data-i18n="retry">Réessayer</button>
 </div>
 
-<button id="fsBtn" title="Plein écran (F)">⛶ Plein écran</button>
-<button id="gameTools">Scores et replays</button>
+<button id="fsBtn" title="Plein écran (F)" data-i18n="fullscreen" data-i18n-title="fullscreenTitle">⛶ Plein écran</button>
+<button id="gameTools" data-i18n="tools">Scores et replays</button>
 <div id="persistenceError" role="alert" aria-live="assertive"></div>
 <dialog id="dataDialog">
-  <h2>Sauvegardes et replays</h2>
-  <p class="sub">Les imports remplacent la sauvegarde ou le replay choisi sur cet appareil.</p>
-  <div class="tool-row"><button id="importScore">Importer score.dat</button><button id="exportScore">Exporter score.dat</button></div>
-  <div class="tool-row"><label for="replaySlot">Emplacement du replay</label><select id="replaySlot"></select></div>
-  <div class="tool-row"><button id="importReplay">Importer un replay</button><button id="exportReplay">Exporter le replay</button></div>
+  <h2 data-i18n="toolsTitle">Sauvegardes et replays</h2>
+  <p class="sub" data-i18n="toolsIntro">Les imports remplacent la sauvegarde ou le replay choisi sur cet appareil.</p>
+  <div class="tool-row"><button id="importScore" data-i18n="importScore">Importer score.dat</button><button id="exportScore" data-i18n="exportScore">Exporter score.dat</button></div>
+  <div class="tool-row"><label for="replaySlot" data-i18n="replaySlot">Emplacement du replay</label><select id="replaySlot"></select></div>
+  <div class="tool-row"><button id="importReplay" data-i18n="importReplay">Importer un replay</button><button id="exportReplay" data-i18n="exportReplay">Exporter le replay</button></div>
   <p id="dataStatus" role="status" aria-live="polite"></p>
-  <button id="closeData">Fermer</button>
+  <button id="closeData" data-i18n="close">Fermer</button>
 </dialog>
 <input id="scoreFile" type="file" accept=".dat" hidden />
 <input id="replayFile" type="file" accept=".rpy" hidden />
 
 <script type="module">
 const $ = id => document.getElementById(id);
+// Optional shared site UI is hosted outside the game project. Keep the runtime
+// hooks available while that module downloads; gameplay never waits for it.
+const pendingResults = [];
+window.__th06GameLanguage = "fr";
+window.__th06OnLanguageChanged = code => { window.__th06GameLanguage = code; };
+window.__th06SubmitScore = payload => { if (pendingResults.length < 50) pendingResults.push(payload); };
+window.__th06TakePendingResults = () => pendingResults.splice(0);
+function loadSharedInterface() {
+  import("/platform/community.js").catch(() => setTimeout(loadSharedInterface, 30000));
+}
+loadSharedInterface();
+const ui = (key, fallback, values = {}) => window.__th06Text?.(key, values)
+  || fallback.replace(/\{(\w+)\}/g, (match, name) => values[name] ?? match);
 const REQUIRED = ["TL.DAT", "CM.DAT", "ST.DAT", "IN.DAT"];
 const ARCHIVES = [...REQUIRED, "ED.DAT", "MD.DAT", "th06e_ST.DAT", "th06e_ED.DAT", "th06e_MD.DAT", "th06e_IN.DAT", "th06e_CM.DAT"];
 const MAX_FILE = 64 * 1024 * 1024, MAX_TOTAL = 1024 * 1024 * 1024;
@@ -106,7 +119,7 @@ function canonicalName(name) {
 }
 function complete(map) {
   const missing = REQUIRED.filter(name => !(map[name] instanceof Uint8Array) || map[name].byteLength === 0);
-  if (missing.length) throw new Error("Fichiers manquants : " + missing.join(", "));
+  if (missing.length) throw new Error(ui("missingFiles", "Fichiers manquants : {files}", { files: missing.join(", ") }));
   return map;
 }
 function versioned(path) {
@@ -119,7 +132,7 @@ function loadRuntime() {
     const runtimeUrl = versioned("./pkg/th06.js");
     const runtime = await import(runtimeUrl);
     const response = await fetch(versioned("./pkg/th06_bg.wasm"));
-    if (!response.ok) throw new Error("Le moteur du jeu n’a pas pu être chargé.");
+    if (!response.ok) throw new Error(ui("engineUnavailable", "Le moteur du jeu n’a pas pu être chargé."));
     const compiledModule = typeof WebAssembly.compileStreaming === "function" && response.headers.get("Content-Type")?.split(";")[0] === "application/wasm"
       ? await WebAssembly.compileStreaming(response)
       : await WebAssembly.compile(await response.arrayBuffer());
@@ -146,17 +159,17 @@ function loadRuntime() {
   return runtimePromise;
 }
 function validateManifest(data) {
-  if (!data || !data.files || typeof data.files !== "object" || Array.isArray(data.files)) throw new Error("La liste des fichiers du site est invalide.");
+  if (!data || !data.files || typeof data.files !== "object" || Array.isArray(data.files)) throw new Error(ui("invalidManifest", "La liste des fichiers du site est invalide."));
   const entries = [], names = new Set();
   for (const [key, path] of Object.entries(data.files)) {
     const name = canonicalName(key);
-    if (!name || key.includes("/") || key.includes("\\") || names.has(name) || typeof path !== "string") throw new Error("Entrée invalide dans la liste des fichiers : " + key);
+    if (!name || key.includes("/") || key.includes("\\") || names.has(name) || typeof path !== "string") throw new Error(ui("invalidManifestEntry", "Entrée invalide dans la liste des fichiers : {file}", { file: key }));
     const url = new URL(path, location.href);
-    if (url.origin !== location.origin || !["http:", "https:"].includes(url.protocol) || url.username || url.password) throw new Error("Les fichiers du jeu doivent provenir de ce site.");
+    if (url.origin !== location.origin || !["http:", "https:"].includes(url.protocol) || url.username || url.password) throw new Error(ui("invalidAssetOrigin", "Les fichiers du jeu doivent provenir de ce site."));
     names.add(name); entries.push([name, url.href]);
   }
   const missing = REQUIRED.filter(name => !names.has(name));
-  if (missing.length) throw new Error("La liste du site est incomplète : " + missing.join(", "));
+  if (missing.length) throw new Error(ui("incompleteManifest", "La liste du site est incomplète : {files}", { files: missing.join(", ") }));
   return entries;
 }
 async function readHosted(entries) {
@@ -166,23 +179,23 @@ async function readHosted(entries) {
     while (index < entries.length) {
       const [name, url] = entries[index++];
       const response = await fetch(url, { signal: controller.signal });
-      if (!response.ok) throw new Error(name + " : téléchargement impossible (" + response.status + ").");
+      if (!response.ok) throw new Error(ui("downloadFailed", "{file} : téléchargement impossible ({status}).", { file: name, status: response.status }));
       const advertised = Number(response.headers.get("Content-Length"));
-      if (advertised > MAX_FILE) throw new Error(name + " est trop volumineux.");
+      if (advertised > MAX_FILE) throw new Error(ui("assetTooLarge", "{file} est trop volumineux.", { file: name }));
       const reader = response.body?.getReader();
-      if (!reader) throw new Error("Le navigateur ne permet pas la lecture des fichiers du jeu.");
+      if (!reader) throw new Error(ui("streamUnavailable", "Le navigateur ne permet pas la lecture des fichiers du jeu."));
       const chunks = []; let size = 0;
       for (;;) {
         const { value, done } = await reader.read();
         if (done) break;
         size += value.byteLength; total += value.byteLength;
-        if (size > MAX_FILE || total > MAX_TOTAL) { await reader.cancel(); throw new Error("Les fichiers dépassent la capacité de chargement du navigateur."); }
+        if (size > MAX_FILE || total > MAX_TOTAL) { await reader.cancel(); throw new Error(ui("assetsTooLarge", "Les fichiers dépassent la capacité de chargement du navigateur.")); }
         chunks.push(value);
       }
       const bytes = new Uint8Array(size); let offset = 0;
       for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
       map[name] = bytes;
-      status.textContent = "Chargement du jeu : " + (++completed) + " / " + entries.length;
+      status.textContent = ui("loadingFiles", "Chargement du jeu : {completed} / {total}", { completed: ++completed, total: entries.length });
     }
   }
   try { await Promise.all([worker(), worker()]); return complete(map); }
@@ -194,7 +207,7 @@ async function startGame() {
   let map;
   try {
     map = await readHosted(manifest);
-    status.textContent = "Démarrage du jeu…";
+    status.textContent = ui("startingGame", "Démarrage du jeu…");
     const runtime = await loadRuntime();
     await runtime.start_game(map);
     document.body.classList.add("playing");
@@ -212,17 +225,18 @@ $("retry").addEventListener("click", () => location.reload());
 function toggleFullscreen() {
   const canvas = $("th06-canvas"); if (!canvas) return;
   const action = document.fullscreenElement ? document.exitFullscreen() : canvas.requestFullscreen();
-  action?.catch(() => { $("persistenceError").textContent = "Le navigateur a refusé le plein écran."; });
+  action?.catch(() => { $("persistenceError").textContent = ui("fullscreenDenied", "Le navigateur a refusé le plein écran."); });
 }
 $("fsBtn").addEventListener("click", toggleFullscreen);
 window.addEventListener("keydown", event => {
-  if ($("dataDialog").open) return;
+  if ($("dataDialog").open || window.__th06CommunityDialogOpen?.()) return;
   if ((event.key === "f" || event.key === "F") && document.body.classList.contains("playing")) { event.preventDefault(); toggleFullscreen(); }
 }, true);
 
 // Save data is handled by Rust's validated score/T6RP parsers. Nothing is uploaded.
 const dialog = $("dataDialog"), dataStatus = $("dataStatus");
-function syncSuspension() { runtimeApi?.set_suspended(document.hidden || $("dataDialog").open); }
+function syncSuspension() { runtimeApi?.set_suspended(document.hidden || $("dataDialog").open || Boolean(window.__th06CommunityDialogOpen?.())); }
+window.__th06SyncSuspension = syncSuspension;
 document.addEventListener("visibilitychange", syncSuspension);
 for (let slot = 0; slot < 15; slot++) $("replaySlot").add(new Option(String(slot + 1).padStart(2, "0"), String(slot)));
 $("gameTools").addEventListener("click", () => { dataStatus.textContent = ""; dialog.showModal(); syncSuspension(); });
@@ -236,7 +250,7 @@ function download(name, bytes) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 async function dataAction(action) {
-  try { await action(await loadRuntime()); dataStatus.textContent = "Terminé."; }
+  try { await action(await loadRuntime()); dataStatus.textContent = ui("done", "Terminé."); }
   catch (err) { dataStatus.textContent = err?.message || String(err); }
 }
 $("importScore").addEventListener("click", () => $("scoreFile").click());
@@ -244,14 +258,14 @@ $("importReplay").addEventListener("click", () => $("replayFile").click());
 $("scoreFile").addEventListener("change", async event => {
   const file = event.target.files[0]; event.target.value = "";
   if (file) dataAction(async runtime => {
-    if (file.size > 16 * 1024 * 1024) throw new Error("Sauvegarde trop volumineuse.");
+    if (file.size > 16 * 1024 * 1024) throw new Error(ui("saveTooLarge", "Sauvegarde trop volumineuse."));
     runtime.import_score(new Uint8Array(await file.arrayBuffer()));
   });
 });
 $("replayFile").addEventListener("change", async event => {
   const file = event.target.files[0], slot = Number($("replaySlot").value); event.target.value = "";
   if (file) dataAction(async runtime => {
-    if (file.size > 16 * 1024 * 1024) throw new Error("Replay trop volumineux.");
+    if (file.size > 16 * 1024 * 1024) throw new Error(ui("replayTooLarge", "Replay trop volumineux."));
     runtime.import_replay(new Uint8Array(await file.arrayBuffer()), slot);
   });
 });
@@ -262,21 +276,22 @@ $("exportReplay").addEventListener("click", () => dataAction(runtime => {
 }));
 
 (async function boot() {
-  status.textContent = "Chargement du jeu…";
+  status.textContent = ui("loadingGame", "Chargement du jeu…");
   try {
     const [build, hosted] = await Promise.all([
       fetch("./build.json", { cache: "no-store" }).then(response => response.ok ? response.json() : null),
       fetch("./assets.json", { cache: "no-cache" }).then(response => {
-        if (!response.ok) throw new Error("Les ressources du jeu sont indisponibles. Réessayez dans un instant.");
+        if (!response.ok) throw new Error(ui("assetsUnavailable", "Les ressources du jeu sont indisponibles. Réessayez dans un instant."));
         return response.json();
       }),
     ]);
     if (typeof build?.version === "string") version = build.version.slice(0, 128);
+    window.__th06BuildVersion = version;
     manifest = validateManifest(hosted);
     await startGame();
   } catch (err) {
     console.error(err);
-    error.textContent = "Le jeu n’a pas pu démarrer : " + (err?.message || String(err));
+    error.textContent = ui("startError", "Le jeu n’a pas pu démarrer : {message}", { message: err?.message || String(err) });
     status.textContent = "";
     document.body.classList.remove("playing");
     $("th06-canvas")?.remove();

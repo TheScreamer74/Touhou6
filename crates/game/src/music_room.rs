@@ -41,35 +41,27 @@ impl MusicRoom {
         let font = MenuFont::load(engine, &files.inn, textures);
         let mut tracks = Vec::new();
         for (path, title, description) in parse_comments(&files.music_comments) {
-            let bake = |bytes: &[u8], color, shadow, textures: &mut Vec<Texture>| {
-                let image = th06_engine::text::render_shiftjis(bytes, 15.0, color, Some(shadow));
-                let tex = textures.len();
-                textures.push(engine.create_texture(&image.rgba, image.width, image.height));
-                Text {
-                    tex,
-                    w: image.width as f32,
-                    h: image.height as f32,
-                }
-            };
-            let title = bake(&title, [255, 224, 192], [128, 32, 48], textures);
+            let (tex, w, h) = crate::localization::bake_shiftjis(
+                engine,
+                textures,
+                &title,
+                15.0,
+                [255, 224, 192],
+                Some([128, 32, 48]),
+                [496, 20],
+            );
+            let title = Text { tex, w, h };
             let mut desc = Vec::new();
             for (line, bytes) in description.iter().enumerate().take(8) {
-                for half in 0..2 {
-                    let start = half * 32;
-                    if start >= bytes.len() {
-                        continue;
-                    }
-                    let txt = bake(
-                        &bytes[start..bytes.len().min(start + 32)],
-                        [192, 224, 255],
-                        [0, 0, 48],
-                        textures,
-                    );
-                    desc.push((
-                        txt,
-                        [96.0 + half as f32 * 248.0, 320.0 + line as f32 * 16.0],
-                    ));
-                }
+                let (tex, w, h) = crate::localization::bake_custom(
+                    engine,
+                    textures,
+                    bytes,
+                    0,
+                    [496, 20],
+                    raster_comment,
+                );
+                desc.push((Text { tex, w, h }, [96.0, 320.0 + line as f32 * 16.0]));
             }
             tracks.push(Track {
                 path,
@@ -200,6 +192,51 @@ impl MusicRoom {
             depth: None,
         });
     }
+}
+fn raster_comment(
+    bytes: &[u8],
+    source_key: &str,
+    _: u32,
+    width: u32,
+    height: u32,
+    language: crate::localization::Language,
+) -> Vec<u8> {
+    use th06_engine::text;
+    if language != crate::localization::Language::Original {
+        return crate::localization::canvas_image(
+            text::render(
+                &crate::localization::translate_in(language, source_key),
+                15.0,
+                [192, 224, 255],
+                Some([0, 0, 48]),
+            ),
+            [width, height],
+            text::SpriteTextAlign::Left,
+        )
+        .rgba;
+    }
+    let mut rgba = vec![0; (width * height * 4) as usize];
+    for half in 0..2 {
+        let start = half * 32;
+        if start >= bytes.len() {
+            continue;
+        }
+        let image = text::render_shiftjis(
+            &bytes[start..bytes.len().min(start + 32)],
+            15.0,
+            [192, 224, 255],
+            Some([0, 0, 48]),
+        );
+        let offset = half as u32 * 248;
+        for y in 0..height.min(image.height) {
+            for x in 0..image.width.min(width.saturating_sub(offset)) {
+                let source = ((y * image.width + x) * 4) as usize;
+                let dest = ((y * width + offset + x) * 4) as usize;
+                rgba[dest..dest + 4].copy_from_slice(&image.rgba[source..source + 4]);
+            }
+        }
+    }
+    rgba
 }
 /// The source leaves the title's CR/LF in place, producing an empty first comment line.
 fn parse_comments(bytes: &[u8]) -> Vec<(String, Vec<u8>, Vec<Vec<u8>>)> {

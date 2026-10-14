@@ -275,6 +275,8 @@ fn main() {
     let mut probe_run = false;
     let mut ecl_dump = false;
     let mut color_mode: Option<bool> = None;
+    let mut language = None;
+    let mut hitbox = None;
     let mut hardware_texture_blending: Option<bool> = None;
     let mut capture_seed: Option<u16> = None;
     let mut score_fixture: Option<(u64, i64)> = None;
@@ -359,6 +361,26 @@ fn main() {
             "--autoplay" => autoplay = true,
             "--probe-run" => probe_run = true,
             "--ecl-dump" => ecl_dump = true,
+            "--language" => {
+                let value = args.next().expect("--language <ja|fr|en|de|nl>");
+                language = Some(match value.as_str() {
+                    "ja" => th06::localization::Language::Original,
+                    "fr" => th06::localization::Language::French,
+                    "en" => th06::localization::Language::English,
+                    "de" => th06::localization::Language::German,
+                    "nl" => th06::localization::Language::Dutch,
+                    _ => panic!("invalid language: {value}"),
+                });
+            }
+            "--hitbox" => {
+                let value = args.next().expect("--hitbox <off|focus|always>");
+                hitbox = Some(match value.as_str() {
+                    "off" => th06::options::Hitbox::Off,
+                    "focus" => th06::options::Hitbox::Focus,
+                    "always" => th06::options::Hitbox::Always,
+                    _ => panic!("invalid hitbox: {value}"),
+                });
+            }
             "--color-16bit" => color_mode = Some(true),
             "--color-32bit" => color_mode = Some(false),
             "--hardware-texture-blending" => hardware_texture_blending = Some(true),
@@ -469,7 +491,10 @@ fn main() {
         && replay_pools.is_none()
         && capture_dir.is_none()
         && !ecl_dump;
-    let (textures, mut game) = build_game(&engine, &files, with_audio);
+    if let Some(value) = language {
+        th06::localization::set_language(value);
+    }
+    let (mut textures, mut game) = build_game(&engine, &files, with_audio);
 
     let hiscore_path = game_dir.join("th06_hiscore.txt");
     game.set_hiscore(load_hiscore(&hiscore_path));
@@ -479,6 +504,14 @@ fn main() {
     game.set_scores(load_scores(&scores_path));
     game.set_scores_path(scores_path);
     game.configure_storage(&game_dir.to_string_lossy());
+    // Explicit capture settings override persisted preferences without writing
+    // them back; initial recipes were already baked in the requested language.
+    if let Some(value) = language {
+        game.options.language = value;
+    }
+    if let Some(value) = hitbox {
+        game.options.hitbox = value;
+    }
     if let Some(value) = hardware_texture_blending {
         game.options.hardware_texture_blending = value;
     }
@@ -819,7 +852,6 @@ fn main() {
                     )
                 });
         let all_pool_frames = pools.is_some() && capture_frames.is_empty();
-        let textures_ref: Vec<&th06_engine::Texture> = textures.iter().collect();
         let mut pending = capture_frames;
         let mut pending_pools = capture_pool_frames;
         for update in 1..=frames {
@@ -840,6 +872,8 @@ fn main() {
             if directory.is_some() {
                 // The original retains color between Presents. Every draw
                 // chain contributes, even when no PNG checkpoint is requested.
+                engine.apply_texture_replacements(&mut textures);
+                let textures_ref = textures.iter().collect::<Vec<_>>();
                 engine.advance_frame(&frame.cmds, &textures_ref, frame.bg.as_ref());
             }
             if let (Some(file), Some(state)) = (&mut stages, game.diagnostic_stage_state()) {
@@ -977,7 +1011,6 @@ fn main() {
         let out_root = PathBuf::from(out_root);
         std::fs::create_dir_all(&out_root).expect("create record dir");
         game.start_title_bgm();
-        let textures_ref: Vec<&th06_engine::Texture> = textures.iter().collect();
 
         let mut idx = 0usize;
         let mut entered_stage = false;
@@ -1013,6 +1046,8 @@ fn main() {
                 frames_dir = out_root.join(format!("_f_{label}"));
                 std::fs::create_dir_all(&frames_dir).unwrap();
             }
+            engine.apply_texture_replacements(&mut textures);
+            let textures_ref = textures.iter().collect::<Vec<_>>();
             engine.advance_frame(&frame.cmds, &textures_ref, frame.bg.as_ref());
             let pixels = engine.read_frame();
             image::save_buffer(
@@ -1048,7 +1083,6 @@ fn main() {
         // steer under the boss (TH06_GOD to survive, TH06_NOSHOOT to let the
         // boss cycle every card via timeouts).
         std::fs::create_dir_all(&dir).expect("create record dir");
-        let textures_ref: Vec<&th06_engine::Texture> = textures.iter().collect();
         let no_shoot = std::env::var_os("TH06_NOSHOOT").is_some();
         for f in 0..frames {
             let mut held = if no_shoot {
@@ -1071,6 +1105,8 @@ fn main() {
                 &[]
             };
             let frame = game.update(&Input::synthetic(&held, pressed));
+            engine.apply_texture_replacements(&mut textures);
+            let textures_ref = textures.iter().collect::<Vec<_>>();
             engine.advance_frame(&frame.cmds, &textures_ref, frame.bg.as_ref());
             let pixels = engine.read_frame();
             let path = format!("{dir}/frame_{f:06}.png");
@@ -1092,7 +1128,6 @@ fn main() {
         // tap Start, then hold Shoot, dumping a PNG every `demo_interval`
         // frames so the real title->stage->boss path is visible headlessly.
         std::fs::create_dir_all(&dir).expect("create demo dir");
-        let textures_ref: Vec<&th06_engine::Texture> = textures.iter().collect();
         let mut frame = Frame {
             cmds: Vec::new(),
             bg: None,
@@ -1122,6 +1157,8 @@ fn main() {
             };
             frame = game.update(&input);
             if f % demo_interval == 0 {
+                engine.apply_texture_replacements(&mut textures);
+                let textures_ref = textures.iter().collect::<Vec<_>>();
                 engine.advance_frame(&frame.cmds, &textures_ref, frame.bg.as_ref());
                 let pixels = engine.read_frame();
                 let path = format!("{dir}/frame_{f:05}.png");
@@ -1145,7 +1182,6 @@ fn main() {
         // that use ex-instructions) are exercised. Dialogue is advanced with
         // Enter (which doesn't fire shots) so the fight actually starts.
         let no_shoot = std::env::var_os("TH06_NOSHOOT").is_some();
-        let textures_ref: Vec<&th06_engine::Texture> = textures.iter().collect();
         for f in 0..frames {
             let mut held = if no_shoot {
                 Vec::new()
@@ -1169,6 +1205,8 @@ fn main() {
                 &[]
             };
             let frame = game.update(&Input::synthetic(&held, pressed));
+            engine.apply_texture_replacements(&mut textures);
+            let textures_ref = textures.iter().collect::<Vec<_>>();
             engine.advance_frame(&frame.cmds, &textures_ref, frame.bg.as_ref());
         }
         let pixels = engine.read_frame();

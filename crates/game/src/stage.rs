@@ -839,6 +839,7 @@ pub struct Stage {
     stage_rng_seed: u16,
     /// Focus held last update, for drawing the orbs in their focused position.
     last_input_focus: bool,
+    hitbox_mode: crate::options::Hitbox,
     /// positionOfLastEnemyHit: the lowest on-screen enemy, for the orb-amulet and
     /// ReimuA-seal homing (set in `collide`).
     last_enemy_hit: Option<[f32; 2]>,
@@ -1439,6 +1440,7 @@ impl Stage {
             is_replay: false,
             stage_rng_seed: cfg.rng_seed,
             last_input_focus: false,
+            hitbox_mode: crate::options::Hitbox::Focus,
             last_enemy_hit: None,
             state: PlayerState::Spawning(120),
             shots: Vec::new(),
@@ -4591,6 +4593,37 @@ impl Stage {
         })
     }
 
+    pub(crate) fn set_hitbox_mode(&mut self, mode: crate::options::Hitbox) {
+        self.hitbox_mode = mode;
+    }
+
+    fn draw_hitbox(&self, cmds: &mut Vec<DrawCmd>) {
+        use crate::options::Hitbox;
+        if !matches!(self.state, PlayerState::Alive)
+            || self.dying != 0
+            || self.hitbox_mode == Hitbox::Off
+            || (self.hitbox_mode == Hitbox::Focus && !self.last_input_focus)
+        {
+            return;
+        }
+        // Optional port overlay. The center is the player's RHW position and
+        // the 2.5-pixel core marks the actual +/-1.25 collision box. Neither
+        // this marker nor its visibility changes collision calculations.
+        let center = [self.arcade[0] + self.pos[0], self.arcade[1] + self.pos[1]];
+        for (side, tint, rotation) in [
+            (7.0, [0.0, 0.0, 0.0, 0.95], std::f32::consts::FRAC_PI_4),
+            (5.0, [1.0, 1.0, 1.0, 0.95], std::f32::consts::FRAC_PI_4),
+            (2.5, [1.0, 0.12, 0.25, 1.0], 0.0),
+        ] {
+            let mut command = rect(
+                [center[0] - side / 2.0, center[1] - side / 2.0, side, side],
+                tint,
+            );
+            command.rot = rotation;
+            cmds.push(command);
+        }
+    }
+
     pub(crate) fn draw(&self) -> Vec<DrawCmd> {
         let mut cmds = Vec::with_capacity(96 + self.world.bullets.len());
         if self.background.is_none() {
@@ -5189,6 +5222,7 @@ impl Stage {
         for command in &mut cmds[bullet_start..] {
             *command = self.project_world_cmd(*command, 0.0, self.draw_arcade);
         }
+        self.draw_hitbox(&mut cmds);
         // RHW and absolute stage sprites share the old viewport's clipping,
         // even though RHW positions already include the newer arcade origin.
         for command in &mut cmds {
@@ -5381,9 +5415,38 @@ impl Stage {
         // Once it stops, the stage chain leaves the existing color buffer intact.
         if let Some(asset) = &self.loading_asset
             && let Some(runner) = &self.loading_runner
-            && let Some(command) = screen_asset_cmd(asset, runner)
+            && let Some(mut command) = screen_asset_cmd(asset, runner)
         {
-            cmds.push(command);
+            if crate::localization::language() != crate::localization::Language::Original {
+                // The bottom 37 source rows contain the functional “Now
+                // Loading” caption. Keep the character and branded artwork
+                // above it, then render the selected language in that band.
+                let full = command.dst;
+                let upper = 219.0 / 256.0;
+                command.dst[3] *= upper;
+                command.src[3] = command.src[1] + (command.src[3] - command.src[1]) * upper;
+                cmds.push(command);
+                cmds.push(rect(
+                    [
+                        full[0],
+                        full[1] + full[3] * upper,
+                        full[2],
+                        full[3] * (1.0 - upper),
+                    ],
+                    [0.0, 0.0, 0.0, runner.alpha],
+                ));
+                crate::localization::draw_label(
+                    &mut cmds,
+                    [full[0] + 12.0, full[1] + full[3] * upper + 4.0],
+                    16.0 * runner.scale[1].abs(),
+                    [1.0, 0.85, 0.4, runner.alpha],
+                    "game.loading",
+                    "Loading",
+                    full[2] - 24.0,
+                );
+            } else {
+                cmds.push(command);
+            }
         }
 
         // Portraits, names, loading and dialogue use absolute RHW positions.
@@ -5768,7 +5831,12 @@ impl Stage {
         if self.paused
             && let Some(asset) = &self.pause_asset
         {
-            for runner in self.pause_runners.iter().flatten() {
+            for (index, runner) in self
+                .pause_runners
+                .iter()
+                .enumerate()
+                .filter_map(|(index, runner)| runner.as_ref().map(|runner| (index, runner)))
+            {
                 if !runner.visible() {
                     continue;
                 }
@@ -5785,6 +5853,32 @@ impl Stage {
                 let h = sprite.height * runner.scale[1];
                 let x = runner.pos[0] + runner.pos_offset[0];
                 let y = runner.pos[1] + runner.pos_offset[1];
+                if crate::localization::language() != crate::localization::Language::Original {
+                    let (key, fallback) = [
+                        ("pause.title", "Pause"),
+                        ("pause.resume", "Resume"),
+                        ("pause.quit", "Return to title"),
+                        ("pause.confirm", "Return to title?"),
+                        ("ui.yes", "Yes"),
+                        ("ui.no", "No"),
+                    ][index];
+                    if crate::localization::draw_label(
+                        cmds,
+                        [x - w / 2.0, y - h / 2.0],
+                        16.0 * runner.scale[1].abs(),
+                        [
+                            runner.color[0],
+                            runner.color[1],
+                            runner.color[2],
+                            runner.alpha,
+                        ],
+                        key,
+                        fallback,
+                        w.abs(),
+                    ) {
+                        continue;
+                    }
+                }
                 let (tw, th) = (asset.tex_size.0 as f32, asset.tex_size.1 as f32);
                 cmds.push(DrawCmd {
                     tex: asset.tex,
@@ -5864,6 +5958,9 @@ fn draw_num(cmds: &mut Vec<DrawCmd>, pos: [f32; 2], tint: [f32; 4], text: &str) 
 /// As [`draw_num`] but with an AsciiManager scale (e.g. 2.0 for the spellcard
 /// bonus "+N").
 fn draw_num_scaled(cmds: &mut Vec<DrawCmd>, pos: [f32; 2], scale: f32, tint: [f32; 4], text: &str) {
+    if crate::localization::draw_translated_text(cmds, pos, 16.0 * scale, tint, text) {
+        return;
+    }
     let mut x = pos[0];
     for ch in text.chars() {
         let c = ch as u32;
@@ -5898,6 +5995,9 @@ fn draw_num_scaled(cmds: &mut Vec<DrawCmd>, pos: [f32; 2], scale: f32, tint: [f3
 
 /// Draw ASCII text using the 16x16 glyph grid in ascii.png.
 pub fn draw_text(cmds: &mut Vec<DrawCmd>, pos: [f32; 2], size: f32, tint: [f32; 4], text: &str) {
+    if crate::localization::draw_translated_text(cmds, pos, size, tint, text) {
+        return;
+    }
     let mut x = pos[0];
     for ch in text.chars() {
         let c = ch as u32;
@@ -5944,6 +6044,52 @@ fn rect(dst: [f32; 4], tint: [f32; 4]) -> DrawCmd {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn optional_hitbox_tracks_the_shaken_player_and_hides_outside_live_play() {
+        use crate::options::Hitbox;
+        let mut s = stage(Difficulty::Normal, false, 1, 3);
+        s.state = PlayerState::Alive;
+        s.pos = [123.0, 321.0];
+        s.arcade[0] = 34.0;
+        s.arcade[1] = 19.0;
+        let mut commands = Vec::new();
+        s.set_hitbox_mode(Hitbox::Focus);
+        s.draw_hitbox(&mut commands);
+        assert!(commands.is_empty());
+        s.last_input_focus = true;
+        s.draw_hitbox(&mut commands);
+        assert_eq!(commands.len(), 3);
+        assert_eq!(commands[2].dst, [155.75, 338.75, 2.5, 2.5]);
+        assert_eq!(s.pos, [123.0, 321.0]);
+        commands.clear();
+        s.last_input_focus = false;
+        s.set_hitbox_mode(Hitbox::Always);
+        s.draw_hitbox(&mut commands);
+        assert_eq!(commands.len(), 3);
+        for mode in [Hitbox::Off, Hitbox::Focus] {
+            commands.clear();
+            s.set_hitbox_mode(mode);
+            s.draw_hitbox(&mut commands);
+            assert!(commands.is_empty());
+        }
+        s.set_hitbox_mode(Hitbox::Always);
+        for state in [
+            PlayerState::Spawning(0),
+            PlayerState::Dead(0),
+            PlayerState::GameOver,
+            PlayerState::Results,
+        ] {
+            commands.clear();
+            s.state = state;
+            s.draw_hitbox(&mut commands);
+            assert!(commands.is_empty());
+        }
+        s.state = PlayerState::Alive;
+        s.dying = 1;
+        s.draw_hitbox(&mut commands);
+        assert!(commands.is_empty());
+    }
 
     #[test]
     fn bomb_portrait_created_by_player_ticks_in_same_calculation_gui_phase() {

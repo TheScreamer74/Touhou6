@@ -21,11 +21,28 @@ fn archive(path: PathBuf) -> HashMap<String, Vec<u8>> {
 }
 
 fn main() {
-    let args: Vec<_> = std::env::args().skip(1).collect();
+    let mut values = std::env::args().skip(1);
+    let mut args = Vec::new();
+    let mut language = th06::localization::Language::Original;
+    while let Some(value) = values.next() {
+        if value == "--language" {
+            let code = values.next().expect("--language <ja|fr|en|de|nl>");
+            language = match code.as_str() {
+                "ja" => th06::localization::Language::Original,
+                "fr" => th06::localization::Language::French,
+                "en" => th06::localization::Language::English,
+                "de" => th06::localization::Language::German,
+                "nl" => th06::localization::Language::Dutch,
+                _ => panic!("invalid language: {code}"),
+            };
+        } else {
+            args.push(value);
+        }
+    }
     assert_eq!(
         args.len(),
         8,
-        "ending_trace <game-dir> <out-dir> <shot0..3> <difficulty0..3> <retries> <seen0|1> <plain|confirm|ctrl> <max-updates>"
+        "ending_trace <game-dir> <out-dir> <shot0..3> <difficulty0..3> <retries> <seen0|1> <plain|confirm|ctrl> <max-updates> [--language ja|fr|en|de|nl]"
     );
     let game = PathBuf::from(&args[0]);
     let output = PathBuf::from(&args[1]);
@@ -68,6 +85,8 @@ fn main() {
     th06_engine::set_color_16bit(false);
     let ed = archive(game.join("ED.DAT"));
     let inn = archive(game.join("IN.DAT"));
+    th06::localization::set_language(language);
+    th06::localization::begin_textures();
     let mut textures = Vec::new();
     let assets = EndingAssets::load(&engine, &ed, &inn["text.anm"], &mut textures).unwrap();
     let mut ending = assets.start(character, difficulty, retries, seen).unwrap();
@@ -77,9 +96,9 @@ fn main() {
         std::io::BufWriter::new(std::fs::File::create(output.join("events.csv")).unwrap());
     writeln!(states,"tick,file_prefix_fnv,pc,has_seen,script_time,pause,clear,minimum_pause,minimum_clear,long_delay,short_delay,text_line,text_color,background_y,scroll_speed,fade_kind,fade_timer,fade_duration").unwrap();
     writeln!(events, "tick,event,value").unwrap();
-    let references = textures.iter().collect::<Vec<_>>();
     for tick in 1..=frames {
         // Original main.cpp runs the draw chain before the calculation chain.
+        th06::localization::refresh();
         let draw = ending.draw();
         // Supervisor::OnUpdate clears both input masks after registering a
         // new scene. Its first END calculation therefore receives no keys,
@@ -107,6 +126,8 @@ fn main() {
         }
         writeln!(states, "{}", ending.reference_state(tick)).unwrap();
         if tick % 600 == 1 {
+            engine.apply_texture_replacements(&mut textures);
+            let references = textures.iter().collect::<Vec<_>>();
             let pixels = engine.render_to_image(&draw, &references, None);
             image::save_buffer(
                 output.join(format!("tick_{tick:06}.png")),

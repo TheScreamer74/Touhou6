@@ -101,7 +101,24 @@ or replays. Serve `index.html` with revalidation or
 old HTML page. Content-hashed asset URLs may be used independently in the
 manifest when artwork or music changes.
 
-The page has no login. Any access restriction belongs on the host.
+The game stays public. An optional, independently hosted community interface is loaded from `/platform/community.js`. Its source and service belong to the host, outside this repository. The adapter exposes only language, suspension and completed-run metadata hooks; a missing shared interface does not prevent playing.
+
+## Language and hitbox options
+
+The in-game Options menu offers the original Japanese presentation and French,
+English, German and Dutch. Text catalogs cover stage dialogues, spell names,
+music titles/comments, endings and staff roles. Brand artwork and proper names
+remain original. Language changes reuse texture slots, with only one active
+language rasterized. New web profiles start in French; older options retain their
+language choice and migrate without discarding gameplay settings.
+
+The optional hitbox can be hidden, shown while focusing, or always shown during
+live play. Its 2.5-pixel center marks the original collision box. It changes only
+the overlay. It does not change collisions, scores or replay inputs.
+
+The native capture tool accepts `--language ja|fr|en|de|nl` and
+`--hitbox off|focus|always`. Use a scratch game directory for menu scenarios,
+since normal Options interactions save their settings.
 
 ## Compatibility limits
 

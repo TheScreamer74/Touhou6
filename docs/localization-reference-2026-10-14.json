@@ -1,0 +1,188 @@
+{
+  "schema": 1,
+  "pass": true,
+  "scope": "Exact source-key presence and UTF-8 validity; this is coverage, not human linguistic review or rendered layout approval.",
+  "source": "User-provided original v1.02h ST.DAT, ED.DAT and MD.DAT, extracted outside the repository.",
+  "translation_base": "User-provided English patch where available, original Japanese for spell names; FR/DE/NL authored for this port.",
+  "msg_entries": 89,
+  "stages": [
+    {
+      "stage": 1,
+      "msg_entries": 12,
+      "dialogue_keys": 45
+    },
+    {
+      "stage": 2,
+      "msg_entries": 12,
+      "dialogue_keys": 32
+    },
+    {
+      "stage": 3,
+      "msg_entries": 13,
+      "dialogue_keys": 46
+    },
+    {
+      "stage": 4,
+      "msg_entries": 12,
+      "dialogue_keys": 51
+    },
+    {
+      "stage": 5,
+      "msg_entries": 14,
+      "dialogue_keys": 83
+    },
+    {
+      "stage": 6,
+      "msg_entries": 13,
+      "dialogue_keys": 83
+    },
+    {
+      "stage": 7,
+      "msg_entries": 13,
+      "dialogue_keys": 164
+    }
+  ],
+  "ending_files": [
+    "end00.end",
+    "end00b.end",
+    "end01.end",
+    "end10.end",
+    "end10b.end",
+    "end11.end",
+    "staff00.end"
+  ],
+  "music_tracks": 17,
+  "required_unique_keys": 1386,
+  "required_key_sha256": "7e0ab9f75ba6afa9bd552e2363575d60bd181e636ffa7cabdc745dcd3cde9a98",
+  "required_by_category": {
+    "dialogue": 502,
+    "spell": 64,
+    "stage": 7,
+    "song": 14,
+    "ending_line": 141,
+    "ending_chunk": 223,
+    "ending_context": 248,
+    "music_title": 17,
+    "music_comment": 102,
+    "song_prefixed": 34,
+    "ui": 104
+  },
+  "identical_language_keys": true,
+  "languages": {
+    "fr": {
+      "pass": true,
+      "keys": 1535,
+      "bytes": 106192,
+      "sha256": "6ad8d1ad0d96d582dcb3598c734962179338709d1da4269dfc120a492529d57d",
+      "missing": [],
+      "invalid": [],
+      "covered_by_category": {
+        "dialogue": 502,
+        "spell": 64,
+        "stage": 7,
+        "song": 14,
+        "ending_line": 141,
+        "ending_chunk": 223,
+        "ending_context": 248,
+        "music_title": 17,
+        "music_comment": 102,
+        "song_prefixed": 34,
+        "ui": 104
+      }
+    },
+    "en": {
+      "pass": true,
+      "keys": 1535,
+      "bytes": 104061,
+      "sha256": "4509f62e7ef57ee00f808742a2607c16012c7344c9ad65608176773ba0955532",
+      "missing": [],
+      "invalid": [],
+      "covered_by_category": {
+        "dialogue": 502,
+        "spell": 64,
+        "stage": 7,
+        "song": 14,
+        "ending_line": 141,
+        "ending_chunk": 223,
+        "ending_context": 248,
+        "music_title": 17,
+        "music_comment": 102,
+        "song_prefixed": 34,
+        "ui": 104
+      }
+    },
+    "de": {
+      "pass": true,
+      "keys": 1535,
+      "bytes": 105090,
+      "sha256": "89b6cc65969bdf0eab0b6ccebe6efa5ee7638d21eaf7d8aa527347d691098b5f",
+      "missing": [],
+      "invalid": [],
+      "covered_by_category": {
+        "dialogue": 502,
+        "spell": 64,
+        "stage": 7,
+        "song": 14,
+        "ending_line": 141,
+        "ending_chunk": 223,
+        "ending_context": 248,
+        "music_title": 17,
+        "music_comment": 102,
+        "song_prefixed": 34,
+        "ui": 104
+      }
+    },
+    "nl": {
+      "pass": true,
+      "keys": 1535,
+      "bytes": 102919,
+      "sha256": "4d53e0e54ff94336afef3fabdeee251cc8f82c44386fee822b23be839c41988b",
+      "missing": [],
+      "invalid": [],
+      "covered_by_category": {
+        "dialogue": 502,
+        "spell": 64,
+        "stage": 7,
+        "song": 14,
+        "ending_line": 141,
+        "ending_chunk": 223,
+        "ending_context": 248,
+        "music_title": 17,
+        "music_comment": 102,
+        "song_prefixed": 34,
+        "ui": 104
+      }
+    }
+  },
+  "input_member_sha256": {
+    "msg1.dat": "cda4f9379e47133993683650516a35d4365fd56ac2866ff5178b1292495ae245",
+    "ecldata1.ecl": "9d9a40e9f7e3ab9346d3874438134659cacf9d34f4aff57b96b4be4ea85b99d7",
+    "stage1.std": "dac455f46f11061656615837da15d9fadd6bcdba42bc2dc5b0a35f3b47ab3278",
+    "msg2.dat": "868dd9c8f709bbc0f99ae9e2112d7a0a2d5ce404999eb5912db40e0eb5672aee",
+    "ecldata2.ecl": "aa89aaaf13264d909bbaaa24f2af263ae1a58145ad5cc33fcea5eb9cb920c43e",
+    "stage2.std": "dc9f62bbf7967a17b53536acd7dba4bb49caaa36f3a9a278d115567f190f2955",
+    "msg3.dat": "a1ecf1ad9981e7961b59b17ef2b88a2cb4a2dded551060460e2dc591b4e772f0",
+    "ecldata3.ecl": "44dfcaa737b7d4b3d1275655627e15a9d5b7710fc75a0885fb39d8c9485056d6",
+    "stage3.std": "97018c20afcb71b1ebb4ca0d2ce72e6b3868c3d6bf0187e2ce7b7bd28ed71260",
+    "msg4.dat": "78c5e6cab07a8e2e0bead7fe045f99465e5c234536b16ebbdf52fa2ff96f7fcd",
+    "ecldata4.ecl": "92695da99b651da492f4fb7c7497b5c8ed8105a23370cc4529901609077c8b60",
+    "stage4.std": "054f629efb55c13865127b1ebb966febdaffee653a37e699e57fb9b3e58d9696",
+    "msg5.dat": "fee4895b0f647a53b6eb4f0d831bf53a203afb434d895be8a21913ebe6a0f8ef",
+    "ecldata5.ecl": "50b5c4777a56910148466c7e5ea1c8dadc126e706420604d52421a49bf861d1b",
+    "stage5.std": "0eebe546820bc2f6eb1ecfe1c9208e56a6fababa8784d5027fa9073daeb77910",
+    "msg6.dat": "ad46a6189c5e5b75bcac9cf21cc0b19af5191ce297817ca6c9c0c9b1e9cfaca2",
+    "ecldata6.ecl": "4a4d4e5bf7ff79ab49b918267130b42308b3a5565cc892dc0e636b8b667740e5",
+    "stage6.std": "0ab61614c339aa135351ea2cbe4313001636e498747a3324a67f48ae12a5dd09",
+    "msg7.dat": "1d03a23634d605217c9f8594b680acc8dbe1932751daea76b05c63cfbff3dcd9",
+    "ecldata7.ecl": "fb900c7e54b1f5d0c36a2e09986bef8f8fde002ca7b5005d12e3aaec7e856392",
+    "stage7.std": "859c00712c4a1f92ba002e0e75360ff2293bdc67b01315970d7d9e42f6d48ccb",
+    "end00.end": "a488f28607471b24eef45509aa119c3dd3b795635322da03e661faf64e5d5112",
+    "end00b.end": "2d375d282d2189809cb7874810eacd1bca98d25ba64d55193af1ef9e84736b48",
+    "end01.end": "301849c8367f0fe3f49b03dcf367656960c8c309a8825dca82abb1bbe6c7d8cb",
+    "end10.end": "78efa93c3b6d0e46222338362cc0534681d73fe0d4e8a6196afef9c60d4f3a1a",
+    "end10b.end": "ec6ab5044dc309b8f067b4862db2e0c8dfb21a3e95ce8b14e165d0eae2c8f0b5",
+    "end11.end": "fe67ba592ce43ed75f1233ffba254d15ae6e8428d3cbba260fc5994e47a7618d",
+    "staff00.end": "03b7e1ea4f3dc2188592819dfc01b1bf9c153267f7ce7d1544e6396c1d53190d",
+    "musiccmt.txt": "4f0a925e88bbb1ae7582835976f6e7a8df2b526194500c39e5a88b1f0bbfd3dd"
+  }
+}

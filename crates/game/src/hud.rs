@@ -217,6 +217,32 @@ impl Hud {
                 if id <= 5 { r.rotation } else { 0.0 },
                 r.corner,
             );
+            if crate::localization::language() != crate::localization::Language::Original {
+                let label = match id {
+                    9 => Some(("game.score", "Score")),
+                    10 => Some(("game.high_score", "High score")),
+                    11 => Some(("game.player", "Player")),
+                    12 => Some(("game.bomb", "Bomb")),
+                    13 => Some(("game.power", "Power")),
+                    14 => Some(("game.graze", "Graze")),
+                    15 => Some(("game.point", "Points")),
+                    _ => None,
+                };
+                if let Some((key, fallback)) = label
+                    && crate::localization::draw_label(
+                        cmds,
+                        [geometry.dst[0], geometry.dst[1]],
+                        12.0,
+                        [1.0, 1.0, 1.0, r.alpha],
+                        key,
+                        fallback,
+                        // Values begin at x=496; all labels start at x=432.
+                        60.0,
+                    )
+                {
+                    continue;
+                }
+            }
             cmds.push(DrawCmd {
                 clip: None,
                 tex: self.tex_slot,
