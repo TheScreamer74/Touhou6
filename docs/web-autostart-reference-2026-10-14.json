@@ -22,5 +22,9 @@
     "Preserve local score/settings/replay persistence and import/export."
   ],
   "audio_scope": "Existing runtime unlocks AudioContext directly on trusted keydown/pointerdown. Automatic launch can start with suspended audio until the first gesture; this UI check does not claim physical PCM output before activation. Final runtime AudioWorklet continuity has separate receipts.",
-  "publication_verified": false
+  "publication_verified": true,
+  "public_version": "fidelity-20261014-autostart-0cb6025d5b09",
+  "publication_receipt": "deployment-2026-10-14.json",
+  "public_browser_errors_or_warnings": [],
+  "cache_scope": "Previously cached HTML can need one reload. Browser startup was verified after normal revalidation; this does not establish immediate replacement of every pre-existing browser cache."
 }
