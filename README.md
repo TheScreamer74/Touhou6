@@ -17,9 +17,9 @@
 
 The engine reads Touhou Koumakyou ~ the Embodiment of Scarlet Devil v1.02h
 archives and interprets their ECL, STD, ANM, MSG and END scripts. The Windows
-executable is not run. Supply your own game files for local play, or use a web
-host configured with its own asset manifest. Personal browser files are never
-uploaded.
+executable is not run. Supply your own game files for native play. The web
+version loads the host's asset manifest and starts automatically; scores,
+settings and replays stay on the player's device.
 
 Implementation follows the [matching decompilation](https://github.com/GensokyoClub/th06).
 [REA](https://github.com/morluto/rea) and Ghidra were also used to inspect the
@@ -42,7 +42,7 @@ whole-game binary or visual equivalence; see [validation](docs/REVERSE_ENGINEERI
 | Audio | 17 BGM tracks and original loop markers; WAV/web Ogg playback, MIDI synthesis with a supplied SoundFont, original sound-effect variants and gains |
 | Display | 32-bit and original R5G6B5 mode; supplied Japanese font or bundled fallback |
 | Input | Keyboard and gamepad, configurable controller mappings |
-| Web | Hosted asset manifest or local folder selection, local file cache, fullscreen and score/replay import/export |
+| Web | Automatic launch with hosted assets, fullscreen and local score/replay import/export |
 
 The usual six-stage run ends after stage 5 on Easy. Extra has its own clear
 flow and unlock records. END artwork and staff animations require `ED.DAT`;
@@ -69,8 +69,10 @@ cd web
 python3 -m http.server 8080
 ```
 
-Open `http://localhost:8080`. The [web guide](web/README.md) documents hosted
-`assets.json`, engine cache versioning, personal file storage and save exports.
+Configure `assets.json` and its referenced game files, then open
+`http://localhost:8080`; the game starts automatically. The
+[web guide](web/README.md) documents the manifest, engine cache versioning and
+save exports. Browser audio starts after the first key press or click.
 
 ## Controls
 
@@ -109,10 +111,11 @@ records the separately executed binary comparisons and their actual coverage.
 The R5G6B5 renderer reproduces limited texture/framebuffer precision, but driver
 rounding may differ from the original Direct3D hardware. MIDI timbre depends on
 the supplied SoundFont, just as the original depended on its MIDI device.
-Native builds accept `TH06_SOUNDFONT` or `gm.sf2` beside the DAT files; browser
-folder imports and hosted manifests can supply `gm.sf2`. Japanese text accepts
-`TH06_FONT` on native builds or a separately supplied `msgothic.ttc`/`msgothic.ttf`;
-the bundled Noto Sans JP remains the fallback. Font outlines alone do not
+Native builds accept `TH06_SOUNDFONT` or `gm.sf2` beside the DAT files; web hosts
+can supply `gm.sf2` through the asset manifest. Japanese text accepts
+`msgothic.ttc`/`msgothic.ttf` beside the DAT files or through the hosted manifest;
+native builds also support `TH06_FONT`. The bundled Noto Sans JP remains the
+fallback. Font outlines alone do not
 reproduce Windows GDI rasterization. See [display/audio details](docs/PRESENTATION_FIDELITY.md).
 Browser audio, GPU availability and storage depend on the browser. Focused
 comparisons are evidence for their tested paths, rather than a claim of 100%

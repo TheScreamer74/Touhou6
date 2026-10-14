@@ -19,12 +19,7 @@
   }
   h1 { font-weight: 600; letter-spacing: 0.04em; margin: 0; }
   .sub { color: #8a8aa0; font-size: 0.9rem; max-width: 32rem; line-height: 1.5; }
-  .panel {
-    background: #15151f; border: 1px solid #2a2a3a; border-radius: 12px;
-    padding: 1.5rem 1.8rem; display: flex; flex-direction: column; gap: 1rem;
-    align-items: center; width: min(100%, 36rem);
-  }
-  select, input[type=password], input[type=text] {
+  select {
     background: #0d0d16; border: 1px solid #33334a; border-radius: 8px;
     color: #fff; padding: 0.6rem 0.8rem; font-size: 1rem; width: 14rem;
   }
@@ -69,40 +64,14 @@
   dialog { color: #e8e8f0; background: #15151f; border: 1px solid #33334a; border-radius: 12px; max-width: min(32rem, 85vw); }
   dialog::backdrop { background: #000a; }
   .tool-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.6rem; margin: 1rem 0; }
-  code { background: #0d0d16; padding: 0.1rem 0.35rem; border-radius: 4px; }
 </style>
 </head>
 <body>
 <div id="shell">
   <h1>東方紅魔郷 <span style="color:#b3123a">·</span> Embodiment of Scarlet Devil</h1>
-  <div class="sub">Retrouvez le jeu dans votre navigateur.
-    Vos fichiers personnels restent sur cet appareil et ne sont jamais envoyés au serveur.</div>
-
-  <div id="hosted" class="panel hidden">
-    <div>Les fichiers du jeu sont disponibles sur ce site.</div>
-    <button id="playHosted" disabled>▶ Jouer</button>
-  </div>
-
-  <!-- Folder upload -->
-  <div id="picker" class="panel">
-    <div>Choisissez votre dossier <code>th06</code></div>
-    <div class="sub">Il contient <code>TL.DAT</code>, <code>CM.DAT</code>,
-      <code>ST.DAT</code>, <code>IN.DAT</code> et les musiques <code>bgm/</code>.
-      <code>ED.DAT</code> et <code>MD.DAT</code> apportent les fins, le générique et les commentaires musicaux.</div>
-    <input id="folder" type="file" webkitdirectory directory multiple />
-    <div id="pickErr" class="err"></div>
-  </div>
-
-  <!-- Resume: saved files found (IndexedDB), skip the folder picker -->
-  <div id="resume" class="panel hidden">
-    <div>Votre dossier est enregistré sur cet appareil.</div>
-    <div class="sub">Il reste stocké dans ce navigateur.</div>
-    <button id="playSaved" disabled>▶ Jouer avec mes fichiers</button>
-    <button id="useDifferent" style="background:#2a2a3a">Changer de dossier</button>
-  </div>
-
   <div id="status" role="status" aria-live="polite"></div>
   <div id="error" class="err" role="alert"></div>
+  <button id="retry" class="hidden">Réessayer</button>
 </div>
 
 <button id="fsBtn" title="Plein écran (F)">⛶ Plein écran</button>
@@ -125,8 +94,7 @@ const $ = id => document.getElementById(id);
 const REQUIRED = ["TL.DAT", "CM.DAT", "ST.DAT", "IN.DAT"];
 const ARCHIVES = [...REQUIRED, "ED.DAT", "MD.DAT", "th06e_ST.DAT", "th06e_ED.DAT", "th06e_MD.DAT", "th06e_IN.DAT", "th06e_CM.DAT"];
 const MAX_FILE = 64 * 1024 * 1024, MAX_TOTAL = 1024 * 1024 * 1024;
-const CACHE_TAG = "v2-canonical", IDB_NAME = "th06-files", IDB_STORE = "files";
-let busy = false, ready = false, manifest = null, version = "", runtimePromise = null, runtimeApi = null;
+let busy = false, manifest = null, version = "", runtimePromise = null, runtimeApi = null;
 const status = $("status"), error = $("error");
 
 function canonicalName(name) {
@@ -141,75 +109,6 @@ function complete(map) {
   if (missing.length) throw new Error("Fichiers manquants : " + missing.join(", "));
   return map;
 }
-function controls() {
-  $("folder").disabled = busy || !ready;
-  for (const id of ["playHosted", "playSaved", "useDifferent"]) $(id).disabled = busy || !ready;
-}
-function idbOpen() {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(IDB_NAME, 1);
-    request.onupgradeneeded = () => { if (!request.result.objectStoreNames.contains(IDB_STORE)) request.result.createObjectStore(IDB_STORE); };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-    request.onblocked = () => reject(new Error("Le stockage est utilisé par un autre onglet."));
-  });
-}
-async function withStore(mode, operation) {
-  const db = await idbOpen();
-  try {
-    return await new Promise((resolve, reject) => {
-      const tx = db.transaction(IDB_STORE, mode), store = tx.objectStore(IDB_STORE);
-      const result = operation(store);
-      tx.oncomplete = () => {
-        try { resolve(typeof result === "function" ? result() : result); }
-        catch (err) { reject(err); }
-      };
-      tx.onerror = tx.onabort = () => reject(tx.error || new Error("Stockage local indisponible."));
-    });
-  } finally { db.close(); }
-}
-async function idbHasFiles() {
-  // Inspect names only: do not read hundreds of MB before the player clicks.
-  try {
-    return await withStore("readonly", store => {
-      const tag = store.get("__tag"), keys = store.getAllKeys();
-      return () => ["v1", CACHE_TAG].includes(tag.result) && REQUIRED.every(name => keys.result.some(key => canonicalName(String(key)) === name));
-    });
-  } catch { return false; }
-}
-async function idbLoad() {
-  return complete(await withStore("readonly", store => {
-    const tag = store.get("__tag"), keys = store.getAllKeys(), map = Object.create(null);
-    let total = 0, invalid = null;
-    keys.onsuccess = () => {
-      for (const key of keys.result) {
-        const name = canonicalName(String(key));
-        if (!name) continue;
-        const value = store.get(key);
-        value.onsuccess = () => {
-          const bytes = value.result;
-          if (!(bytes instanceof Uint8Array || bytes instanceof ArrayBuffer)) { invalid = new Error("Fichiers enregistrés illisibles. Choisissez votre dossier à nouveau."); return; }
-          if (bytes.byteLength > MAX_FILE || (total += bytes.byteLength) > MAX_TOTAL) { invalid = new Error("Les fichiers enregistrés sont trop volumineux."); return; }
-          if (map[name]) { invalid = new Error("Deux fichiers enregistrés portent le même nom."); return; }
-          map[name] = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-        };
-      }
-    };
-    return () => {
-      if (!["v1", CACHE_TAG].includes(tag.result)) throw new Error("Veuillez choisir à nouveau votre dossier.");
-      if (invalid) throw invalid;
-      return map;
-    };
-  }));
-}
-async function idbSave(map) {
-  await withStore("readwrite", store => {
-    store.clear(); store.put(CACHE_TAG, "__tag");
-    for (const [name, bytes] of Object.entries(map)) store.put(bytes, name);
-  });
-}
-function idbClear() { return withStore("readwrite", store => store.clear()); }
-
 function versioned(path) {
   const url = new URL(path, location.href);
   if (version) url.searchParams.set("v", version);
@@ -245,25 +144,6 @@ function loadRuntime() {
     return runtime;
   })().catch(err => { runtimePromise = null; throw err; });
   return runtimePromise;
-}
-async function readFolder(files) {
-  const selected = new Map();
-  let total = 0;
-  for (const file of files) {
-    const name = canonicalName(file.name);
-    if (!name) continue;
-    if (selected.has(name)) throw new Error("Deux fichiers portent le nom " + name + ". Choisissez un seul dossier de jeu.");
-    if (file.size > MAX_FILE || (total += file.size) > MAX_TOTAL) throw new Error("Ce dossier est trop volumineux pour le chargement dans le navigateur.");
-    selected.set(name, file);
-  }
-  const missing = REQUIRED.filter(name => !selected.has(name));
-  if (missing.length) throw new Error("Fichiers manquants : " + missing.join(", "));
-  const map = Object.create(null);
-  for (const [name, file] of selected) {
-    status.textContent = "Lecture de " + name + "…";
-    map[name] = new Uint8Array(await file.arrayBuffer());
-  }
-  return complete(map);
 }
 function validateManifest(data) {
   if (!data || !data.files || typeof data.files !== "object" || Array.isArray(data.files)) throw new Error("La liste des fichiers du site est invalide.");
@@ -308,16 +188,12 @@ async function readHosted(entries) {
   try { await Promise.all([worker(), worker()]); return complete(map); }
   catch (err) { controller.abort(); throw err; }
 }
-async function startGame(produce, save = false) {
-  if (busy || !ready || document.body.classList.contains("playing")) return;
-  busy = true; controls(); error.textContent = ""; $("pickErr").textContent = "";
+async function startGame() {
+  if (busy || document.body.classList.contains("playing")) return;
+  busy = true; error.textContent = ""; $("retry").classList.add("hidden");
   let map;
   try {
-    map = await produce();
-    if (save) {
-      status.textContent = "Enregistrement sur cet appareil…";
-      try { await idbSave(map); } catch (err) { console.warn("Stockage des fichiers indisponible", err); }
-    }
+    map = await readHosted(manifest);
     status.textContent = "Démarrage du jeu…";
     const runtime = await loadRuntime();
     await runtime.start_game(map);
@@ -326,31 +202,13 @@ async function startGame(produce, save = false) {
     const canvas = $("th06-canvas");
     if (canvas) { canvas.addEventListener("dblclick", toggleFullscreen); canvas.focus(); }
     status.textContent = "";
-  } catch (err) {
-    console.error(err);
-    error.textContent = "Le jeu n’a pas pu démarrer : " + (err?.message || String(err));
-    status.textContent = "";
-    document.body.classList.remove("playing");
-    $("th06-canvas")?.remove();
-    $("picker").classList.remove("hidden");
   } finally {
     // Rust owns its copies once start_game resolves. Release the JS references.
     if (map) for (const name of Object.keys(map)) delete map[name];
-    busy = false; controls();
+    busy = false;
   }
 }
-$("folder").addEventListener("change", event => {
-  const files = [...event.target.files];
-  if (files.length) startGame(() => readFolder(files), true);
-  event.target.value = "";
-});
-$("playHosted").addEventListener("click", () => startGame(() => readHosted(manifest)));
-$("playSaved").addEventListener("click", () => startGame(idbLoad));
-$("useDifferent").addEventListener("click", async () => {
-  if (busy) return;
-  try { await idbClear(); } catch (err) { console.warn(err); }
-  $("resume").classList.add("hidden"); $("picker").classList.remove("hidden");
-});
+$("retry").addEventListener("click", () => location.reload());
 function toggleFullscreen() {
   const canvas = $("th06-canvas"); if (!canvas) return;
   const action = document.fullscreenElement ? document.exitFullscreen() : canvas.requestFullscreen();
@@ -404,21 +262,26 @@ $("exportReplay").addEventListener("click", () => dataAction(runtime => {
 }));
 
 (async function boot() {
-  controls(); status.textContent = "Préparation…";
-  const [build, hosted, cached] = await Promise.allSettled([
-    fetch("./build.json", { cache: "no-store" }).then(response => response.ok ? response.json() : null),
-    fetch("./assets.json", { cache: "no-cache" }).then(response => response.ok ? response.json() : null),
-    idbHasFiles(),
-  ]);
-  if (build.status === "fulfilled" && typeof build.value?.version === "string") version = build.value.version.slice(0, 128);
-  if (hosted.status === "fulfilled" && hosted.value) {
-    try { manifest = validateManifest(hosted.value); $("hosted").classList.remove("hidden"); }
-    catch (err) { error.textContent = err.message; }
+  status.textContent = "Chargement du jeu…";
+  try {
+    const [build, hosted] = await Promise.all([
+      fetch("./build.json", { cache: "no-store" }).then(response => response.ok ? response.json() : null),
+      fetch("./assets.json", { cache: "no-cache" }).then(response => {
+        if (!response.ok) throw new Error("Les ressources du jeu sont indisponibles. Réessayez dans un instant.");
+        return response.json();
+      }),
+    ]);
+    if (typeof build?.version === "string") version = build.version.slice(0, 128);
+    manifest = validateManifest(hosted);
+    await startGame();
+  } catch (err) {
+    console.error(err);
+    error.textContent = "Le jeu n’a pas pu démarrer : " + (err?.message || String(err));
+    status.textContent = "";
+    document.body.classList.remove("playing");
+    $("th06-canvas")?.remove();
+    $("retry").classList.remove("hidden");
   }
-  if (cached.status === "fulfilled" && cached.value) $("resume").classList.remove("hidden");
-  ready = true; controls(); status.textContent = "";
-  // Compile ahead of the click; audio is unlocked by the first game input.
-  loadRuntime().catch(err => { console.warn("Préchargement du moteur", err); });
 })();
 </script>
 </body>

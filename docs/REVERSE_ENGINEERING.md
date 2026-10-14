@@ -4,6 +4,39 @@ The port uses the original game data and matching decompilation as its source
 of behavior. Focused binary observations, reference comparisons and runtime
 checks have different scopes; none is a whole-game equivalence proof.
 
+## Final frozen-build validation — 2026-10-14
+
+The final native binary `33050887`, WASM `0cb6025d` and source manifest
+`b94dcce4` share the full hashes recorded in the
+[campaign receipt](campaign-reference-2026-10-14.json). These results refer to
+that frozen build; publication is recorded separately.
+
+| Check | Observed result |
+|---|---|
+| Original replay simulation | 96/96 pass; 1,822,403 observations and 43,147 object-pool checkpoints |
+| Ordered replay audio | 96/96 pass; 881,883 requests/fades and 96 matching stage-entry music requests |
+| Death/bomb/grace boundaries without invulnerability | 3/3 pass; 3,998 observations and 2,583 pool checkpoints |
+| Final rendering probes | Five complete simulation traces pass; all 35 images are present, but all 35 fail the unchanged strict pixel criteria |
+| Natural transitions and menu audio | Six transition paths and seven Options/MusicRoom audio probes pass; 4,404 ordered audio requests |
+| Saved replay and highscore | Original and native creation date `10/14/26`, checksums and canonical playback semantics match |
+| Short browser recovery | Final WebGL2 32/16-bit probes pass with at most two logical history chains and no blocking wait/finish calls |
+| Browser MIDI continuity | AudioWorklet continues during a two-second UI stall at 44.1 and 48 kHz; observation windows contain 89,600 and 102,400 PCM frames |
+
+The transition comparison covers 29,284 presentations, 23,159 gameplay
+observations, 422 return-navigation observations and 759 Results observations.
+The final rendering probes overlap five replay cases and do not add new routes.
+The exhaustive 6,209-image campaign belongs to the earlier `4e84e9e1` build;
+its strict image result also failed and is not reassigned to the final build.
+The final 35 images retain whole-frame, playfield, HUD and FPS checks without
+masks, alignment or relaxed thresholds.
+
+These are fixed-input comparisons. Font rasterization, MIDI timbre and residual
+pixel differences remain explicit limits. The browser probes establish short
+recovery and audio continuity, without establishing long-term memory stability,
+controlled FPS performance or a complete browser playthrough. See the separate
+[WebGL](webgl-reference-2026-10-13.json) and
+[AudioWorklet](midi-worklet-2026-10-13.json) receipts for their exact scope.
+
 ## Predefined original-reference campaign
 
 The coverage contract is [fidelity-scenarios.json](fidelity-scenarios.json):
@@ -26,7 +59,7 @@ The original draw precedes calculation; its subsequent Present labels the
 post-calculation state, potentially after three replay ticks. The harness
 records these clocks separately instead of shifting images until they match.
 
-The complete rendering campaign is tied to immutable native binary
+The earlier complete rendering campaign is tied to immutable native binary
 `4e84e9e14d5bfc3c429aec93fe6f35a99da8e5e935a98abc6a27fa0686c69096`
 and its source manifest. Its simulation, image and ordered-audio results are
 reported separately; completing captures does not establish image parity.
@@ -38,8 +71,8 @@ The campaign has exposed and corrected ECL float-copy behavior, callback and
 item-slot ordering, the aliased Stage4 rotation, initial enemy animation bounds,
 Stage5 redirection/culling, Extra raw-angle acceleration, deathbomb timers,
 pause/Continue timing, Options input order, title pre-input, persistent rendering,
-spellcard backgrounds and stage loading overlays. The current diagnostic
-menu/result receipt covers 1,439 original observations, including all 40 CLRD
+spellcard backgrounds and stage loading overlays. The earlier diagnostic
+menu/result receipt covered 1,439 original observations, including all 40 CLRD
 progress bytes after the Extra unlock sequence.
 [Menu receipt](menu-reference-2026-10-12.json).
 
@@ -288,21 +321,21 @@ TH06_GOD=1 TH06_REFERENCE_DIR=/path/to/extracted-reference \
 
 | Area | Scope and remaining limit |
 |---|---|
-| Replay equivalence | Internal recording/playback covers 96 routes; the predefined campaign compares actual original stage inputs and terminals separately, without inferring unexecuted branch equivalence |
+| Replay equivalence | The final predefined campaign passes 96 original-input scenarios with declared invulnerability; separate failure paths are bounded probes, and unexecuted inputs remain outside the proof |
 | Japanese font | MS Gothic can be supplied separately; the hosted fallback is Noto Sans JP, and rasterization differs from Windows GDI |
 | MIDI timbre | Original MIDI messages and loop timing are supported; the hosted free TimGM6mb bank differs from proprietary Windows MIDI banks |
-| GPU output | Original 16-bit texture/back-buffer precision is implemented; driver-specific edge and conversion rounding can differ on Metal/WebGL2 |
+| GPU output | Final 35-image strict criteria still fail; the earlier 6,209-image baseline belongs to another build. Driver-specific edge and conversion rounding can differ on Metal/WebGL2 |
 
 Actual MIDI, its isolated browser audio thread, original SFX variants, the
 R5G6B5 renderer and their focused checks are documented in
 [presentation fidelity](PRESENTATION_FIDELITY.md). The Windows font/bank files are
 not part of the supplied game archive and are not bundled.
 
-The current browser check loads 25 hosted assets (including the separate MIDI
-bank), starts the game, enables 16-bit rendering and exercises Marisa B shots
-and Master Spark. A saved MIDI setting also starts through AudioWorklet after a
-real reload. The preceding build additionally checked replay import and durable
-score/replay storage. This checks startup and those flows;
+An earlier browser check loaded 25 hosted assets (including the separate MIDI
+bank), started the game, enabled 16-bit rendering and exercised Marisa B shots
+and Master Spark. A saved MIDI setting also started through AudioWorklet after a
+real reload. Its preceding build additionally checked replay import and durable
+score/replay storage. Those checks cover startup and those flows;
 it is not a browser playthrough of every stage/character/difficulty.
 
 These checks do not establish pixel identity for every effect, unexecuted GUI

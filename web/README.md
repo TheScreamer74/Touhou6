@@ -1,9 +1,10 @@
 # Web build
 
-The browser can load a hosted game set through `assets.json`, or read the
-player's own game folder. Personal files are read locally and never uploaded.
-Scores, settings and replays stay in browser storage. The in-game **Sauvegardes
-et replays** button imports and exports `score.dat` and the 15 replay slots.
+The page loads the hosted game set through `assets.json` and starts the game
+automatically. It no longer asks the player to select a game folder. Scores,
+settings and replays stay in browser storage. The **Scores et replays** button
+opens local import and export tools for `score.dat` and the 15 replay slots.
+Audio starts after the first key press or click, as required by browsers.
 
 ## Build
 
@@ -21,8 +22,10 @@ python3 -m http.server 8080
 
 ## Hosted game files
 
-If `assets.json` exists, the page offers **Jouer**. Its `files` object maps the
-names consumed by Rust to same-origin URLs, relative to the page. Example:
+`assets.json` is required. Its `files` object maps the names consumed by Rust
+to same-origin URLs, relative to the page. The page downloads these files,
+shows progress and starts the game without a launch button. If loading fails,
+**Réessayer** reloads the page. Example manifest:
 
 ```json
 {
@@ -71,33 +74,18 @@ beside the bank. The bank is separate from the MIT engine source and is not
 committed here. MIDI renders in an isolated AudioWorklet; ScriptProcessor is the
 compatibility fallback. See [audio/display details](../docs/PRESENTATION_FIDELITY.md).
 Optional `msgothic.ttc`/`msgothic.ttf` files are recognized when supplied by the
-player; the default font is Noto Sans JP.
+host through the manifest; the default font is Noto Sans JP.
 
 Downloads use two concurrent streams, report progress, abort together on an
 error, and enforce a 64 MiB per-file / 1 GiB total input limit. The engine and
-decoded audio need additional memory. Hosted files use the HTTP cache rather
-than duplicating the whole hosted set in IndexedDB.
-
-## Personal game folder
-
-Without a hosted manifest, the folder picker is immediately available. Select
-the directory containing `TL.DAT`, `CM.DAT`, `ST.DAT`, `IN.DAT`, `ED.DAT`,
-`MD.DAT` and `bgm/`. Archives and music are selected by their basename,
-case-insensitively. Executables, documentation and unrelated files are ignored.
-Duplicate recognized names are rejected so different installations cannot be
-mixed silently. A minimal four-archive set can start; the complete set is
-needed for endings and musical comments.
-
-Personal files are saved in IndexedDB when storage is available. A return
-visit reads only cached names before displaying **Jouer avec mes fichiers**;
-the large file contents are loaded after that click. Storage failure does not
-prevent the current game from starting. **Changer de dossier** clears this
-file cache, while preserving scores, settings and replays. Existing v1 file
-caches remain readable.
+decoded audio need additional memory. Hosted files use the HTTP cache. The
+loader does not store game resources in IndexedDB. Scores, settings and replays
+use localStorage independently of the hosted files; imports and exports remain
+local and do not upload anything to the host.
 
 ## Deployment and updates
 
-Upload `index.html`, `midi-worklet.js`, `pkg/`, and optionally `assets.json`
+Upload `index.html`, `midi-worklet.js`, `pkg/`, and `assets.json`
 with its referenced files. Serve `.wasm` as `application/wasm`. To publish a new engine build, add
 `build.json` beside the page:
 
@@ -107,8 +95,8 @@ with its referenced files. Serve `.wasm` as `application/wasm`. To publish a new
 
 The page fetches this small file without caching and uses its version in the
 JS, WASM and MIDI worklet URLs. Change the version only after both generated files have
-been uploaded. An engine update does not invalidate the personal asset cache,
-HTTP asset URLs, scores or replays. Serve `index.html` with revalidation or
+been uploaded. An engine update does not invalidate HTTP asset URLs, scores
+or replays. Serve `index.html` with revalidation or
 `Cache-Control: no-cache`; `build.json` alone cannot refresh an already cached
 old HTML page. Content-hashed asset URLs may be used independently in the
 manifest when artwork or music changes.
@@ -121,7 +109,7 @@ Music playback supports original WAV tracks (or hosted Ogg conversions) and
 original MIDI with a separately supplied SoundFont. Both 32-bit color and the
 original limited-precision R5G6B5 mode are supported. Browser fullscreen depends on user activation and
 browser permission; the F key and on-screen button request it directly.
-Japanese text defaults to Noto Sans JP; a player-supplied MS Gothic font is
+Japanese text defaults to Noto Sans JP; a host-supplied MS Gothic font is
 optional, with rasterization still differing from Windows GDI.
 
 Replay files use the original T6RP format. Deterministic recording/playback is

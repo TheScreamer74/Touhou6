@@ -1,0 +1,213 @@
+{
+  "date": "2026-10-14",
+  "kind": "predefined-original-reference-campaign",
+  "native_checks_complete": true,
+  "whole_game_equivalence_established": false,
+  "artifacts": {
+    "native_binary_sha256": "330508878953a1bdf306054b764cdd1c4bfeee4073dc6df7d2afc36e70a13158",
+    "runtime_source_sha256": "b94dcce4e17bbbb122f7be36c0dabdfa0b00882046254a34a9055a7d988f2b98",
+    "wasm_sha256": "0cb6025d5b0909daca4d28664f0a40fe11cfa57eb289e602a1913cc3a87d05d8",
+    "wasm_bytes": 9639568,
+    "version": "fidelity-20261014-0cb6025d5b09",
+    "build_receipt_sha256": "760bd739c6c97d6b79b86db4ac8fca83142a5ec34e351fcad499e6640b53689b"
+  },
+  "build_tests": {
+    "workspace_passed": 134,
+    "workspace_ignored": 30,
+    "python_passed": 76,
+    "bg_order_depth_gpu_both_modes_passed": true,
+    "clip_gpu_both_modes_passed": true,
+    "clippy_and_format_passed": true,
+    "webgl_browser_16_and_32_bits_passed": true,
+    "midi_audio_worklet_44100_and_48000_hz_passed": true
+  },
+  "state96": {
+    "passed": true,
+    "cases": 96,
+    "observations": 1822403,
+    "pool_checkpoints": 43147,
+    "receipt_sha256": "a8648a56596a069bd69510e367ebf0ef36557374dbae5bad9c46eaefaf5d5891",
+    "original_collection_attestation_sha256": "28b0ed1212e7c900477b7b5d4ac268d3dc7d1136347cb4a2d58d481035f426e5",
+    "scope": "Exact original observed replay states/terminals and five object pools at predefined checkpoints; whole-stage invulnerability is declared on both sides."
+  },
+  "audio96": {
+    "passed": true,
+    "cases": 96,
+    "ordered_requests": 881883,
+    "different_event_groups": 0,
+    "stage_entry_music_matches": 96,
+    "receipt_sha256": "5967e9ba34ce6a65b617a72b7b4305cca1516c921cae3ae9e0e2aea7c22398dc",
+    "scope": "Ordered sound/music requests and fades during replay frames1..original terminal, plus the first stage-entry music request. Scene transitions after the terminal and physical output PCM are separate probes."
+  },
+  "nogod3": {
+    "passed": true,
+    "cases": [
+      "death-bomb-no-god",
+      "deathbomb-after-grace",
+      "deathbomb-last-grace"
+    ],
+    "observations": 3998,
+    "pool_checkpoints": 2583,
+    "receipt_sha256": "31dc96847e91755d5a5ce0b668333d9f24c1fc576b44425c0ebf404e3f51d08c",
+    "scope": "Three explicit death/bomb/grace-boundary input paths without invulnerability; not all possible failure inputs."
+  },
+  "render_final": {
+    "simulation_passed_cases": 5,
+    "cases": [
+      {
+        "id": "replay-c1-d3-s4",
+        "images": 4,
+        "strict_passed_images": 0,
+        "missing_images": 0,
+        "scalar_differences": 0,
+        "simulation_passed": true,
+        "observations": 21712,
+        "pools": 403,
+        "image_passed": false,
+        "execution_sha256": "e529c97ad2f1625cd9056b3f4eb42f141633220a502472488267a41eb8c81f96",
+        "simulation_receipt_sha256": "1d9214e69c672b4ea0fe66b9387f236891f664ef179dc655b4f18052f9d19762",
+        "image_receipt_sha256": "1001119e01f0ba302dfc2ff1716ff4add284522abb37585d0f4b92ee81c9659e"
+      },
+      {
+        "id": "replay-c1-d3-s6",
+        "images": 4,
+        "strict_passed_images": 0,
+        "missing_images": 0,
+        "scalar_differences": 0,
+        "simulation_passed": true,
+        "observations": 31537,
+        "pools": 570,
+        "image_passed": false,
+        "execution_sha256": "eea35dee59a454408911ac2981dd5da008368cf3973291917f517b1cb9808e9f",
+        "simulation_receipt_sha256": "ac1a693b9498f7fb7157158a6a78f488791672f6295e2930ee3ffd953a4c67f5",
+        "image_receipt_sha256": "33c3a703d0f5708d4b2f2eb2bfcbd6136f6ac309a400ea10d770d4d832f1a894"
+      },
+      {
+        "id": "replay-c0-d4-s7",
+        "images": 4,
+        "strict_passed_images": 0,
+        "missing_images": 0,
+        "scalar_differences": 0,
+        "simulation_passed": true,
+        "observations": 49225,
+        "pools": 842,
+        "image_passed": false,
+        "execution_sha256": "490cb763a9f25f3d62a65350c1c408bedf284fca0045f3a4a698dd70490d9739",
+        "simulation_receipt_sha256": "a3e91339f8d14720aba86de6402bd74f1cba1f9d36dcc032bdace39fedb4e4e7",
+        "image_receipt_sha256": "e33306e5cee83fbae4aad82e38fd2559ad93a6c4d0ff4ca5ab27fe801cbad35d"
+      },
+      {
+        "id": "replay-c0-d1-s3",
+        "images": 16,
+        "strict_passed_images": 0,
+        "missing_images": 0,
+        "scalar_differences": 0,
+        "simulation_passed": true,
+        "observations": 17098,
+        "pools": 322,
+        "image_passed": false,
+        "execution_sha256": "8df3257afa35a2645458469c785da74cbdb1523043e04ca7503d54dfdef81ae0",
+        "simulation_receipt_sha256": "40adf3f136c93bbda7baa19858e73409a117cec7687ca50f6687a0a1450de450",
+        "image_receipt_sha256": "4312a031cf658dad31397525027debc4994b709ced1cbbe95e5ff7ac20a22861"
+      },
+      {
+        "id": "replay-c0-d1-s5",
+        "images": 7,
+        "strict_passed_images": 0,
+        "missing_images": 0,
+        "scalar_differences": 0,
+        "simulation_passed": true,
+        "observations": 20105,
+        "pools": 376,
+        "image_passed": false,
+        "execution_sha256": "e5309a30dbd94bd326101f34fe7229ba6b19955efd3c8ca3d5912b6b56034596",
+        "simulation_receipt_sha256": "89fad075f77cbf0f2f43dba75d054441d613fe6437b8d6af0a30d9f9e656840b",
+        "image_receipt_sha256": "b3be5ddce6a29bd3d461fe50cf4c02f239381e769ba891d6d85fcd4ae4eee3d2"
+      }
+    ],
+    "observations": 139677,
+    "pool_checkpoints": 2513,
+    "image_pairs": 35,
+    "strict_image_passed": false,
+    "strict_passed_images": 0,
+    "missing_images": 0,
+    "scalar_differing_checkpoints": 0,
+    "criteria": {
+      "channel_error_tolerance": 2,
+      "maximum_bad_fraction": 0.01,
+      "maximum_mae": 1.0
+    },
+    "receipt_sha256": "f7f161388e2cad9d61bfff58f28d17c5ddf8369449e93345855bc6db9eb0ff0d",
+    "scope": "Five overlapping replay scenarios captured with complete simulation traces on the final build. All pixels, including HUD/FPS/text, retain the same strict criteria; execution completion is not an image pass."
+  },
+  "transition_menu13": {
+    "passed": true,
+    "transition_paths": 6,
+    "transition_presentations": 29284,
+    "gameplay_paths": 5,
+    "gameplay_observations": 23159,
+    "return_navigation_paths": 4,
+    "return_navigation_observations": 422,
+    "results_observations": 759,
+    "audio_passed_cases": 13,
+    "transition_audio_requests": 4242,
+    "menu_audio_requests": 162,
+    "total_audio_requests": 4404,
+    "receipt_sha256": "b5c49a850f92e45cea2d79f4adabcb8683c9b48de8bfa7af43310ce67e917946",
+    "scope": "Six natural pause/Continue/Practice/Result/save paths plus seven Options/MusicRoom ordered-audio probes. Menu-state comparison is limited to four return-navigation intervals."
+  },
+  "save14": {
+    "passed": true,
+    "original_date": "10/14/26",
+    "native_date": "10/14/26",
+    "date_normalization": false,
+    "canonical_semantics_sha256": "33689d3b58704136f0d23fdcdadf58963965b66c56d79477c59ef110a3fb8b4b",
+    "original_aggregate_sha256": "aaf13332c6a52818780fabff9490a0ff4456bbd010bd201ad5c25be1df40816c",
+    "comparison_receipt_sha256": "a40e68dd21a4829a4eabcf69d59510fb864bf26bf3d5a43021162018d9a80b82",
+    "scope": "Exact canonical replay metadata including creation date, stage headers and every interpreted input through the first sentinel, plus ordered highscore records at the declared threshold. Both file checksums and boundaries are independently parsed. The original files stay on the server; no original file is reconstructed from the aggregate."
+  },
+  "webgl_short": {
+    "passed": true,
+    "modes": [
+      32,
+      16
+    ],
+    "maximum_logical_history_chains": 2,
+    "finish_calls": 0,
+    "cpu_wait_calls": 0,
+    "receipt": "webgl-reference-2026-10-13.json#final_validation",
+    "canonical_final_validation_sha256": "42971e6c6b2838e24033dba1a208540b7a588c155202d770c924dafb2a2afab6",
+    "scope": "Two logical history draw chains, not two total GL submissions. Surface blits continue eachRAF and fences count separately. Short recovery test; not proof of long-term browser GPU memory stability or controlled FPS benchmark."
+  },
+  "audio_worklet_short": {
+    "passed": true,
+    "main_thread_stall_ms": 2000,
+    "sample_rates": [
+      44100,
+      48000
+    ],
+    "observed_pcm_frames": {
+      "44100": 89600,
+      "48000": 102400
+    },
+    "receipt": "midi-worklet-2026-10-13.json#final_validation",
+    "canonical_final_validation_sha256": "32bf319926363e1430df54c83672b0077f3b98d3f4104f2155d28244fb1a53c6",
+    "scope": "Audio continuity in browser at both rates; not proof of identical Windows GS timbre."
+  },
+  "historical_image_baseline": {
+    "native_binary_sha256": "4e84e9e14d5bfc3c429aec93fe6f35a99da8e5e935a98abc6a27fa0686c69096",
+    "cases": 96,
+    "image_pairs": 6209,
+    "strict_image_passed": false,
+    "receipt_sha256": "182d77bf041aa721edf04339339bf46c1879832e7c645edc22f2dab4f55a4bfc",
+    "scope": "6209 images belong to the older 4e84e9e1 build and were not regenerated exhaustively on the final 33050887 build. Their pixels and verdicts are not attributed to the final artifact."
+  },
+  "limitations": [
+    "Strict pixel criteria still fail on the final 35 images and historical 6209-image baseline; no masks, alignment or relaxed thresholds were applied.",
+    "The fixed replay/transition inputs cover their executed branches, not every possible input or a universal seamless equivalence claim.",
+    "Noto Sans JP rasterization differs from Windows GDI/MS Gothic; TimGM6mb differs from Windows GS timbre.",
+    "Ordered audio requests are separate from physical PCM equivalence. Earlier MIDI/loop/END probes retain their own dated artifacts and scopes.",
+    "Browser checks prove short WebGL recovery and AudioWorklet continuity; they do not establish long-term memory stability, controlled FPS performance or a full browser playthrough."
+  ],
+  "publication_scope": "No deployment outcome is asserted by this validation receipt."
+}

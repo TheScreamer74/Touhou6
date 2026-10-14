@@ -211,16 +211,18 @@ not become new synthesizer features. GM System On and Roland GS Reset are
 recognized.
 
 For native builds, provide `gm.sf2` beside the game's DAT files, or set
-`TH06_SOUNDFONT=/absolute/path/to/bank.sf2`. Browser folder imports recognize
-`gm.sf2`; hosted manifests can provide the same name. MIDI is enabled only
-when the bank and all 17 original MIDI files validate. The browser backend
+`TH06_SOUNDFONT=/absolute/path/to/bank.sf2`. Web hosts can provide `gm.sf2`
+through the asset manifest. MIDI is enabled only when the bank and all 17
+original MIDI files validate. The browser backend
 instantiates the same compiled WASM module in an AudioWorklet and synthesizes
 stereo on the audio rendering thread. Its 128-frame blocks use the actual
 AudioContext sample rate. An Encoding API fallback loads before wasm-bindgen
 because Chromium omits TextDecoder/TextEncoder from AudioWorkletGlobalScope.
 The browser explicitly waits for audio-node installation before the first
-title track, including when MIDI was persisted as the selected mode. The
-game thread only sends bank/track/fade/stop messages. A 2048-frame
+title track, including when MIDI was persisted as the selected mode. The page
+loads hosted assets and starts automatically; the browser unlocks audio on the
+first key press or click. The game thread only sends bank/track/fade/stop
+messages. A 2048-frame
 ScriptProcessor provides compatibility playback when AudioWorklet cannot
 start, or restarts a track if the isolated processor reports a failure. That
 compatibility path remains subject to main-thread stalls.
@@ -241,8 +243,8 @@ acceleration, and honors the sound option.
 
 No MS Gothic font is supplied by the game archive or the current user system.
 Native builds can explicitly load `msgothic.ttc`/`msgothic.ttf` beside the DAT
-files or a font selected by `TH06_FONT`; browser folder imports recognize
-those two filenames. Proprietary fonts are never bundled or hosted by default.
+files or a font selected by `TH06_FONT`; hosted manifests recognize those two
+filenames. Proprietary fonts are never bundled or hosted by default.
 The bundled Noto Sans JP remains the fallback. Supplying the original font
 matches its outlines but does not reproduce Windows GDI antialiasing or
 synthetic bold pixel-for-pixel. The fixed text-sprite helper reproduces the

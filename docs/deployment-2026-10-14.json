@@ -1,0 +1,225 @@
+{
+  "runtime_release": {
+    "version": "fidelity-20261014-0cb6025d5b09",
+    "code_commit": "8e16b936ccb72ecabe01b71efe25fbc4477343c7",
+    "previous_release": "/home/ubuntu/touhou6-web/releases/fidelity-20261012-3ac820702f24",
+    "release": "/home/ubuntu/touhou6-web/releases/fidelity-20261014-0cb6025d5b09",
+    "public_symlink": "/home/ubuntu/Touhou6-Mac/web/th06",
+    "wasm_sha256": "0cb6025d5b0909daca4d28664f0a40fe11cfa57eb289e602a1913cc3a87d05d8",
+    "checksums": {
+      "index.html": "4ec03afc8bf63949acb55bb84d3b8f383a337e25c0ce4af69546ec28593ee8f9",
+      "midi-worklet.js": "5e77d3d3f65a0b1efb2af6fa1eb5203fafca92cee8157c4e14cfa094598bd39b",
+      "pkg/th06.js": "d7a2aff4e7ec210d53134d8c1935e5088117ad99583f6114c1c1b97edef9552d",
+      "pkg/th06_bg.wasm": "0cb6025d5b0909daca4d28664f0a40fe11cfa57eb289e602a1913cc3a87d05d8",
+      "assets.json": "fc984c13068f28eb52f8ac51e3e0d1517b6dcc5a691eb2ecbcb7e850120b9ca9",
+      "build.json": "750bb173e96b51db4570c7394cc1108e3500884b420a1cfaf39455cb8a3e7486"
+    },
+    "release_archive_sha256": "3d3e581f76c9818562a05f738b59c199e49053a4ae71cf484f31ae7486e1f072",
+    "source_archive": "/home/ubuntu/touhou6-web/source/touhou6-8e16b936ccb7-source.tar.gz",
+    "source_archive_sha256": "4b60cf50ced7a9ce622d9714ce281d1b754e82162baed2a3dba0cfdad448ac58",
+    "assets_reused_from": "/home/ubuntu/touhou6-web/releases/fidelity-20261012-3ac820702f24/assets",
+    "published_utc": "2026-10-14T10:16:49.067662+00:00"
+  },
+  "runtime_release_http": {
+    "observed_utc": "2026-10-14T10:18:32.801389+00:00",
+    "passed": true,
+    "tls_verification": "certifi CA bundle, certificate and hostname validation enabled",
+    "requests": [
+      {
+        "path": "/th06/build.json",
+        "status": 200,
+        "content_type": "application/json",
+        "bytes": 817,
+        "sha256": "750bb173e96b51db4570c7394cc1108e3500884b420a1cfaf39455cb8a3e7486",
+        "metadata": {
+          "date": "2026-10-14",
+          "wasm_sha256": "0cb6025d5b0909daca4d28664f0a40fe11cfa57eb289e602a1913cc3a87d05d8",
+          "wasm_bytes": 9639568,
+          "native_binary_sha256": "330508878953a1bdf306054b764cdd1c4bfeee4073dc6df7d2afc36e70a13158",
+          "runtime_source_sha256": "b94dcce4e17bbbb122f7be36c0dabdfa0b00882046254a34a9055a7d988f2b98",
+          "source_frozen_before_and_after_build": true,
+          "version": "fidelity-20261014-0cb6025d5b09",
+          "tests": {
+            "workspace_passed": 134,
+            "workspace_ignored": 30,
+            "python_passed": 76,
+            "bg_order_depth_gpu_both_modes_passed": true,
+            "clip_gpu_both_modes_passed": true,
+            "clippy_and_format_passed": true,
+            "webgl_browser_16_and_32_bits_passed": true,
+            "midi_audio_worklet_44100_and_48000_hz_passed": true
+          },
+          "code_commit": "8e16b936ccb72ecabe01b71efe25fbc4477343c7"
+        }
+      },
+      {
+        "path": "/th06/pkg/th06_bg.wasm?v=fidelity-20261014-0cb6025d5b09",
+        "status": 200,
+        "content_type": "application/wasm",
+        "bytes": 9639568,
+        "sha256": "0cb6025d5b0909daca4d28664f0a40fe11cfa57eb289e602a1913cc3a87d05d8"
+      },
+      {
+        "path": "/th06/pkg/th06.js?v=fidelity-20261014-0cb6025d5b09",
+        "status": 200,
+        "content_type": "text/javascript",
+        "bytes": 144408,
+        "sha256": "d7a2aff4e7ec210d53134d8c1935e5088117ad99583f6114c1c1b97edef9552d"
+      },
+      {
+        "path": "/th06/midi-worklet.js?v=fidelity-20261014-0cb6025d5b09",
+        "status": 200,
+        "content_type": "text/javascript",
+        "bytes": 4873,
+        "sha256": "5e77d3d3f65a0b1efb2af6fa1eb5203fafca92cee8157c4e14cfa094598bd39b"
+      },
+      {
+        "path": "/th06/assets.json",
+        "status": 200,
+        "content_type": "application/json",
+        "bytes": 977,
+        "sha256": "fc984c13068f28eb52f8ac51e3e0d1517b6dcc5a691eb2ecbcb7e850120b9ca9",
+        "declared_files": 25
+      },
+      {
+        "path": "/th04/",
+        "status": 200,
+        "content_type": "text/html",
+        "bytes": 0,
+        "sha256": null
+      },
+      {
+        "path": "/",
+        "status": 200,
+        "content_type": "text/html",
+        "bytes": 0,
+        "sha256": null
+      },
+      {
+        "path": "/th06/assets/CM.DAT",
+        "status": 200,
+        "content_length": "935275"
+      },
+      {
+        "path": "/th06/assets/ED.DAT",
+        "status": 200,
+        "content_length": "2017777"
+      },
+      {
+        "path": "/th06/assets/IN.DAT",
+        "status": 200,
+        "content_length": "760223"
+      },
+      {
+        "path": "/th06/assets/MD.DAT",
+        "status": 200,
+        "content_length": "306003"
+      },
+      {
+        "path": "/th06/assets/ST.DAT",
+        "status": 200,
+        "content_length": "2964458"
+      },
+      {
+        "path": "/th06/assets/TL.DAT",
+        "status": 200,
+        "content_length": "1040706"
+      },
+      {
+        "path": "/th06/assets/gm.sf2",
+        "status": 200,
+        "content_length": "5969788"
+      },
+      {
+        "path": "/th06/assets/th06_01.ogg",
+        "status": 200,
+        "content_length": "1426998"
+      },
+      {
+        "path": "/th06/assets/th06_02.ogg",
+        "status": 200,
+        "content_length": "1894069"
+      },
+      {
+        "path": "/th06/assets/th06_03.ogg",
+        "status": 200,
+        "content_length": "1241998"
+      },
+      {
+        "path": "/th06/assets/th06_04.ogg",
+        "status": 200,
+        "content_length": "1837627"
+      },
+      {
+        "path": "/th06/assets/th06_05.ogg",
+        "status": 200,
+        "content_length": "1895712"
+      },
+      {
+        "path": "/th06/assets/th06_06.ogg",
+        "status": 200,
+        "content_length": "2997905"
+      },
+      {
+        "path": "/th06/assets/th06_07.ogg",
+        "status": 200,
+        "content_length": "2276786"
+      },
+      {
+        "path": "/th06/assets/th06_08.ogg",
+        "status": 200,
+        "content_length": "2558014"
+      },
+      {
+        "path": "/th06/assets/th06_09.ogg",
+        "status": 200,
+        "content_length": "2960106"
+      },
+      {
+        "path": "/th06/assets/th06_10.ogg",
+        "status": 200,
+        "content_length": "3815498"
+      },
+      {
+        "path": "/th06/assets/th06_11.ogg",
+        "status": 200,
+        "content_length": "1872080"
+      },
+      {
+        "path": "/th06/assets/th06_12.ogg",
+        "status": 200,
+        "content_length": "1221653"
+      },
+      {
+        "path": "/th06/assets/th06_13.ogg",
+        "status": 200,
+        "content_length": "3586160"
+      },
+      {
+        "path": "/th06/assets/th06_14.ogg",
+        "status": 200,
+        "content_length": "3533892"
+      },
+      {
+        "path": "/th06/assets/th06_15.ogg",
+        "status": 200,
+        "content_length": "2918100"
+      },
+      {
+        "path": "/th06/assets/th06_16.ogg",
+        "status": 200,
+        "content_length": "1124706"
+      },
+      {
+        "path": "/th06/assets/th06_17.ogg",
+        "status": 200,
+        "content_length": "2390664"
+      },
+      {
+        "path": "/th06/assets/th06e_ST.DAT",
+        "status": 200,
+        "content_length": "2966623"
+      }
+    ]
+  }
+}

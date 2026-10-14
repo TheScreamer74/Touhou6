@@ -1,0 +1,26 @@
+{
+  "date": "2026-10-14",
+  "kind": "hosted-only-automatic-web-launch",
+  "html_sha256": "c1d486dea079bc81fcc94fdae743eda93d76752eb27b5c2d92e25c9641444b25",
+  "wasm_sha256": "0cb6025d5b0909daca4d28664f0a40fe11cfa57eb289e602a1913cc3a87d05d8",
+  "runtime_source_sha256": "b94dcce4e17bbbb122f7be36c0dabdfa0b00882046254a34a9055a7d988f2b98",
+  "runtime_rebuilt": false,
+  "local_browser": "Codex In-app Browser / WebGL2",
+  "local_checks": {
+    "automatic_start_without_click": true,
+    "canvas_focused": true,
+    "keyboard_returns_to_title": true,
+    "score_replay_dialog_opens_and_closes": true,
+    "fresh_success_errors_or_warnings": [],
+    "incomplete_manifest_shows_error_and_retry": true,
+    "retry_reloads_and_starts_after_manifest_repaired": true,
+    "expected_failure_console_error": "La liste du site est incompl\u00e8te : TL.DAT, CM.DAT, ST.DAT, IN.DAT"
+  },
+  "changes": [
+    "Remove resource folder picker, cached-resource resume UI and IndexedDB resource loader.",
+    "Load hosted manifest, display loading progress and launch automatically.",
+    "Preserve local score/settings/replay persistence and import/export."
+  ],
+  "audio_scope": "Existing runtime unlocks AudioContext directly on trusted keydown/pointerdown. Automatic launch can start with suspended audio until the first gesture; this UI check does not claim physical PCM output before activation. Final runtime AudioWorklet continuity has separate receipts.",
+  "publication_verified": false
+}
