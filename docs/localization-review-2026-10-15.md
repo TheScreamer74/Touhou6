@@ -21,10 +21,14 @@ byte-exact JSON formatting round-trip, valid UTF-8, `{…}` placeholders unchang
 no value newly containing Japanese, no key added/removed (END occurrence keys
 untouched). `cargo test --workspace` passes (154 passed, 30 ignored).
 
-Not yet done: `scripts/audit_locales.py` and the ending timing/state/music replay
-checks need extracted ED.DAT/MD.DAT, which were not available on the review
-machine. Since no key changed, script timing is unaffected by construction, but
-the replay check is still to be run.
+Post-review checks on the extracted original ST/ED/MD (outside the repository):
+`scripts/audit_locales.py` passes for all four languages — 1386 required unique
+keys, required-key SHA-256 `7e0ab9f75ba6afa9bd552e2363575d60bd181e636ffa7cabdc745dcd3cde9a98`
+(unchanged from the 2026-10-14 reference), 0 missing, 0 invalid per catalog.
+The ending tests, including the asset-gated
+`original_assets_all_six_endings_reach_staff_roll_and_finish`, pass (15/15).
+No key changed, so END chunk timing is unaffected by construction. Rendered
+layout of the changed lines is covered by the separate readability ticket.
 
 Each section below is the reviewer's own report, including open doubts that were
 deliberately left unchanged for a human to decide.
