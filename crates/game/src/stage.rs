@@ -588,6 +588,16 @@ pub struct ScriptRef {
     pub tex_size: [f32; 2],
 }
 
+/// BulletManager_OnDraw places the laser body and base glow at
+/// `pos + (cos, sin) * offset` and draws them with Draw3: unrounded D3D
+/// pixel-centre coordinates, i.e. +0.5 in WebGPU pixels (as `sprite_geometry::world`).
+fn laser_screen_point(laser: &crate::ecl_vm::Laser, offset: f32) -> [f32; 2] {
+    [
+        FIELD_X + laser.pos[0] + laser.angle.cos() * offset + 0.5,
+        FIELD_Y + laser.pos[1] + laser.angle.sin() * offset + 0.5,
+    ]
+}
+
 /// `Stage_OnUpdate` while `g_GameManager.isTimeStopped`: writes the D3DCOLOR
 /// bytes alpha 0x60, red 0x80, green 0x30, blue 0x30 (`COLOR_RED_BYTE_IDX` is 2,
 /// `COLOR_BLUE_BYTE_IDX` is 0), i.e. a red tint on Sakuya's spellcard background.
@@ -5020,8 +5030,7 @@ impl Stage {
             let length = (laser.end_offset - laser.start_offset).max(0.0);
             let width = laser.draw_width.max(0.0);
             let midpoint = laser.start_offset + length / 2.0;
-            let cx = FIELD_X + laser.pos[0] + laser.angle.cos() * midpoint;
-            let cy = FIELD_Y + laser.pos[1] + laser.angle.sin() * midpoint;
+            let [cx, cy] = laser_screen_point(laser, midpoint);
             let color = laser.color.max(0) as u32;
             let base = if laser.script == 9 { 146 } else { 62 };
             if let Some(sprite) = self.bullet_sprites.get(&(base + color)) {
@@ -5055,8 +5064,7 @@ impl Stage {
                             .unwrap_or(0)),
                 )
             {
-                let ox = FIELD_X + laser.pos[0] + laser.angle.cos() * laser.start_offset;
-                let oy = FIELD_Y + laser.pos[1] + laser.angle.sin() * laser.start_offset;
+                let [ox, oy] = laser_screen_point(laser, laser.start_offset);
                 let mut scale = laser.width / 10.0 * ((16.0 - laser.start_offset) / 16.0);
                 if scale < 0.0 {
                     scale = laser.width / 10.0;
@@ -6919,6 +6927,37 @@ mod tests {
         s.spawn_item(item);
         s.update_items();
         assert_eq!(s.items[0].pos[1], 458.0);
+    }
+
+    #[test]
+    fn laser_draw_point_uses_draw3_pixel_centres() {
+        let laser = crate::ecl_vm::Laser {
+            in_use: true,
+            pos: [100.25, 50.0],
+            angle: 0.0,
+            speed: 0.0,
+            start_offset: 4.0,
+            end_offset: 40.0,
+            start_length: 36.0,
+            width: 8.0,
+            start_time: 0,
+            duration: 20,
+            despawn_duration: 16,
+            hitbox_start: 0,
+            hitbox_end: 0,
+            flags: 0,
+            script: 9,
+            draw_width: 8.0,
+            draw_alpha: 1.0,
+            state: 1,
+            timer: 0,
+            color: 0,
+        };
+        // Unrounded position plus the D3D-to-WebGPU half pixel.
+        assert_eq!(
+            laser_screen_point(&laser, 4.0),
+            [FIELD_X + 104.75, FIELD_Y + 50.5]
+        );
     }
 
     #[test]

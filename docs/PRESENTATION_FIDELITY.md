@@ -97,7 +97,11 @@ alpha 0x60, red 0x80, green 0x30, blue 0x30 (`Stage_OnUpdate`; `COLOR_RED_BYTE_I
 is 2), a red tint; an earlier port swapped red and blue. In the replay-c0-d1-s5
 time-stop checkpoint 10800 this lowered playfield MAE from 11.71 to 2.95.
 Fidelity captures pass `--hitbox off`: the original draws no hitbox, while the
-port option defaults to Focus. `loading.anm` appears on stage results and runs its
+port option defaults to Focus. Lasers and their base glows are drawn by
+`BulletManager_OnDraw` with Draw3 at unrounded D3D pixel-centre coordinates;
+the port now adds the same +0.5 WebGPU half pixel as `sprite_geometry::world`.
+Before, they sat half a pixel up and left: in replay-c1-d3-s6 checkpoint 7201
+playfield MAE fell from 5.68 to 1.82. `loading.anm` appears on stage results and runs its
 interrupt-driven reveal on the next stage; the stopped loading VM gates stage
 background drawing as in `Gui::IsStageFinished`.
 
