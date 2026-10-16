@@ -139,21 +139,30 @@ pub(crate) fn canvas_image(
     let [width, height] = canvas.map(|n| n.max(1));
     let mut rgba = vec![0; (width * height * 4) as usize];
     // Long translations shrink horizontally inside the same sprite rectangle.
-    // Vertical size remains legible and independent of original byte counts.
+    // A render taller than the original canvas (Noto vs GDI line height) is
+    // shrunk vertically too, so descenders and the shadow are not cut off.
     let target_width = image.width.min(width);
+    let target_height = image.height.min(height);
     let offset = match alignment {
         SpriteTextAlign::Left => 0,
         SpriteTextAlign::Center => (width - target_width) / 2,
         SpriteTextAlign::Right => width - target_width,
     };
-    for y in 0..height.min(image.height) {
+    for y in 0..target_height {
+        let source_y = if image.height > height {
+            // Endpoint-inclusive: the first and last source rows both survive.
+            let (from, to) = (image.height as u64 - 1, (target_height as u64 - 1).max(1));
+            ((y as u64 * from + to / 2) / to) as u32
+        } else {
+            y
+        };
         for x in 0..target_width {
             let source_x = if image.width > width {
                 ((x as u64 * image.width as u64) / target_width as u64) as u32
             } else {
                 x
             };
-            let source = ((y * image.width + source_x) * 4) as usize;
+            let source = ((source_y * image.width + source_x) * 4) as usize;
             let dest = ((y * width + x + offset) * 4) as usize;
             rgba[dest..dest + 4].copy_from_slice(&image.rgba[source..source + 4]);
         }
@@ -210,6 +219,66 @@ fn render_recipe(recipe: &Recipe, value: Language) -> TextImage {
         },
     }
 }
+/// Layout of one registered text in one language: the natural rendered width
+/// and height versus the original sprite canvas. Translations shrink
+/// horizontally to the canvas (`canvas_image`) and are clipped vertically.
+#[derive(Debug, Clone)]
+pub struct TextFit {
+    pub language: &'static str,
+    pub source: String,
+    pub text: String,
+    pub canvas: [u32; 2],
+    pub natural: [u32; 2],
+    pub horizontal_scale: f32,
+    pub vertically_clipped: bool,
+    /// Non-transparent pixels below the canvas height that are cut off.
+    pub clipped_ink_pixels: u32,
+}
+
+/// Measures every registered text recipe in each translated language without
+/// touching the GPU textures. Custom (ending) recipes use the 15 px chunk metrics.
+pub fn audit_text_fit() -> Vec<TextFit> {
+    REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let mut rows = Vec::new();
+        for recipe in &registry.recipes {
+            let (px, shadow) = match recipe.kind {
+                RecipeKind::Text { px, shadow, .. } => (px, shadow),
+                RecipeKind::Sprite { font_size, .. } => (font_size as f32, Some([0; 3])),
+                // Ending chunks (`ending::chunk_text`) render at 15 px with a
+                // shadow; staff credit lines are approximated the same way.
+                RecipeKind::Custom { .. } => (15.0, Some([0; 3])),
+            };
+            for value in [
+                Language::French,
+                Language::English,
+                Language::German,
+                Language::Dutch,
+            ] {
+                let translated = translate_in(value, &recipe.source).into_owned();
+                let image = text::render(&translated, px, [255; 3], shadow);
+                let [width, height] = recipe.canvas.map(|n| n.max(1));
+                rows.push(TextFit {
+                    language: value.code(),
+                    source: recipe.source.clone(),
+                    text: translated,
+                    canvas: recipe.canvas,
+                    natural: [image.width, image.height],
+                    horizontal_scale: (width as f32 / image.width.max(1) as f32).min(1.0),
+                    vertically_clipped: image.height > height,
+                    clipped_ink_pixels: image
+                        .rgba
+                        .chunks_exact(4)
+                        .skip((height.min(image.height) * image.width) as usize)
+                        .filter(|pixel| pixel[3] != 0)
+                        .count() as u32,
+                });
+            }
+        }
+        rows
+    })
+}
+
 fn register(engine: &Engine, textures: &mut Vec<Texture>, mut recipe: Recipe) -> (usize, f32, f32) {
     recipe.slot = textures.len();
     let image = render_recipe(&recipe, language());
@@ -585,6 +654,31 @@ mod tests {
         set_language(Language::Original);
         assert_eq!(translated_ascii("Stage 6  Power 128"), None);
     }
+    #[test]
+    fn tall_render_keeps_its_bottom_rows_inside_the_canvas() {
+        // An 18-row render in a 16-row sprite: the last source row (descenders,
+        // shadow) must still reach the canvas instead of being cut off.
+        let mut rgba = vec![0; 4 * 18 * 4];
+        for x in 0..4 {
+            rgba[(17 * 4 + x) * 4..(17 * 4 + x) * 4 + 4].copy_from_slice(&[255; 4]);
+        }
+        let image = canvas_image(
+            TextImage {
+                width: 4,
+                height: 18,
+                rgba,
+            },
+            [4, 16],
+            SpriteTextAlign::Left,
+        );
+        assert_eq!((image.width, image.height), (4, 16));
+        assert!(
+            image.rgba[15 * 4 * 4..]
+                .chunks_exact(4)
+                .all(|p| p[3] == 255)
+        );
+    }
+
     #[test]
     fn long_text_fits_without_changing_texture_dimensions() {
         let image = canvas_image(

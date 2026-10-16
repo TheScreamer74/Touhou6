@@ -495,6 +495,27 @@ fn main() {
         th06::localization::set_language(value);
     }
     let (mut textures, mut game) = build_game(&engine, &files, with_audio);
+    if let Ok(path) = std::env::var("TH06_TEXT_FIT_AUDIT") {
+        // Diagnostic: measure every baked translated text against its canvas.
+        let rows: Vec<_> = th06::localization::audit_text_fit()
+            .into_iter()
+            .map(|row| {
+                serde_json::json!({
+                    "language": row.language, "source": row.source, "text": row.text,
+                    "canvas": row.canvas, "natural": row.natural,
+                    "horizontal_scale": row.horizontal_scale,
+                    "vertically_clipped": row.vertically_clipped,
+                    "clipped_ink_pixels": row.clipped_ink_pixels,
+                })
+            })
+            .collect();
+        std::fs::write(
+            &path,
+            serde_json::to_vec_pretty(&rows).expect("serialize text fit"),
+        )
+        .expect("write text fit audit");
+        return;
+    }
 
     let hiscore_path = game_dir.join("th06_hiscore.txt");
     game.set_hiscore(load_hiscore(&hiscore_path));
