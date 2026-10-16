@@ -588,6 +588,18 @@ pub struct ScriptRef {
     pub tex_size: [f32; 2],
 }
 
+/// `Stage_OnUpdate` while `g_GameManager.isTimeStopped`: writes the D3DCOLOR
+/// bytes alpha 0x60, red 0x80, green 0x30, blue 0x30 (`COLOR_RED_BYTE_IDX` is 2,
+/// `COLOR_BLUE_BYTE_IDX` is 0), i.e. a red tint on Sakuya's spellcard background.
+fn tint_time_stopped_spell_background(runner: &mut AnmRunner) {
+    runner.alpha = 0x60 as f32 / 255.0;
+    runner.color = [
+        0x80 as f32 / 255.0,
+        0x30 as f32 / 255.0,
+        0x30 as f32 / 255.0,
+    ];
+}
+
 fn screen_asset_cmd(asset: &PortraitAsset, runner: &AnmRunner) -> Option<DrawCmd> {
     if !runner.visible() {
         return None;
@@ -2057,8 +2069,7 @@ impl Stage {
         self.anim += 1;
         if self.world.time_stopped {
             if let Some(runner) = &mut self.spell_background_runner {
-                runner.alpha = 96.0 / 255.0;
-                runner.color = [48.0 / 255.0, 48.0 / 255.0, 128.0 / 255.0];
+                tint_time_stopped_spell_background(runner);
             }
         } else {
             if self.spell_active {
@@ -6908,6 +6919,15 @@ mod tests {
         s.spawn_item(item);
         s.update_items();
         assert_eq!(s.items[0].pos[1], 458.0);
+    }
+
+    #[test]
+    fn time_stop_tints_spell_background_red_like_stage_on_update() {
+        let mut runner = AnmRunner::new(Vec::new());
+        tint_time_stopped_spell_background(&mut runner);
+        let byte = |value: f32| (value * 255.0).round() as u8;
+        assert_eq!(byte(runner.alpha), 0x60);
+        assert_eq!(runner.color.map(byte), [0x80, 0x30, 0x30]);
     }
 
     #[test]

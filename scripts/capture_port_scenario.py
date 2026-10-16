@@ -157,7 +157,9 @@ def capture(case, reference, args):
                *entry_arguments, "--capture-dir", str(out.resolve()),
                "--capture-frames", ",".join(map(str, sorted(checkpoints))),
                "--capture-clock", "replay", "--replay-pools", str((out / "pools.jsonl").resolve()),
-               "--frames", str(last_frame + (700 if menu_entry else 200)), f"--color-{args.color_bits}bit"]
+               "--frames", str(last_frame + (700 if menu_entry else 200)), f"--color-{args.color_bits}bit",
+               # The original draws no hitbox; the port's extension defaults to Focus.
+               "--hitbox", "off"]
     if complete_reference:
         command.extend(["--complete-reference", "--capture-pool-frames", ",".join(map(str, pool_frames))])
     if provenance.get("god", False):

@@ -92,8 +92,12 @@ probe and tested WASM hashes separately.
 The stage-specific `eff01.anm` through `eff07.anm` spellcard backgrounds use
 original script zero, its alpha animation and ANM UV-scroll opcodes 27/28. Stages
 6 and 7 use the original early background and replace it when the boss dialogue
-loads the late effects sheet. Time stop uses the original blue-tinted RGB
-(48,48,128), alpha96. `loading.anm` appears on stage results and runs its
+loads the late effects sheet. Time stop writes the original D3DCOLOR bytes
+alpha 0x60, red 0x80, green 0x30, blue 0x30 (`Stage_OnUpdate`; `COLOR_RED_BYTE_IDX`
+is 2), a red tint; an earlier port swapped red and blue. In the replay-c0-d1-s5
+time-stop checkpoint 10800 this lowered playfield MAE from 11.71 to 2.95.
+Fidelity captures pass `--hitbox off`: the original draws no hitbox, while the
+port option defaults to Focus. `loading.anm` appears on stage results and runs its
 interrupt-driven reveal on the next stage; the stopped loading VM gates stage
 background drawing as in `Gui::IsStageFinished`.
 
