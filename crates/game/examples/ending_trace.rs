@@ -98,8 +98,8 @@ fn main() {
     writeln!(events, "tick,event,value").unwrap();
     for tick in 1..=frames {
         // Original main.cpp runs the draw chain before the calculation chain.
-        th06::localization::refresh();
         let draw = ending.draw();
+        th06::localization::refresh(&draw);
         // Supervisor::OnUpdate clears both input masks after registering a
         // new scene. Its first END calculation therefore receives no keys,
         // even when Ctrl/Z are physically held throughout the transition.
