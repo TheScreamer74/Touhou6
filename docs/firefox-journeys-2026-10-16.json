@@ -1,0 +1,46 @@
+{
+  "ticket": "Touhou6 #7 — Valider les parcours complets Firefox, sauvegardes et transmission du résultat",
+  "date": "2026-10-16",
+  "target": {
+    "url": "https://games.blackoutburst.com/th06/",
+    "engine_wasm_sha256": "c6e5010cce486905f2f1c16d4a2274afb5707bdc2e8685719a3f939f8e201fdc",
+    "release": "community-20261016-language-c6e5010cce48 (live during the run)"
+  },
+  "browser": "Playwright 1.48.2 Firefox build 1465 (Firefox 131), headless, 1280x960, macOS",
+  "harness": {
+    "driver": "scripts/firefox_journeys/driver.mjs — persistent synthetic profile; init script wraps window.__th06SubmitScore to log every payload before forwarding it; --no-community routes /platform/community.js to 404",
+    "bot": "scripts/firefox_journeys/bot.sh — blind hold-shoot/sweep/bomb pattern that stops on the first new result event",
+    "synthetic_progress": "crates/formats/examples/unlock_score.rs — ScoreData::default() with stages_cleared(_without_continues)=99, encoded by the crate's own encoder (128 B) and imported through the page's Importer score.dat; used to unlock Extra/Practice without touching real saves"
+  },
+  "profiles": ["run1: fresh synthetic profile with community adapter", "run2: fresh synthetic profile, community.js blocked (404)"],
+  "scenarios": [
+    {"id": "options", "steps": "Options: Vies 3→5 (wraps 5→1), Retour", "result": "value persists in session and after full page reload (th06:th06-options.bin)"},
+    {"id": "practice-RA", "steps": "Practice Easy St1 Reimu A, bot until natural game over (Rumia boss reached)", "events": [{"mode": "practice", "character": 0, "difficulty": 0, "stage": 1, "cleared": false, "continues": 0, "frames": 10896, "score": 701760}], "note": "practice starts with 2 spare lives/3 bombs regardless of option; matches decomp MainMenu.cpp:762-767"},
+    {"id": "story-continue", "steps": "Story Easy Reimu A, 5 lives, bot taps Z through the continue prompt", "events": [{"mode": "normal", "character": 0, "difficulty": 0, "stage": 2, "cleared": false, "continues": 1, "frames": 19500, "score": 2037011}], "result": "single event at game over, before name entry; Résultats screen agrees (score 2037011, continues 1, 10 lives lost); leaving the results/name entry adds no event; replay save refused with 'Impossible d'enregistrer un replay après avoir continué.' as in the original"},
+    {"id": "demo", "steps": "idle on title ~75 s; attract demo (stage 4) plays and returns", "events": []},
+    {"id": "practice-RB", "events": [{"mode": "practice", "character": 1, "difficulty": 0, "stage": 1, "cleared": false, "frames": 6994, "score": 643510}]},
+    {"id": "practice-MB", "events": [{"mode": "practice", "character": 3, "difficulty": 0, "stage": 1, "cleared": false, "frames": 7351, "score": 754080}]},
+    {"id": "practice-MA", "events": [{"mode": "practice", "character": 2, "difficulty": 0, "stage": 1, "cleared": false, "frames": 8024, "score": 636800}]},
+    {"id": "extra", "steps": "Extra Marisa A, bot until game over; name 'T'; Résultats; save replay slot 01", "events": [{"mode": "extra", "character": 2, "difficulty": 4, "stage": 7, "cleared": false, "continues": 0, "frames": 2899, "score": 4712660}], "result": "single event; Extra record table shows T 4712660; replay list shows No.01 T 10/16/26 MarisaA Extra"},
+    {"id": "replay-playback", "steps": "Replays → No.01, play to end", "events": [], "result": "replay reproduces the run (Record 4712660 shown); no event"},
+    {"id": "export-import", "steps": "Scores et replays: Exporter score.dat (392 B), Exporter le replay slot 01 (th6_01.rpy, 1232 B), Importer un replay into slot 02 → 'Terminé.'", "result": "after page reload: localStorage holds options, score.dat, replay/th6_01.rpy and th6_02.rpy; Replays lists No.01 and No.02; imported No.02 plays (Record 4712660) with no event"},
+    {"id": "pending-queue", "result": "adapter shows 'N partie(s) en attente. Connectez-vous pour publier vos scores.'; after 6 runs, blackoutburst.th06.pending.v1 holds 6 entries {run, ownerId, createdAt} and survives reload"},
+    {"id": "leaderboard-keyboard", "steps": "pause during replay; click Classement; press Tab/ArrowDown inside dialog; Escape; ArrowDown", "result": "dialog opens with focus on Fermer and __th06CommunityDialogOpen()=true (game suspended); keys inside dialog do not reach the game; Escape closes, focus returns to canvas#th06-canvas, next ArrowDown moves the pause cursor Reprendre→Retour au titre"},
+    {"id": "no-adapter", "steps": "community.js 404; import synthetic score; Practice Easy St1 Reimu A ×3 (one navigation slip entered Extra Reimu A)", "events": [{"mode": "practice", "character": 0, "stage": 1, "frames": 7353}, {"mode": "practice", "character": 0, "stage": 1, "frames": 7631}, {"mode": "extra", "character": 0, "difficulty": 4, "stage": 7, "frames": 4348}], "result": "game fully playable; only Plein écran and Scores et replays buttons; events reach the page's in-memory queue; 0 JS errors"}
+  ],
+  "coverage": {
+    "game_over_continue": "covered (story-continue)",
+    "practice": "covered, all four shot types (RA=0, RB=1, MA=2, MB=3)",
+    "extra": "covered (Marisa A, Reimu A)",
+    "one_event_per_run": "covered: 9 terminal runs → 9 events, none duplicated by results/name entry/replay save/return to title",
+    "no_event_for_replay_demo": "covered (two replay playbacks incl. imported, two attract demos)",
+    "no_event_for_diagnostic_god_mode": "not exercisable in the public web build (TH06_GOD is native-only); covered by community::result_payload callers in source only",
+    "natural_victory": "NOT covered: the blind bot never cleared a stage (best: Rumia reached with 1 life). Needs a human-played clear (cleared:true) or a deterministic input driver.",
+    "server_publication": "not exercised: no account login on synthetic profiles; publication remains with the platform project"
+  },
+  "limits": [
+    "Headless Firefox only; no audio checked.",
+    "Screenshots and saved .dat/.rpy files stay local (proprietary assets), not committed.",
+    "One real-player clear is still required for the victory/ending → result ordering check."
+  ]
+}
