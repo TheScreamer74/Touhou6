@@ -223,6 +223,15 @@ fn basename(path: &str) -> &str {
     path.rsplit('/').next().unwrap()
 }
 
+/// Colour and alpha archive names declared by an ANM entry, as `LoadAnm`
+/// passes them to `LoadTexture`/`LoadTextureAlphaChannel`.
+fn anm_texture_files(entry: &th06_formats::anm0::Entry) -> (&str, Option<&str>) {
+    (
+        basename(&entry.name),
+        entry.alpha_name.as_deref().map(basename),
+    )
+}
+
 /// Per-stage assets: scripts/data bytes plus the parsed sprite sheets and the
 /// texture slots they were uploaded to.
 struct StageData {
@@ -636,14 +645,12 @@ pub fn build_game(engine: &Engine, files: &GameFiles, with_audio: bool) -> (Vec<
     let etama4_tex = load(&files.cm, "etama4.png", Some("etama4_a.png"), &mut textures);
 
     let portrait = |archive: &HashMap<String, Vec<u8>>, name: &str, textures: &mut Vec<Texture>| {
-        let tex = load(
-            archive,
-            &format!("{name}.png"),
-            Some(&format!("{name}_a.png")),
-            textures,
-        );
         let anm = Anm0::parse(&archive[&format!("{name}.anm")]).expect("portrait ANM");
-        stage::PortraitAsset::new(tex, &anm.entries[0])
+        let entry = &anm.entries[0];
+        // face10b and face12b reuse face10a_a.png and face12a_a.png.
+        let (color, mask) = anm_texture_files(entry);
+        let tex = load(archive, color, mask, textures);
+        stage::PortraitAsset::new(tex, entry)
     };
     let player_portraits = std::array::from_fn(|c| {
         ["a", "b", "c"]
@@ -2769,6 +2776,22 @@ fn has_next_stage(mode: RunMode, difficulty: Difficulty, current_stage: usize) -
 #[cfg(test)]
 mod route_tests {
     use super::*;
+    #[test]
+    fn portrait_alpha_comes_from_the_anm_entry() {
+        let entry = th06_formats::anm0::Entry {
+            width: 256,
+            height: 256,
+            format: 1,
+            name: "data/face/face12b.png".into(),
+            alpha_name: Some("data/face/face12a_a.png".into()),
+            sprites: Vec::new(),
+            scripts: Vec::new(),
+        };
+        assert_eq!(
+            anm_texture_files(&entry),
+            ("face12b.png", Some("face12a_a.png"))
+        );
+    }
     #[test]
     fn story_easy_and_practice_have_original_stage_limits() {
         assert!(has_next_stage(RunMode::Story, Difficulty::Normal, 4));

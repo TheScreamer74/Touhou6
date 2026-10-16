@@ -108,7 +108,12 @@ only switches `D3DRS_DESTBLEND` to ONE, and fixed-function fog blends the
 fragment toward `D3DRS_FOGCOLOR` before blending. The port previously faded
 additive glows to black with distance, which dimmed the stage 5/7 window
 lights. Over the five render_final cases (360 checkpoints) mean playfield MAE
-fell from 1.925 to 1.294 and mean full-frame MAE from 1.136 to 0.783. `loading.anm` appears on stage results and runs its
+fell from 1.925 to 1.294 and mean full-frame MAE from 1.136 to 0.783.
+
+Portraits read the alpha file declared by their ANM entry, as `LoadAnm` does:
+`face10b` and `face12b` reuse `face10a_a.png` and `face12a_a.png` and have no
+alpha file of their own, so the port previously drew them opaque. In
+replay-c0-d4-s7 checkpoint 30602 playfield MAE fell from 4.51 to 1.15. `loading.anm` appears on stage results and runs its
 interrupt-driven reveal on the next stage; the stopped loading VM gates stage
 background drawing as in `Gui::IsStageFinished`.
 
