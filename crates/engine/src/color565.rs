@@ -229,8 +229,8 @@ impl Renderer {
             source = source.replace("textureSample(tex, samp, in.uv)", "original_sample(in.uv)");
             if background {
                 source = source.replace(
-                    "return vec4f(c.rgb * c.a * f, c.a);",
-                    "return compose(in.pos.xy, vec4f(c.rgb * c.a * f, c.a), true, true);",
+                    "return vec4f(rgb * c.a, c.a);",
+                    "return compose(in.pos.xy, vec4f(rgb * c.a, c.a), true, true);",
                 );
                 source = source.replace(
                     "return vec4f(rgb, c.a);",
@@ -1054,6 +1054,48 @@ mod tests {
         let pixels = engine.render_to_image(&vec![cmd; 256], &[&texture], None);
         assert_eq!(&pixels[..4], &[255, 0, 0, 255]);
         super::super::set_color_16bit(false);
+    }
+
+    #[test]
+    #[ignore = "requires GPU adapter"]
+    fn background_additive_quads_receive_fixed_function_fog() {
+        // D3D fog blends the fragment toward D3DRS_FOGCOLOR before the
+        // SRCALPHA/ONE additive blend; a fully fogged glow adds fog * alpha.
+        super::super::set_color_16bit(false);
+        let engine = Engine::new();
+        let texture = engine.create_texture_with_format(&[255, 255, 255, 255], 1, 1, 1);
+        let quad: Vec<_> = [
+            [-1.0, -1.0],
+            [1.0, -1.0],
+            [1.0, 1.0],
+            [-1.0, -1.0],
+            [1.0, 1.0],
+            [-1.0, 1.0],
+        ]
+        .iter()
+        .map(|p| Vertex3 {
+            pos: [p[0], p[1], 0.5],
+            uv: [0.5, 0.5],
+            depth: 1.0,
+            color: [1.0, 1.0, 1.0, 0.5],
+        })
+        .collect();
+        let scene = BgScene {
+            mvp: glam::Mat4::IDENTITY.to_cols_array_2d(),
+            fog_color: [0.5, 0.0, 0.0, 1.0],
+            fog_near: 0.0,
+            fog_far: 1.0,
+            verts: Vec::new(),
+            verts_add: quad,
+            draw_ranges: Vec::new(),
+            tex: 0,
+            arcade: [0.0, 0.0, 640.0, 480.0],
+        };
+        let pixels = engine.render_to_image(&[], &[&texture], Some(&scene));
+        // Cleared to the fog colour (128) plus fog * alpha (64); fading the glow
+        // to black instead would leave 128.
+        assert!((191..=193).contains(&pixels[0]), "red {}", pixels[0]);
+        assert_eq!(&pixels[1..3], &[0, 0]);
     }
 
     #[test]

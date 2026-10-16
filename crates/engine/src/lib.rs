@@ -206,11 +206,13 @@ fn fs(in: VOut) -> @location(0) vec4f {
     }
     let span = max(u.fog_params.y - u.fog_params.x, 1.0);
     let f = clamp((u.fog_params.y - in.depth) / span, 0.0, 1.0);
-    if (u.fog_params.z > 0.5) {
-        // Additive glow: fades to nothing with distance, premultiplied for One/One.
-        return vec4f(c.rgb * c.a * f, c.a);
-    }
+    // D3D fixed-function fog blends the fragment toward D3DRS_FOGCOLOR before
+    // blending, for additive VMs too (AnmManager only switches DESTBLEND to ONE).
     let rgb = mix(u.fog_color.rgb, c.rgb, f);
+    if (u.fog_params.z > 0.5) {
+        // Premultiplied for the One/One pipeline: SRCALPHA * fogged colour.
+        return vec4f(rgb * c.a, c.a);
+    }
     return vec4f(rgb, c.a);
 }
 "#;
