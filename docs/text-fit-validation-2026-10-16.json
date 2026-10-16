@@ -1,0 +1,76 @@
+{
+  "kind": "translated-text-fit-and-legibility-validation",
+  "date": "2026-10-16",
+  "branch": "claude/text-fit-audit-2026-10-16",
+  "catalog_sha256": {
+    "fr": "495da56402015636458fe724daf56e891f909e9ea431c2f29a4b52de84edf1f3",
+    "en": "0b5ff092093a88b232ef0bfad60d0ec49a7ed69ca17d5e5dab4f4bab31c18e02",
+    "de": "38132b42dab416ddc72bb0ae1e7955fbdc4a63ffe59e3e180f569da25a2cff9a",
+    "nl": "acb8adfe3b271b7f842ddd772d9860656944fa75d90f62e049d3bd56cc329a4a"
+  },
+  "native_binary_sha256": "2a5f168dc723215fcd7f59055cee1cd4c21dd788bcc372ed4c44082ce4279e00",
+  "audit": {
+    "method": "TH06_TEXT_FIT_AUDIT: every registered text recipe (dialogue, spells, stage/song titles, Music Room, ending chunks, result labels) re-rendered per language through text::render and compared with its original sprite canvas; staff credit lines approximated with the 15 px chunk metrics.",
+    "registered_text_language_rows": 4160,
+    "per_language": {
+      "fr": {
+        "texts": 1040,
+        "min_horizontal_scale": 0.776,
+        "below_0_85": 3,
+        "below_0_70": 0,
+        "taller_than_canvas_now_shrunk": 338,
+        "untranslated_japanese": 0
+      },
+      "en": {
+        "texts": 1040,
+        "min_horizontal_scale": 0.749,
+        "below_0_85": 5,
+        "below_0_70": 0,
+        "taller_than_canvas_now_shrunk": 338,
+        "untranslated_japanese": 0
+      },
+      "de": {
+        "texts": 1040,
+        "min_horizontal_scale": 0.742,
+        "below_0_85": 6,
+        "below_0_70": 0,
+        "taller_than_canvas_now_shrunk": 338,
+        "untranslated_japanese": 0
+      },
+      "nl": {
+        "texts": 1040,
+        "min_horizontal_scale": 0.769,
+        "below_0_85": 4,
+        "below_0_70": 0,
+        "taller_than_canvas_now_shrunk": 338,
+        "untranslated_japanese": 0
+      }
+    }
+  },
+  "fixes": [
+    "song-title and other renders taller than their 16-row canvas are shrunk vertically (40 translated banners lost descender/shadow rows)",
+    "9 hard-coded texts without catalog entries now translated: 4 player bomb names, 4 result-screen shot labels, unknown-spell placeholder",
+    "German Țepeș replaced by Tepes (comma-below letters missing from Noto Sans JP; rendered as tofu)"
+  ],
+  "glyph_coverage": "All FR/EN/DE/NL catalog characters are present in NotoSansJP-Bold.otf; ASCII-keyed UI strings stay within the runtime Latin atlas except „ in DE/NL ending chunks, which are rendered by Noto (covered).",
+  "captures_native": {
+    "stage_title_and_song_banner": "stages 1-7 x ja/fr/en/de/nl, frame 240",
+    "bomb_name_banner": "characters 0-3 x ja/fr/en/de/nl, bomb at frame 300, frame 330",
+    "worst_squeezed_texts": "12 most squeezed (x0.74-x0.83) + formerly clipped song titles, baked images"
+  },
+  "captures_browser": {
+    "build": "public community build (games.blackoutburst.com/th06)",
+    "language_switch_in_session": "fr -> en from Options: game text and page chrome switch immediately",
+    "persistence_after_reload": "lives 4, colour depth 16 bit, language English retained in th06-options.bin (localStorage)"
+  },
+  "intentionally_preserved": [
+    "FINAL/EXTRA stage labels are original pixel art combined with the translated stage word",
+    "staff credit proper names/logos/handwritten final phrase (PORT_EXTENSIONS.md)",
+    "character and place proper names"
+  ],
+  "not_covered": [
+    "Firefox captures of the new catalogs (public build still runs the pre-review catalogs)",
+    "every individual dialogue line on screen: covered by the fit audit, not by one capture per line",
+    "16-bit display mode text"
+  ]
+}

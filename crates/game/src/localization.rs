@@ -233,6 +233,9 @@ pub struct TextFit {
     pub vertically_clipped: bool,
     /// Non-transparent pixels below the canvas height that are cut off.
     pub clipped_ink_pixels: u32,
+    /// Final sprite exactly as `render_recipe` bakes it, for squeezed or
+    /// taller-than-canvas texts (width, height, RGBA).
+    pub baked: Option<(u32, u32, Vec<u8>)>,
 }
 
 /// Measures every registered text recipe in each translated language without
@@ -272,6 +275,10 @@ pub fn audit_text_fit() -> Vec<TextFit> {
                         .skip((height.min(image.height) * image.width) as usize)
                         .filter(|pixel| pixel[3] != 0)
                         .count() as u32,
+                    baked: (image.width > width || image.height > height).then(|| {
+                        let baked = render_recipe(recipe, value);
+                        (baked.width, baked.height, baked.rgba)
+                    }),
                 });
             }
         }

@@ -497,9 +497,16 @@ fn main() {
     let (mut textures, mut game) = build_game(&engine, &files, with_audio);
     if let Ok(path) = std::env::var("TH06_TEXT_FIT_AUDIT") {
         // Diagnostic: measure every baked translated text against its canvas.
+        let dump = std::env::var("TH06_TEXT_FIT_DUMP").ok();
         let rows: Vec<_> = th06::localization::audit_text_fit()
             .into_iter()
-            .map(|row| {
+            .enumerate()
+            .map(|(index, row)| {
+                if let (Some(dir), Some((w, h, rgba))) = (&dump, &row.baked) {
+                    let name = format!("{dir}/{index:05}-{}.png", row.language);
+                    image::save_buffer(&name, rgba, *w, *h, image::ColorType::Rgba8)
+                        .expect("write text fit image");
+                }
                 serde_json::json!({
                     "language": row.language, "source": row.source, "text": row.text,
                     "canvas": row.canvas, "natural": row.natural,
