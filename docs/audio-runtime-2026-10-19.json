@@ -1,0 +1,29 @@
+{
+  "ticket": "Touhou6 #4 — Recertifier les boucles et la sortie audio de la version publiée (runtime part)",
+  "date": "2026-10-19",
+  "target": {
+    "url": "https://games.blackoutburst.com/th06/",
+    "engine_wasm_sha256_prefix": "c6e5010cce486905",
+    "release": "community-20261016-language-c6e5010cce48 (live during the run)"
+  },
+  "browser": "Playwright 1.48.2 Firefox build 1465 (Firefox 131), headless, macOS; autoplay prefs relaxed; 48 kHz run via media.cubeb.force_sample_rate",
+  "method": "scripts/audio_runtime/audio_tap.js wraps every AudioNode.connect(destination) through a recorder AudioWorklet that passes audio through unchanged and records, per 128-frame render quantum, currentFrame, RMS, peak and max |x[n]-x[n-1]| per channel; optional raw PCM windows are written as WAV (kept local: original game audio). analyze_tap.py checks frame continuity, audio clock vs wall clock between marked events, silence runs and click candidates. Loop seams compared against the original th06_01.wav looped at its .pos points (264615..2611365) via cross-correlation, gain fit and residual SNR; 48 kHz reference is an FFT band-limited resample.",
+  "results": {
+    "render_continuity": "0 frame gaps over 165 s of tapped output across 5 dumps at 44.1 kHz (title, menus, Stage 1 gameplay with shots/bombs, pause/resume, options, MIDI, reload); AudioContext 'running' throughout",
+    "main_thread_load": "WAV/Ogg: 10x400 ms busy loops on the title and 5x300 ms during gameplay; MIDI worklet: 10x400 ms plus 2x1500 ms. Audio clock/wall clock 0.999-1.002 per phase, 0 dropouts, 0 click candidates in those phases",
+    "pause_resume": "game pause menu keeps BGM playing at unchanged level (no gap, no level step) and resume continues seamlessly; matches the original, where the in-game menu does not stop music",
+    "quit_to_title": "Revenir au menu -> Oui stops BGM immediately (one hard step, then 2.42 s digital silence) before the title track starts; decomp GameManager_DeletedCallback calls Supervisor::StopAudio (no fade) for non-demo runs, so the hard stop is the original behaviour",
+    "language_change": "two language switches during MIDI playback in Options: 0 gaps, 0 click candidates, clock ratio 0.999-1.000",
+    "reload": "page reload with MIDI selected: setting persisted, AudioWorklet output from first block, 0 gaps/clicks in 16.4 s",
+    "loop_seam_44100": "Music Room track 1 (WAV/Ogg mode): loop jump located at capture 59.081 s; best local alignment shift 0 samples; residual SNR 23.1 dB pre-seam / 24.8 dB post-seam vs 18-26 dB elsewhere in the track (lossy Ogg ceiling); seam max |dx| 0.1149 vs 0.1148 in the original looped WAV",
+    "loop_seam_48000": "same track at a forced 48 kHz AudioContext: alignment shift 0 samples at 48 kHz, residual SNR 20.9/21.7 dB around the seam vs 17-26 dB elsewhere; gain 0.990",
+    "sfx": "Stage 1 shots/bombs play without gaps; click candidates during gameplay (12 in 46.6 s) coincide with SFX onsets/retriggers (decomp SoundPlayer restarts a voice with Stop+SetCurrentPosition(0)+Play, also abrupt)",
+    "mix_headroom": "observation, not a defect: BGM+SFX sum exceeds full scale during dense gameplay (918 of 16064 render quanta with peak > 1.0, max 1.71). Web Audio clips at the device like the original DirectSound mixer; no limiter is present in either"
+  },
+  "not_covered": [
+    "BGM fades: FadeOutMusic is triggered only by stage-end MSG dialogue (Gui.cpp:718, 4 s) and endings; not reachable on the public web build without clearing a stage (no god mode on web). Needs a human clear or a native/offline check.",
+    "Physical output and human listening at 48 kHz: headless capture only; the human listening receipt in the ticket (Chrome 155, menu/stage 1/boss/Music Room) remains the only listening evidence.",
+    "Tracks other than th06_01 at runtime; the 17x2 offline renders from the earlier receipt still cover all tracks."
+  ],
+  "declared_differences": "Ogg is lossy (residual SNR ~18-26 dB vs original WAV), MIDI uses the TimGM6mb bank, no Windows GS bank is available; no timbre identity is claimed."
+}
