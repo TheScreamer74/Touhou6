@@ -109,8 +109,10 @@ The in-game Options menu offers the original Japanese presentation and French,
 English, German and Dutch. Text catalogs cover stage dialogues, spell names,
 music titles/comments, endings and staff roles. Brand artwork and proper names
 remain original. Language changes reuse texture slots, with only one active
-language rasterized. New web profiles start in French; older options retain their
-language choice and migrate without discarding gameplay settings.
+language rasterized per slot. After a language change, text is refreshed lazily
+before the first frame that draws its slot, rather than rasterizing invisible
+dialogue and endings in the options frame. New web profiles start in French;
+older options retain their language choice and migrate without discarding gameplay settings.
 
 The browser title menu has no Exit entry; close the browser tab to leave.
 
@@ -135,3 +137,16 @@ Replay files use the original T6RP format. Deterministic recording/playback is
 regression-tested on all 96 routes. The bundled original stage-4 replay also
 matches all 3,720 observed scalar states against the original executable. That
 scoped comparison does not establish all-route or pixel/audio equivalence.
+
+## Language-switch regression
+
+Serve the built game with legally supplied archives on localhost, then run
+`node scripts/verify_language_switch.cjs http://127.0.0.1:8080/ logs/language-switch`
+from the repository root (requires Playwright; the original defect protocol uses
+1.48.2 and Firefox 131/build 1465). `TH06_FIREFOX_EXECUTABLE` can select that binary.
+The check uses a fresh synthetic save, disconnects WebAudio output, verifies six
+actual language changes covering all five languages, and records 12 half-second
+rAF windows per switch. Any frame over 100 ms fails. `TH06_BASELINE=1` records the
+previous engine's timing without that threshold assertion. Game screenshots and
+raw traces remain in the chosen local output directory; do not commit assets or
+real player saves.

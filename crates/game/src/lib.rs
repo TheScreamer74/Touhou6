@@ -1728,7 +1728,6 @@ impl Game {
 
     pub fn update(&mut self, input: &Input) -> Frame {
         localization::set_language(self.options.language);
-        localization::refresh();
         self.draw_serial = self.draw_serial.wrapping_add(1);
         if let Some((milliseconds, presentations)) = self
             .diagnostic_draw_millis
@@ -1779,6 +1778,7 @@ impl Game {
         {
             audio.flush_sfx();
         }
+        localization::refresh(&output.cmds);
         output
     }
 

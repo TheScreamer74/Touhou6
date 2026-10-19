@@ -115,17 +115,17 @@ struct Recipe {
 }
 struct Registry {
     recipes: Vec<Recipe>,
-    applied: Language,
+    applied: Vec<Language>,
 }
 thread_local! {
-    static REGISTRY: RefCell<Registry> = const { RefCell::new(Registry { recipes: Vec::new(), applied: Language::Original }) };
+    static REGISTRY: RefCell<Registry> = const { RefCell::new(Registry { recipes: Vec::new(), applied: Vec::new() }) };
 }
 /// Called once before assembling a new Game's texture vector.
 pub fn begin_textures() {
     REGISTRY.with(|registry| {
         *registry.borrow_mut() = Registry {
             recipes: Vec::new(),
-            applied: language(),
+            applied: Vec::new(),
         }
     });
     th06_engine::clear_texture_replacements();
@@ -220,7 +220,11 @@ fn register(engine: &Engine, textures: &mut Vec<Texture>, mut recipe: Recipe) ->
         recipe.format,
     ));
     let result = (recipe.slot, image.width as f32, image.height as f32);
-    REGISTRY.with(|registry| registry.borrow_mut().recipes.push(recipe));
+    REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        registry.recipes.push(recipe);
+        registry.applied.push(language());
+    });
     result
 }
 pub fn bake_text(
@@ -335,15 +339,27 @@ pub fn bake_sprite_shiftjis_aligned(
         },
     )
 }
-/// Refreshes only translated textures, keeping every texture index and size stable.
-pub fn refresh() -> bool {
+/// Refresh text used by this presentation before its textures are uploaded.
+/// Invisible dialogue/ending recipes remain lazy; each slot retains its own
+/// language so newly visible text is refreshed even after several switches.
+/// Recipes are registered in increasing texture-slot order. Repeated draw
+/// commands for one slot bake it only once, with indices and sizes unchanged.
+pub fn refresh(cmds: &[DrawCmd]) -> bool {
     let value = language();
     REGISTRY.with(|registry| {
         let mut registry = registry.borrow_mut();
-        if registry.applied == value {
-            return false;
-        }
-        for recipe in &registry.recipes {
+        let mut changed = false;
+        for cmd in cmds {
+            let Ok(index) = registry
+                .recipes
+                .binary_search_by_key(&cmd.tex, |recipe| recipe.slot)
+            else {
+                continue;
+            };
+            if registry.applied[index] == value {
+                continue;
+            }
+            let recipe = &registry.recipes[index];
             let image = render_recipe(recipe, value);
             th06_engine::queue_texture_replacement(
                 recipe.slot,
@@ -352,9 +368,10 @@ pub fn refresh() -> bool {
                 image.height,
                 recipe.format,
             );
+            registry.applied[index] = value;
+            changed = true;
         }
-        registry.applied = value;
-        true
+        changed
     })
 }
 
@@ -553,6 +570,68 @@ pub fn draw_label(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn refresh_bakes_only_drawn_slots_once_and_tracks_each_slots_language() {
+        thread_local! { static RENDERS: Cell<usize> = const { Cell::new(0) }; }
+        fn render(_: &[u8], _: &str, _: u32, w: u32, h: u32, lang: Language) -> Vec<u8> {
+            RENDERS.with(|count| count.set(count.get() + 1));
+            vec![lang as u8; (w * h * 4) as usize]
+        }
+        set_language(Language::Original);
+        begin_textures();
+        REGISTRY.with(|registry| {
+            let mut registry = registry.borrow_mut();
+            for slot in 0..1000 {
+                registry.recipes.push(Recipe {
+                    source: String::new(),
+                    original: None,
+                    canvas: [2, 3],
+                    slot: slot * 2,
+                    kind: RecipeKind::Custom { color: 0, render },
+                    format: 1,
+                });
+                registry.applied.push(Language::Original);
+            }
+        });
+        let cmd = |tex| DrawCmd {
+            tex,
+            dst: [0., 0., 2., 3.],
+            src: [0., 0., 1., 1.],
+            tint: [1.; 4],
+            rot: 0.,
+            additive: false,
+            color_add: false,
+            depth: None,
+            clip: None,
+        };
+        // A repeated sprite and a non-text slot cannot multiply rasterization.
+        for (index, lang) in Language::ALL[1..]
+            .iter()
+            .chain([Language::Original].iter())
+            .enumerate()
+        {
+            set_language(*lang);
+            assert!(!refresh(&[]));
+            assert!(refresh(&[cmd(10), cmd(10), cmd(11)]));
+            assert!(!refresh(&[cmd(10)]));
+            assert_eq!(RENDERS.with(Cell::get), index + 1);
+            REGISTRY.with(|registry| {
+                let registry = registry.borrow();
+                assert_eq!(registry.applied[5], *lang);
+                assert_eq!(registry.applied[999], Language::Original);
+            });
+        }
+        // Another scene's text refreshes on its first presentation, even when
+        // the current scene was already fully refreshed for that language.
+        set_language(Language::Dutch);
+        assert!(refresh(&[cmd(1998)]));
+        assert!(refresh(&[cmd(10)]));
+        assert_eq!(RENDERS.with(Cell::get), 7);
+        set_language(Language::Original);
+        assert!(refresh(&[cmd(1998)]));
+        begin_textures();
+        assert!(!refresh(&[cmd(1998)]));
+    }
     #[test]
     fn language_identifiers_and_unknown_fallback_are_stable() {
         for value in Language::ALL {
