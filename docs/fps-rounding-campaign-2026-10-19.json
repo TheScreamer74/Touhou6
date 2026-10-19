@@ -1,0 +1,80 @@
+{
+  "schema": 1,
+  "kind": "fps_texel_rounding_campaign",
+  "date": "2026-10-19",
+  "ticket": "Touhou6 #9",
+  "fix_commit": "94c12fe (claude/texel-rounding)",
+  "port_binary_sha256": "af6455963aabf949265e87f7e731ad418a10bc91882846ba31f5686f349e9f2e",
+  "baseline_binary_sha256": "da111a45c6f9102d1367da1dc2068984139cb58ebecf1be08eb8d3867958862d",
+  "cause": "D3DX converts 8-bit source channels to A4R4G4B4/R5G6B5/A1R5G5B5 textures by rounding to the nearest code; the port truncated, so ascii.anm (format 5) text was exactly one 4-bit step (+/-17) off. Fixed in both the 32-bit (original_texture_rgba) and 16-bit (color565::texture) paths; R5G6B5 framebuffer truncation unchanged.",
+  "campaign": {
+    "cases": 96,
+    "checkpoints": 6209,
+    "criteria": "channel tolerance 2, bad fraction <=1%, MAE <=1; no masks or alignment",
+    "baseline": {
+      "fps_ok": 0,
+      "hud_ok": 5892,
+      "playfield_ok": 97,
+      "full_frame_ok": 160,
+      "all_ok": 0,
+      "mean_full_frame_mae": 0.75,
+      "max_full_frame_mae": 8.67,
+      "mae_over_3": 35
+    },
+    "rounding": {
+      "fps_ok": 5874,
+      "hud_ok": 6113,
+      "playfield_ok": 4183,
+      "full_frame_ok": 5389,
+      "all_ok": 4076,
+      "mean_full_frame_mae": 0.354,
+      "max_full_frame_mae": 7.81,
+      "mae_over_3": 29
+    },
+    "simulation": "scalar checkpoints equal in every case (unchanged by a texture-only fix)"
+  },
+  "remaining_fps_failures": {
+    "different_value": {
+      "count": 239,
+      "explanation": "original shows 59.88fps (real frame drop on the capture machine) where the port shows 60.00fps; different displayed value, excluded by the criteria"
+    },
+    "stage_first_frame": {
+      "count": 96,
+      "explanation": "frame 1 of every stage: text over black (HUD not drawn yet); opaque texels identical, only glyph fringe pixels differ (original +2..+8 brighter); frame 2 is identical. Separate first-frame defect (what lies under the text on the stage-entry frame), not texture quantization"
+    }
+  },
+  "mae_over_3": {
+    "region": "playfield only in every case (HUD MAE 0.05, fps 0.02)",
+    "clusters": [
+      {
+        "stage_frame_bucket": "stage02 ~9000",
+        "checkpoints": 9
+      },
+      {
+        "stage_frame_bucket": "stage03 ~14400",
+        "checkpoints": 8
+      },
+      {
+        "stage_frame_bucket": "stage05 ~14400",
+        "checkpoints": 3
+      },
+      {
+        "stage_frame_bucket": "stage05 ~14900",
+        "checkpoints": 3
+      },
+      {
+        "stage_frame_bucket": "stage05 ~15000",
+        "checkpoints": 3
+      },
+      {
+        "stage_frame_bucket": "stage05 ~16200",
+        "checkpoints": 3
+      }
+    ],
+    "classification": "separate playfield rendering defect at the same stage moments across cases (stage 2 ~9000, stage 3 ~14400, stage 5 ~14400-16200); present before this fix and reduced by it (max 8.67 -> 7.81); not related to the fps counter"
+  },
+  "limits": [
+    "Pixels were deleted after each case; the spike clusters are classified from region metrics, not from inspected images",
+    "Native macOS captures only; the wasm build shares the same conversion code"
+  ]
+}
