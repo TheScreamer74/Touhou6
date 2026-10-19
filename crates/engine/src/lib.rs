@@ -1639,14 +1639,8 @@ fn original_texture_rgba(rgba: &[u8], format: u32) -> std::borrow::Cow<'_, [u8]>
                     if channel == 3 && matches!(format, 3 | 4) {
                         return 255;
                     }
-                    let shift = match levels[channel] {
-                        255 => 0,
-                        63 => 2,
-                        31 => 3,
-                        15 => 4,
-                        _ => 7,
-                    };
-                    let code = u32::from(pixel[channel] >> shift);
+                    // D3DX rounds each 8-bit channel to the nearest code.
+                    let code = (u32::from(pixel[channel]) * levels[channel] + 127) / 255;
                     ((code * 255 + levels[channel] / 2) / levels[channel]) as u8
                 })
             })
@@ -1680,8 +1674,8 @@ mod texture_format_tests {
 
     #[test]
     fn original_low_bit_texture_formats_apply_in_32_bit_mode() {
-        // D3DFMT_A4R4G4B4 (ascii.anm format 5) keeps each upper nibble,
-        // independently of the framebuffer format.
+        // D3DFMT_A4R4G4B4 (ascii.anm format 5) rounds each channel to the
+        // nearest code, independently of the framebuffer format.
         assert_eq!(
             &*original_texture_rgba(&[239, 32, 127, 159], 5),
             &[238, 34, 119, 153]
@@ -1692,7 +1686,7 @@ mod texture_format_tests {
         );
         assert_eq!(
             &*original_texture_rgba(&[15, 31, 47, 0], 3),
-            &[8, 28, 41, 255]
+            &[16, 32, 49, 255] // R5G6B5 codes 2,8,6.
         );
         let rgba = [239, 32, 127, 159];
         assert!(matches!(

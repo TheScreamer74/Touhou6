@@ -108,14 +108,10 @@ pub(super) fn texture(
                 if channel == 3 && (format == 3 || format == 4) {
                     return 1;
                 }
-                pixel[channel]
-                    >> match levels[channel] {
-                        255 => 0,
-                        63 => 2,
-                        31 => 3,
-                        15 => 4,
-                        _ => 7,
-                    }
+                // D3DX converts each 8-bit channel to the texture format by
+                // scaling and rounding to the nearest code, unlike the R5G6B5
+                // framebuffer, whose writes truncate.
+                ((u32::from(pixel[channel]) * levels[channel] + 127) / 255) as u8
             })
         })
         .collect();
@@ -941,10 +937,10 @@ mod tests {
         cmd.tint[3] = 1.0;
         cmd.additive = false;
         let pixels = engine.render_to_image(&[cmd], &[&texture], None);
-        assert_eq!(&pixels[..4], &[0, 16, 49, 255]); // A4R4G4B4 source codes 0,1,3.
+        assert_eq!(&pixels[..4], &[16, 32, 66, 255]); // A4R4G4B4 source codes 1,2,4.
         let texture = engine.create_texture_with_format(&[15, 31, 63, 255], 1, 1, 3);
         let pixels = engine.render_to_image(&[cmd], &[&texture], None);
-        assert_eq!(&pixels[..4], &[8, 28, 57, 255]); // R5G6B5 source codes 1,7,7.
+        assert_eq!(&pixels[..4], &[16, 32, 66, 255]); // R5G6B5 source codes 2,8,8.
         let texture = engine.create_texture_with_format(&[15, 31, 63, 255], 1, 1, 1);
         let pixels = engine.render_to_image(&[cmd], &[&texture], None);
         assert_eq!(&pixels[..4], &[8, 28, 57, 255]); // A8R8G8B8 stays full precision, framebuffer truncates.
