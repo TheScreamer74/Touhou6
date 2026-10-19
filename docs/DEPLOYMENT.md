@@ -1,4 +1,27 @@
-# Deployed build — 2026-10-14
+# Deployed build — 2026-10-19
+
+- Public URL: https://games.blackoutburst.com/th06/
+- Build: `community-20261019-render-86f8db761353`
+- Code commit: `e1aae8415b0c41a18a04c8d627c41bd1c916a3ea` (merge of the #1 render fixes up to `d382ebe` with the language refresh fix `dd2e634`)
+- Runtime source SHA256 (`scripts/pin_port_build.py` manifest): `c230f56b300edc9efd0f60879d42872c6efe3cca508a2ac716282e6fa2e09329`
+- WASM SHA256: `86f8db7613537a03018ac812c2181bde91d500b7eb891c67791e535fb59eb527`
+- JS SHA256: `0f23f49855875a141dc4e74ce68343ba2b386f6c104185e2df41df1797e91b26` (unchanged)
+- Release: `/home/ubuntu/touhou6-web/releases/community-20261019-render-86f8db761353`
+- Previous release: `/home/ubuntu/touhou6-web/releases/community-20261016-language-c6e5010cce48`
+- Native executable pinned from the same tree: SHA256 `da111a45c6f9102d1367da1dc2068984139cb58ebecf1be08eb8d3867958862d` with `build-source.json`
+
+Only the engine changed: `index.html`, `midi-worklet.js`, `assets.json` and the
+asset links are byte-identical to the previous release, which was copied and
+then given the new `pkg/` files and `build.json`. `SHA256SUMS` verified on the
+host before an atomic symlink replacement of `/home/ubuntu/Touhou6-Mac/web/th06`.
+After the switch, all six files fetched over HTTPS matched their hashes, the
+portal, TH04 and TH06 returned 200, and a headless Firefox 131 run reached
+Stage 1 at 60 fps with no JS errors. Verified before release on the merged
+tree: `cargo test --workspace`, clippy with all targets (0 warnings), fmt and
+the wasm32 check. Roll back by pointing the symlink at the previous release
+with the procedure below.
+
+## Previous deployment — 2026-10-14
 
 - Public URL: https://games.blackoutburst.com/th06/
 - Build: `community-20261014-747d6d7cbed0`
@@ -57,7 +80,7 @@ public symlink. No release data needs to be removed:
 import os
 from pathlib import Path
 root = Path('/home/ubuntu/Touhou6-Mac/web')
-previous = Path('/home/ubuntu/touhou6-web/releases/fidelity-20261014-autostart-0cb6025d5b09')
+previous = Path('/home/ubuntu/touhou6-web/releases/community-20261016-language-c6e5010cce48')
 temporary = root / '.th06-rollback'
 assert previous.is_dir()
 assert not temporary.exists() and not temporary.is_symlink()
