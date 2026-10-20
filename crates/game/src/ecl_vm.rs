@@ -1968,7 +1968,12 @@ impl Enemy {
                 // ExInsCirnoRainbowBallJank (Perfect Freeze): param 0 freezes
                 // every live bullet, param 1 releases them with a small random
                 // acceleration over 220 frames (ex flag 0x10).
+                world.spawn_particles(12, self.pos, 1, [1.0; 4]);
                 for b in world.bullets.iter_mut() {
+                    if b.despawn_timer > 0 {
+                        continue;
+                    }
+                    b.set_normal_color(0);
                     match param {
                         0 => {
                             b.speed = 0.0;
@@ -2080,9 +2085,7 @@ impl Enemy {
                             continue;
                         }
                         if b.height >= 30.0 && b.sprite_offset != 5 && rng.u16().is_multiple_of(4) {
-                            let base = b.base_sprite;
-                            b.sprite_offset = 5;
-                            b.sprite = base + 5;
+                            b.set_normal_color(5);
                             let dx = b.pos[0] - player[0];
                             let dy = b.pos[1] - player[1];
                             b.angle = if (dx * dx + dy * dy).sqrt() > 128.0 {
@@ -2322,10 +2325,8 @@ impl Enemy {
                     if b.despawn_timer != 0 || b.height >= 30.0 || b.speed != 0.0 {
                         continue;
                     }
-                    let base = b.base_sprite;
                     b.ex_flags |= 0x10;
-                    b.sprite_offset = 2;
-                    b.sprite = base + 2;
+                    b.set_normal_color(2);
                     b.speed = 0.01;
                     b.timer = 0;
                     b.ex_int0 = 120;
@@ -2346,10 +2347,8 @@ impl Enemy {
                     if b.despawn_timer != 0 || b.height >= 30.0 || b.speed != 0.0 {
                         continue;
                     }
-                    let base = b.base_sprite;
                     b.ex_flags |= 0x10;
-                    b.sprite_offset = 2;
-                    b.sprite = base + 2;
+                    b.set_normal_color(2);
                     b.speed = 0.01;
                     b.timer = 0;
                     b.ex_int0 = 120;
@@ -2392,9 +2391,7 @@ impl Enemy {
                             f64::from(b.pos[1] - ey).atan2(f64::from(b.pos[0] - ex)) as f32;
                         b.angle = (bullets_angle - enemy_angle) * 2.2 + enemy_angle;
                         b.ex_accel = sincos_mul(b.angle, 0.01);
-                        let base = b.base_sprite;
-                        b.sprite_offset += 1;
-                        b.sprite = base + b.sprite_offset as u32;
+                        b.set_normal_color(b.sprite_offset + 1);
                     }
                 }
                 self.ex_bat_transform(world);
@@ -3899,6 +3896,51 @@ mod tests {
             [None, None, Some(7), None, None, None, None, None]
         );
         assert_eq!(enemy.get_i32(-10025, &world), 3);
+    }
+
+    #[test]
+    fn perfect_freeze_recolors_live_bullets_and_emits_pulse_without_touching_despawns() {
+        let mut world = world();
+        world.eff_scripts.insert(
+            17,
+            vec![AnmInstr {
+                time: 0,
+                opcode: 21,
+                args: Vec::new(),
+                offset: 0,
+            }],
+        );
+        spawn_bullet_pattern(
+            &mut world,
+            &BulletProps {
+                count1: 2,
+                count2: 1,
+                sprite_offset: 3,
+                ..Default::default()
+            },
+        );
+        world.bullets[1].despawn_timer = 1;
+        let dead_speed = world.bullets[1].speed;
+        let dead_sprite = world.bullets[1].sprite;
+        let rng = world.rng;
+        let mut enemy = Enemy::default();
+        enemy.exec_ex(0, 0, &mut world);
+        assert_eq!(world.bullets[0].sprite_offset, 0);
+        assert_eq!(world.bullets[0].sprite, world.bullets[0].base_sprite);
+        assert_eq!(world.bullets[0].velocity, [0.0; 2]);
+        assert_eq!(
+            (world.bullets[1].speed, world.bullets[1].sprite),
+            (dead_speed, dead_sprite)
+        );
+        assert_eq!(world.effects.iter().flatten().count(), 1);
+        assert_eq!(world.rng, rng);
+        let mut expected = rng;
+        expected.f32_zero_to_one();
+        enemy.exec_ex(0, 1, &mut world);
+        assert_eq!(world.rng, expected);
+        assert_eq!(world.effects.iter().flatten().count(), 2);
+        assert_eq!(world.bullets[0].ex_int0, 220);
+        assert_eq!(world.bullets[1].ex_flags, 0);
     }
 
     #[test]

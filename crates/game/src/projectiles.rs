@@ -80,6 +80,16 @@ impl BulletVisuals {
 }
 
 impl Bullet {
+    /// ExIns callbacks call SetActiveSprite on spriteBullet only. Preserve its
+    /// ANM clock and the separately cached spawn/despawn animations.
+    pub fn set_normal_color(&mut self, color: i32) {
+        self.sprite_offset = color;
+        self.sprite = self.base_sprite + color as u32;
+        if let Some(visuals) = &mut self.visuals {
+            visuals.normal.set_sprite(self.sprite);
+        }
+    }
+
     pub fn visual(&self) -> Option<&AnmRunner> {
         let visuals = self.visuals.as_ref()?;
         if self.despawn_timer > 0 {
@@ -400,6 +410,45 @@ mod tests {
             despawn_timer: 0,
         }
     }
+    #[test]
+    fn recolor_updates_rendered_normal_sprite_without_resetting_other_animations() {
+        let runner = |sprite: u32| {
+            AnmRunner::new(vec![
+                th06_formats::anm0::Instr {
+                    time: 0,
+                    opcode: 1,
+                    args: sprite.to_le_bytes().to_vec(),
+                    offset: 0,
+                },
+                th06_formats::anm0::Instr {
+                    time: 2,
+                    opcode: 3,
+                    args: 64u32.to_le_bytes().to_vec(),
+                    offset: 8,
+                },
+            ])
+        };
+        let mut b = bullet(0);
+        b.visuals = Some(BulletVisuals {
+            normal: runner(17),
+            spawning: [runner(20), runner(21), runner(22)],
+            despawn: runner(23),
+            effect_texture: false,
+        });
+        b.visuals.as_mut().unwrap().normal.tick();
+        b.set_normal_color(5);
+        assert_eq!((b.sprite_offset, b.sprite), (5, 19));
+        assert_eq!(b.visual().unwrap().sprite, Some(19));
+        let v = b.visuals.as_mut().unwrap();
+        v.normal.tick();
+        assert_eq!(v.normal.alpha, 64.0 / 255.0);
+        assert_eq!(
+            v.spawning.each_ref().map(|r| r.sprite),
+            [Some(20), Some(21), Some(22)]
+        );
+        assert_eq!(v.despawn.sprite, Some(23));
+    }
+
     #[test]
     fn first_fired_tick_is_zero_and_acceleration_keeps_cached_velocity() {
         let mut boost = bullet(1);

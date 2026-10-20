@@ -1,0 +1,463 @@
+{
+  "ticket": "Touhou6 #10",
+  "baseline_binary_sha256": "af6455963aabf949265e87f7e731ad418a10bc91882846ba31f5686f349e9f2e",
+  "candidate_binary_sha256": "b85deab23ad50ee4ec74fbe2e47945c1cfa2e7bb258cb589664cbdee0db3a3fe",
+  "scope": "9 fresh silent native captures compared with hash-verified historical original captures; 3 cases, 3 frames each. No fresh original process, web deployment, or full 96-case recertification.",
+  "cases": [
+    {
+      "case": "replay-c0-d1-s2",
+      "elapsed_seconds": 20.436532166786492,
+      "scalar_checkpoint_bytes_unchanged": true,
+      "pool_bytes_unchanged": true,
+      "checkpoints": [
+        {
+          "frame": 9000,
+          "original_sha256": "5e12441274fba86c9917340e343750f0279c954463f74e4380fd7123c9639323",
+          "baseline_sha256": "f7c82764d1710adf66bbe2a23139b5241ec2ab25552cf7bb113c7008be5a3c79",
+          "candidate_sha256": "007fbf828f2ab050dcdda47e6b6e9958ee5a102d7dc8cb99c2b04804dea10185",
+          "full": {
+            "baseline": {
+              "mae": 6.196099175347222,
+              "pixels_over_tolerance_2": 18492
+            },
+            "candidate": {
+              "mae": 2.831824001736111,
+              "pixels_over_tolerance_2": 8840
+            }
+          },
+          "playfield": {
+            "baseline": {
+              "mae": 11.030748155381945,
+              "pixels_over_tolerance_2": 18491
+            },
+            "candidate": {
+              "mae": 5.023113916790675,
+              "pixels_over_tolerance_2": 8839
+            }
+          },
+          "hud": {
+            "baseline": {
+              "mae": 0.055441168924466336,
+              "pixels_over_tolerance_2": 1
+            },
+            "candidate": {
+              "mae": 0.055441168924466336,
+              "pixels_over_tolerance_2": 1
+            }
+          },
+          "fps": {
+            "baseline": {
+              "mae": 0.018391927083333332,
+              "pixels_over_tolerance_2": 0
+            },
+            "candidate": {
+              "mae": 0.018391927083333332,
+              "pixels_over_tolerance_2": 0
+            }
+          }
+        },
+        {
+          "frame": 9001,
+          "original_sha256": "bc72c03c43b4d545e8e3855ba8a75d1b5c438fabb60c8ec0250518a836925470",
+          "baseline_sha256": "9a7da6dbb5a99ec43c043cfa5629fd02a64cf66b756d0aff0c009e3472db81e8",
+          "candidate_sha256": "6f6d1ca171f25a56aed52ffc544f0dc0d4faf8883024bbe3b8650f01c99963cd",
+          "full": {
+            "baseline": {
+              "mae": 7.066119791666667,
+              "pixels_over_tolerance_2": 21098
+            },
+            "candidate": {
+              "mae": 2.828837890625,
+              "pixels_over_tolerance_2": 8898
+            }
+          },
+          "playfield": {
+            "baseline": {
+              "mae": 12.583802238343255,
+              "pixels_over_tolerance_2": 21097
+            },
+            "candidate": {
+              "mae": 5.017227415054563,
+              "pixels_over_tolerance_2": 8897
+            }
+          },
+          "hud": {
+            "baseline": {
+              "mae": 0.0563584000410509,
+              "pixels_over_tolerance_2": 1
+            },
+            "candidate": {
+              "mae": 0.0563584000410509,
+              "pixels_over_tolerance_2": 1
+            }
+          },
+          "fps": {
+            "baseline": {
+              "mae": 0.018391927083333332,
+              "pixels_over_tolerance_2": 0
+            },
+            "candidate": {
+              "mae": 0.018391927083333332,
+              "pixels_over_tolerance_2": 0
+            }
+          }
+        },
+        {
+          "frame": 9002,
+          "original_sha256": "b46cd6f5686f29efcff6152997395210283114a553ab8a3fa4bcc15f0a1578f5",
+          "baseline_sha256": "694c155797e8624430d92777503c23464e975795141a8d6d19553ba73b272049",
+          "candidate_sha256": "7fbd9cf55b2d3daab6188e0a337d8519d5c9ccc5df9f03f218fccc42e41caf9f",
+          "full": {
+            "baseline": {
+              "mae": 7.814476996527778,
+              "pixels_over_tolerance_2": 24086
+            },
+            "candidate": {
+              "mae": 2.834789496527778,
+              "pixels_over_tolerance_2": 9087
+            }
+          },
+          "playfield": {
+            "baseline": {
+              "mae": 13.92072017609127,
+              "pixels_over_tolerance_2": 24085
+            },
+            "candidate": {
+              "mae": 5.028421068948413,
+              "pixels_over_tolerance_2": 9086
+            }
+          },
+          "hud": {
+            "baseline": {
+              "mae": 0.0554219263136289,
+              "pixels_over_tolerance_2": 1
+            },
+            "candidate": {
+              "mae": 0.0554219263136289,
+              "pixels_over_tolerance_2": 1
+            }
+          },
+          "fps": {
+            "baseline": {
+              "mae": 0.018391927083333332,
+              "pixels_over_tolerance_2": 0
+            },
+            "candidate": {
+              "mae": 0.018391927083333332,
+              "pixels_over_tolerance_2": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "case": "replay-c0-d2-s3",
+      "elapsed_seconds": 34.21356066595763,
+      "scalar_checkpoint_bytes_unchanged": true,
+      "pool_bytes_unchanged": true,
+      "checkpoints": [
+        {
+          "frame": 14400,
+          "original_sha256": "df911fdb6983514129926e7b4b18ff35331ffe8feb19cf48ac1d4d95f4c71e8f",
+          "baseline_sha256": "a8a872c7f7c97d4aa008f9c7c16a108c068a3bb1743117d8194a089a9ca78656",
+          "candidate_sha256": "a8a872c7f7c97d4aa008f9c7c16a108c068a3bb1743117d8194a089a9ca78656",
+          "full": {
+            "baseline": {
+              "mae": 3.9550672743055557,
+              "pixels_over_tolerance_2": 29643
+            },
+            "candidate": {
+              "mae": 3.9550672743055557,
+              "pixels_over_tolerance_2": 29643
+            }
+          },
+          "playfield": {
+            "baseline": {
+              "mae": 7.028855096726191,
+              "pixels_over_tolerance_2": 29642
+            },
+            "candidate": {
+              "mae": 7.028855096726191,
+              "pixels_over_tolerance_2": 29642
+            }
+          },
+          "hud": {
+            "baseline": {
+              "mae": 0.05552455357142857,
+              "pixels_over_tolerance_2": 1
+            },
+            "candidate": {
+              "mae": 0.05552455357142857,
+              "pixels_over_tolerance_2": 1
+            }
+          },
+          "fps": {
+            "baseline": {
+              "mae": 0.018391927083333332,
+              "pixels_over_tolerance_2": 0
+            },
+            "candidate": {
+              "mae": 0.018391927083333332,
+              "pixels_over_tolerance_2": 0
+            }
+          }
+        },
+        {
+          "frame": 14401,
+          "original_sha256": "147b9fc8744e187902d4545d7f8569182f074c79f9470beab80e6d65cc9b0d32",
+          "baseline_sha256": "d66456cb459896e122eb316be539b14557c190c522b7c18b204908e662f89b30",
+          "candidate_sha256": "d66456cb459896e122eb316be539b14557c190c522b7c18b204908e662f89b30",
+          "full": {
+            "baseline": {
+              "mae": 3.923994140625,
+              "pixels_over_tolerance_2": 30817
+            },
+            "candidate": {
+              "mae": 3.923994140625,
+              "pixels_over_tolerance_2": 30817
+            }
+          },
+          "playfield": {
+            "baseline": {
+              "mae": 6.9732782273065474,
+              "pixels_over_tolerance_2": 30816
+            },
+            "candidate": {
+              "mae": 6.9732782273065474,
+              "pixels_over_tolerance_2": 30816
+            }
+          },
+          "hud": {
+            "baseline": {
+              "mae": 0.0556720802545156,
+              "pixels_over_tolerance_2": 1
+            },
+            "candidate": {
+              "mae": 0.0556720802545156,
+              "pixels_over_tolerance_2": 1
+            }
+          },
+          "fps": {
+            "baseline": {
+              "mae": 0.018391927083333332,
+              "pixels_over_tolerance_2": 0
+            },
+            "candidate": {
+              "mae": 0.018391927083333332,
+              "pixels_over_tolerance_2": 0
+            }
+          }
+        },
+        {
+          "frame": 14402,
+          "original_sha256": "0e5eace18c5f5b26a8bd50f18feefc13ba32584e13c147717cf68d658aa87089",
+          "baseline_sha256": "a56c9d37c9680845c88568cb72f25888ee977d8bb27909e6b118838d84bb8739",
+          "candidate_sha256": "a56c9d37c9680845c88568cb72f25888ee977d8bb27909e6b118838d84bb8739",
+          "full": {
+            "baseline": {
+              "mae": 3.8697005208333333,
+              "pixels_over_tolerance_2": 32018
+            },
+            "candidate": {
+              "mae": 3.8697005208333333,
+              "pixels_over_tolerance_2": 32018
+            }
+          },
+          "playfield": {
+            "baseline": {
+              "mae": 6.876015314980159,
+              "pixels_over_tolerance_2": 32017
+            },
+            "candidate": {
+              "mae": 6.876015314980159,
+              "pixels_over_tolerance_2": 32017
+            }
+          },
+          "hud": {
+            "baseline": {
+              "mae": 0.05618521654351396,
+              "pixels_over_tolerance_2": 1
+            },
+            "candidate": {
+              "mae": 0.05618521654351396,
+              "pixels_over_tolerance_2": 1
+            }
+          },
+          "fps": {
+            "baseline": {
+              "mae": 0.018391927083333332,
+              "pixels_over_tolerance_2": 0
+            },
+            "candidate": {
+              "mae": 0.018391927083333332,
+              "pixels_over_tolerance_2": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "case": "replay-c1-d2-s5",
+      "elapsed_seconds": 34.73215133277699,
+      "scalar_checkpoint_bytes_unchanged": true,
+      "pool_bytes_unchanged": true,
+      "checkpoints": [
+        {
+          "frame": 14400,
+          "original_sha256": "383ce343db13a172675e0c686560587db3937f0eceff95b464f15ced956cf2c7",
+          "baseline_sha256": "3c1ebb75f5e63ba3b0cb09b7d8fd1693de259c6d3265fe27c618e65a38241e9e",
+          "candidate_sha256": "8e2dd42975497008c7537b54353bd0de1e3af002de6138f61faf48702b3c5cb2",
+          "full": {
+            "baseline": {
+              "mae": 4.882927517361111,
+              "pixels_over_tolerance_2": 34568
+            },
+            "candidate": {
+              "mae": 0.5384103732638889,
+              "pixels_over_tolerance_2": 4247
+            }
+          },
+          "playfield": {
+            "baseline": {
+              "mae": 8.685862707713294,
+              "pixels_over_tolerance_2": 34567
+            },
+            "candidate": {
+              "mae": 0.927796378968254,
+              "pixels_over_tolerance_2": 4246
+            }
+          },
+          "hud": {
+            "baseline": {
+              "mae": 0.05533533456486043,
+              "pixels_over_tolerance_2": 1
+            },
+            "candidate": {
+              "mae": 0.05533533456486043,
+              "pixels_over_tolerance_2": 1
+            }
+          },
+          "fps": {
+            "baseline": {
+              "mae": 0.018391927083333332,
+              "pixels_over_tolerance_2": 0
+            },
+            "candidate": {
+              "mae": 0.018391927083333332,
+              "pixels_over_tolerance_2": 0
+            }
+          }
+        },
+        {
+          "frame": 14401,
+          "original_sha256": "a55b3dce42138b16e688d553f5fd2bca0ee90476c4293470fa822c9c2b5b8254",
+          "baseline_sha256": "505b43bea086d1e88de8ef2c1c08b9435188da1a99d005fdd16b0c34595feefb",
+          "candidate_sha256": "4e5bcfc72b5c726aadc5fa0a0f1d7b3192fe73e2292fb507b63479d6d70bca55",
+          "full": {
+            "baseline": {
+              "mae": 4.895718315972222,
+              "pixels_over_tolerance_2": 34414
+            },
+            "candidate": {
+              "mae": 0.5361273871527777,
+              "pixels_over_tolerance_2": 4041
+            }
+          },
+          "playfield": {
+            "baseline": {
+              "mae": 8.70870341951885,
+              "pixels_over_tolerance_2": 34413
+            },
+            "candidate": {
+              "mae": 0.9237196180555556,
+              "pixels_over_tolerance_2": 4040
+            }
+          },
+          "hud": {
+            "baseline": {
+              "mae": 0.05533533456486043,
+              "pixels_over_tolerance_2": 1
+            },
+            "candidate": {
+              "mae": 0.05533533456486043,
+              "pixels_over_tolerance_2": 1
+            }
+          },
+          "fps": {
+            "baseline": {
+              "mae": 0.018391927083333332,
+              "pixels_over_tolerance_2": 0
+            },
+            "candidate": {
+              "mae": 0.018391927083333332,
+              "pixels_over_tolerance_2": 0
+            }
+          }
+        },
+        {
+          "frame": 14402,
+          "original_sha256": "b4cfa6d752aceadbe0ce477ba02d9d92b2f5ae8d1e6cbfb26ab9a5a13b404415",
+          "baseline_sha256": "763e0bd57fdc37b1a3dcacfd2d021e07c1a64573b86ea026b3efaf4278a27458",
+          "candidate_sha256": "348a1ab2e186f5d81845b5a2dff95c219d522636b436a609823e0a52e5c1e1b7",
+          "full": {
+            "baseline": {
+              "mae": 4.903537326388889,
+              "pixels_over_tolerance_2": 34383
+            },
+            "candidate": {
+              "mae": 0.5374131944444445,
+              "pixels_over_tolerance_2": 3939
+            }
+          },
+          "playfield": {
+            "baseline": {
+              "mae": 8.72266593812004,
+              "pixels_over_tolerance_2": 34382
+            },
+            "candidate": {
+              "mae": 0.9260157025049603,
+              "pixels_over_tolerance_2": 3938
+            }
+          },
+          "hud": {
+            "baseline": {
+              "mae": 0.05533533456486043,
+              "pixels_over_tolerance_2": 1
+            },
+            "candidate": {
+              "mae": 0.05533533456486043,
+              "pixels_over_tolerance_2": 1
+            }
+          },
+          "fps": {
+            "baseline": {
+              "mae": 0.018391927083333332,
+              "pixels_over_tolerance_2": 0
+            },
+            "candidate": {
+              "mae": 0.018391927083333332,
+              "pixels_over_tolerance_2": 0
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "validation": {
+    "cargo_test_release": {
+      "passed": 132,
+      "failed": 0,
+      "ignored": 17
+    },
+    "cargo_build_release": "pass",
+    "cargo_fmt": "pass",
+    "diff_check": "pass"
+  },
+  "separate_defect": {
+    "board_ticket": 12,
+    "id": "6f89bc0888b5db20b55e979b52c42c06",
+    "cause": "ANM9/10 discard X/Y; Draw3 perspective path missing for enemy sub-VM66"
+  },
+  "source_base": "130192966b0c672ae4db5c7130691eb922e73220",
+  "branch": "codex/playfield-visuals-20261020"
+}
