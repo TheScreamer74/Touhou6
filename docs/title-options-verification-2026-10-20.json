@@ -1,0 +1,163 @@
+{
+  "scope": "Fresh silent native baseline/candidate Options and demo captures, using original TL assets; no fresh original process or browser runtime.",
+  "runs": [
+    {
+      "binary": "baseline",
+      "scenario": "options",
+      "binary_sha256": "1b0eac4d90d015a800fa3f7304006b16f9e25c0ef8f78d5096ea9fbcbb823908",
+      "returncode": 0,
+      "elapsed_seconds": 2.2586416667327285,
+      "command": [
+        "/Users/florianchanson/Documents/Codex/2026-10-20/blackoutburst-worker/work/xy-final-binaries/1b0eac4d90d015a800fa3f7304006b16f9e25c0ef8f78d5096ea9fbcbb823908/th06",
+        "--game-dir",
+        "/Users/florianchanson/Documents/Codex/2026-10-20/blackoutburst-worker/work/title-evidence/baseline/options/game",
+        "--input-script",
+        "/Users/florianchanson/Documents/Codex/2026-10-20/blackoutburst-worker/work/title-evidence/baseline/options/input.txt",
+        "--capture-dir",
+        "/Users/florianchanson/Documents/Codex/2026-10-20/blackoutburst-worker/work/title-evidence/baseline/options/capture",
+        "--capture-frames",
+        "150,280,331,367,451,691",
+        "--capture-clock",
+        "update",
+        "--frames",
+        "710",
+        "--color-32bit",
+        "--hitbox",
+        "off",
+        "--software-texture-blending"
+      ],
+      "image_sha256": {
+        "update_frame000150.png": "1d4ba4b899b9f84f70559e67e3840fcf9c9568a382015f0a9390e9be746f2e9c",
+        "update_frame000280.png": "e749b094505cd2efc794877ab8dfd52bdec87553348ffedb25088e86ffe705cc",
+        "update_frame000331.png": "b4c429749ca5259473496c2d08b48ef39c4228e911c83214529a9932889dac61",
+        "update_frame000367.png": "ce6c121432f7356e37ccc9804d6c62e9f0cd7a82e868f0b4de27324f28d10c7a",
+        "update_frame000451.png": "87396c469a10b0b9239c8090667ad3c856e2093ce1a05a7006757fd870bcacca",
+        "update_frame000691.png": "87396c469a10b0b9239c8090667ad3c856e2093ce1a05a7006757fd870bcacca"
+      }
+    },
+    {
+      "binary": "baseline",
+      "scenario": "demo",
+      "binary_sha256": "1b0eac4d90d015a800fa3f7304006b16f9e25c0ef8f78d5096ea9fbcbb823908",
+      "returncode": 0,
+      "elapsed_seconds": 2.90980749996379,
+      "command": [
+        "/Users/florianchanson/Documents/Codex/2026-10-20/blackoutburst-worker/work/xy-final-binaries/1b0eac4d90d015a800fa3f7304006b16f9e25c0ef8f78d5096ea9fbcbb823908/th06",
+        "--game-dir",
+        "/Users/florianchanson/Documents/Codex/2026-10-20/blackoutburst-worker/work/title-evidence/baseline/demo/game",
+        "--input-script",
+        "/Users/florianchanson/Documents/Codex/2026-10-20/blackoutburst-worker/work/title-evidence/baseline/demo/input.txt",
+        "--capture-dir",
+        "/Users/florianchanson/Documents/Codex/2026-10-20/blackoutburst-worker/work/title-evidence/baseline/demo/capture",
+        "--capture-frames",
+        "700,900,1001,1037,1121,1361",
+        "--capture-clock",
+        "update",
+        "--frames",
+        "1380",
+        "--color-32bit",
+        "--hitbox",
+        "off",
+        "--software-texture-blending"
+      ],
+      "image_sha256": {
+        "update_frame000700.png": "5028ede18c1bd1079b93d708861b3edd1923736d3e9c45f298d472a8f6eea761",
+        "update_frame000900.png": "cd05f4501076d5b3a36c9dee9ff5c0ac46f3ae8a679aa7cf6878b840400b5e89",
+        "update_frame001001.png": "bc33e392c9b8aae65a2fb0d6df11f97108ccabec1463b041883abf063d0be37f",
+        "update_frame001037.png": "aa9d6e5a8f0189082963d7c9452e5662543e870153036e768ab20b4308f1ee7d",
+        "update_frame001121.png": "b29e337cb6f1b54b4339e4c1391182bc0f4d9d2bc485919e88a918285f940174",
+        "update_frame001361.png": "b29e337cb6f1b54b4339e4c1391182bc0f4d9d2bc485919e88a918285f940174"
+      }
+    },
+    {
+      "binary": "candidate",
+      "scenario": "options",
+      "binary_sha256": "eda900feb00204f2b83242ee40d9b85945594d2bd8e2508e291b2596855f9444",
+      "returncode": 0,
+      "elapsed_seconds": 2.0520934159867465,
+      "command": [
+        "/Users/florianchanson/Documents/Codex/2026-10-20/blackoutburst-worker/work/title-white-binaries/eda900feb00204f2b83242ee40d9b85945594d2bd8e2508e291b2596855f9444/th06",
+        "--game-dir",
+        "/Users/florianchanson/Documents/Codex/2026-10-20/blackoutburst-worker/work/title-evidence/candidate/options/game",
+        "--input-script",
+        "/Users/florianchanson/Documents/Codex/2026-10-20/blackoutburst-worker/work/title-evidence/candidate/options/input.txt",
+        "--capture-dir",
+        "/Users/florianchanson/Documents/Codex/2026-10-20/blackoutburst-worker/work/title-evidence/candidate/options/capture",
+        "--capture-frames",
+        "150,280,331,367,451,691",
+        "--capture-clock",
+        "update",
+        "--frames",
+        "710",
+        "--color-32bit",
+        "--hitbox",
+        "off",
+        "--software-texture-blending"
+      ],
+      "image_sha256": {
+        "update_frame000150.png": "1d4ba4b899b9f84f70559e67e3840fcf9c9568a382015f0a9390e9be746f2e9c",
+        "update_frame000280.png": "e749b094505cd2efc794877ab8dfd52bdec87553348ffedb25088e86ffe705cc",
+        "update_frame000331.png": "b4c429749ca5259473496c2d08b48ef39c4228e911c83214529a9932889dac61",
+        "update_frame000367.png": "f2ba8c82d49792cb729282808fdf7bc3be0de2b597134e05f9a07a2a4e5f6be3",
+        "update_frame000451.png": "9e537d039b90ed8a7330ecb4c68039c77793aa106766f998299e7b22a2a2e924",
+        "update_frame000691.png": "9e537d039b90ed8a7330ecb4c68039c77793aa106766f998299e7b22a2a2e924"
+      }
+    },
+    {
+      "binary": "candidate",
+      "scenario": "demo",
+      "binary_sha256": "eda900feb00204f2b83242ee40d9b85945594d2bd8e2508e291b2596855f9444",
+      "returncode": 0,
+      "elapsed_seconds": 3.266646625008434,
+      "command": [
+        "/Users/florianchanson/Documents/Codex/2026-10-20/blackoutburst-worker/work/title-white-binaries/eda900feb00204f2b83242ee40d9b85945594d2bd8e2508e291b2596855f9444/th06",
+        "--game-dir",
+        "/Users/florianchanson/Documents/Codex/2026-10-20/blackoutburst-worker/work/title-evidence/candidate/demo/game",
+        "--input-script",
+        "/Users/florianchanson/Documents/Codex/2026-10-20/blackoutburst-worker/work/title-evidence/candidate/demo/input.txt",
+        "--capture-dir",
+        "/Users/florianchanson/Documents/Codex/2026-10-20/blackoutburst-worker/work/title-evidence/candidate/demo/capture",
+        "--capture-frames",
+        "700,900,1001,1037,1121,1361",
+        "--capture-clock",
+        "update",
+        "--frames",
+        "1380",
+        "--color-32bit",
+        "--hitbox",
+        "off",
+        "--software-texture-blending"
+      ],
+      "image_sha256": {
+        "update_frame000700.png": "5028ede18c1bd1079b93d708861b3edd1923736d3e9c45f298d472a8f6eea761",
+        "update_frame000900.png": "cd05f4501076d5b3a36c9dee9ff5c0ac46f3ae8a679aa7cf6878b840400b5e89",
+        "update_frame001001.png": "bc33e392c9b8aae65a2fb0d6df11f97108ccabec1463b041883abf063d0be37f",
+        "update_frame001037.png": "4d1772531e1642518f4ca3cc7276a04af55a8c6451e7bec5e9f0ee0b05f2a048",
+        "update_frame001121.png": "59d0b4735e07109d0d92b249e0ef773415a510a6c2b10391db70109f6a556cc0",
+        "update_frame001361.png": "59d0b4735e07109d0d92b249e0ef773415a510a6c2b10391db70109f6a556cc0"
+      }
+    }
+  ],
+  "initial_control_options_frame150_byte_identical": true,
+  "initial_control_demo_frame700_byte_identical": true,
+  "options_navigation_byte_identical": true,
+  "validation": {
+    "release_tests": {
+      "passed": 135,
+      "failed": 0,
+      "ignored_by_default": 18
+    },
+    "explicit_original_title03_test": "pass: scripts1/2, native/web-quit modes, Options36/120/360ticks, new-demo-chain startup",
+    "release_build": "pass",
+    "wasm_lib_check": "pass",
+    "fmt": "pass",
+    "diff_check": "pass"
+  },
+  "title03_anm_sha256": "950effbfa222cb0f273274e8787096446eaff2b64761ec1f3aefda1962f99f15",
+  "runtime_source_sha256": "d7b222ef68e1dc66144311231d574ed957713b6c33b193ee3cf1db86d0c5ee70",
+  "failed_attempts": [
+    {
+      "reason": "Input harness tap arguments initially used wrong period/count order; parser refused before captures. Corrected per capture.rs syntax; failed run preserved privately."
+    }
+  ]
+}

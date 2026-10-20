@@ -254,6 +254,28 @@ impl MenuArt {
             latin: LatinFont::default(),
         }
     }
+    #[cfg(test)]
+    pub(crate) fn title_script_fixture(
+        script: Vec<th06_formats::anm0::Instr>,
+        sprites: Vec<Sprite>,
+    ) -> Self {
+        let mut art = Self::title_test_fixture();
+        art.vms.retain(|&idx, _| idx == 0);
+        let vm = art.vms.get_mut(&0).unwrap();
+        vm.labels = script
+            .iter()
+            .filter(|i| i.opcode == 22)
+            .map(|i| i.arg_u32(0))
+            .collect();
+        vm.runner = AnmRunner::new(script.clone());
+        vm.script = script;
+        vm.sprites = sprites.into_iter().map(|s| (s.index, s)).collect();
+        art
+    }
+    #[cfg(test)]
+    pub(crate) fn test_rotation(&self) -> f32 {
+        self.vms[&0].runner.rotation
+    }
     pub fn load(
         engine: &Engine,
         files: &HashMap<String, Vec<u8>>,

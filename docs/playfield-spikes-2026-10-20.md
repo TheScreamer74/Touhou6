@@ -1,5 +1,10 @@
 # Playfield spike diagnosis — 20 October 2026
 
+Correction after independent review: the first candidate below used gray0
+instead of original white15 for Perfect Freeze. Its measured numbers remain
+historical intermediate results. See perfect-freeze-white-2026-10-20.md and
+the white-verification receipt for the corrected color and stage2 MAE0.78.
+
 Board ticket #10 required a fresh native capture in each of three clusters,
 identification against the decompiled original, and a correction or a precise
 separate defect. Nine original BMPs and their execution receipts were copied

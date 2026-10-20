@@ -1878,6 +1878,7 @@ impl Game {
             self.replay_session.as_ref().map(replay::Session::frame),
             self.audio_stage,
         );
+        let mut returning_from_demo = false;
         if let Some(frame) = &mut self.demo_frames {
             *frame += 1;
             if input.buttons() != 0 || *frame >= 3720 {
@@ -1886,11 +1887,12 @@ impl Game {
                 self.replay_session = None;
                 self.scene = Scene::Title;
                 self.title.reset(0);
+                returning_from_demo = true;
             }
         }
         let applying_stage_transition = self.pending_stage_transition;
         let neutral = Input::default();
-        let mut output = self.update_inner(if applying_stage_transition {
+        let mut output = self.update_inner(if applying_stage_transition || returning_from_demo {
             &neutral
         } else {
             input
@@ -2147,6 +2149,7 @@ impl Game {
             match action {
                 options::OptionsAction::Back => {
                     self.scene = Scene::Title;
+                    self.title.swap_art(&mut self.options_menu.art);
                     self.title.resume_menu(6);
                     self.title.input = self.options_menu.input;
                 }
@@ -2372,6 +2375,7 @@ impl Game {
                         self.scene = Scene::MusicRoom;
                     }
                     TitleAction::Options => {
+                        self.title.swap_art(&mut self.options_menu.art);
                         self.options_menu.begin();
                         self.options_menu.input = self.title.input;
                         self.scene = Scene::Options;

@@ -142,7 +142,8 @@ impl OptionsMenu {
         self.music_changes.clear();
         self.presentation_options = None;
         self.presentation_cursor = 0;
-        self.art.reset();
+        // The caller transfers the live title VMs; original MainMenu sends
+        // interrupt3 without recreating them.
         self.art.interrupt_all(3);
     }
     pub fn reference_navigation(&self) -> (u8, usize, u16) {

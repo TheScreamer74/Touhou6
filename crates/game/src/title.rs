@@ -182,10 +182,25 @@ impl Title {
     }
     /// Options returns directly to the active title menu, without startup.
     pub fn resume_menu(&mut self, cursor: usize) {
-        self.reset(cursor);
+        // MainMenu keeps these VMs alive through Options. Resetting them here
+        // loses the rotation established by label1; label2 does not restore it.
+        self.cursor = if self.quit_enabled {
+            cursor
+        } else {
+            cursor.min(self.entry_count() - 1)
+        };
+        self.quitting = None;
+        self.pending = None;
+        self.input = MenuInput::default();
         self.art.interrupt_all(2);
         self.pre_input = false;
         self.timer = 1;
+    }
+
+    /// Title and Options are two states of the same original MainMenu chain.
+    /// Transfer its live VMs so they keep advancing while Options owns them.
+    pub(crate) fn swap_art(&mut self, art: &mut MenuArt) {
+        std::mem::swap(&mut self.art, art);
     }
 
     pub fn reference_navigation(&self) -> (u8, usize, u16) {
@@ -217,6 +232,102 @@ impl Title {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn check_title_rotation_survives_options(
+        script: Vec<th06_formats::anm0::Instr>,
+        sprites: Vec<th06_formats::anm0::Sprite>,
+        angle: f32,
+        quit: bool,
+    ) {
+        let mut title = Title::with_quit(MenuArt::title_script_fixture(script, sprites), quit);
+        for _ in 0..120 {
+            title.update(&Input::default());
+        }
+        title.update(&Input::from_buttons(1, 0));
+        for _ in 0..120 {
+            title.update(&Input::default());
+        }
+        assert!((title.art.test_rotation() - angle).abs() < 0.00001);
+        let mut options = crate::options::OptionsMenu::new(MenuArt::title_test_fixture());
+        title.swap_art(&mut options.art);
+        options.begin();
+        for _ in 0..120 {
+            options.update(&Input::default(), &mut crate::options::Options::default());
+        }
+        title.swap_art(&mut options.art);
+        title.resume_menu(6);
+        for tick in 1..=360 {
+            title.update(&Input::default());
+            if [36, 120, 360].contains(&tick) {
+                assert!(
+                    (title.art.test_rotation() - angle).abs() < 0.00001,
+                    "after Options tick={tick}"
+                );
+            }
+        }
+        // A demo returns through a new MainMenu chain. Its first calculation
+        // must execute label1 with neutral input before a new confirmation.
+        title.reset(0);
+        title.update(&Input::default());
+        title.update(&Input::from_buttons(1, 0));
+        for _ in 0..120 {
+            title.update(&Input::default());
+        }
+        assert!((title.art.test_rotation() - angle).abs() < 0.00001);
+    }
+
+    #[test]
+    fn options_transfers_live_vms_and_preserves_startup_rotation_in_both_quit_modes() {
+        let angle = -3.0 * std::f32::consts::PI / 8.0;
+        let mut script = Vec::new();
+        let mut offset = 0;
+        for (opcode, args) in [
+            (21, vec![]),
+            (22, vec![1]),
+            (9, vec![0, 0, angle.to_bits()]),
+            (21, vec![]),
+            (22, vec![2]),
+            (21, vec![]),
+            (22, vec![3]),
+            (21, vec![]),
+        ] {
+            script.push(th06_formats::anm0::Instr {
+                time: 0,
+                opcode,
+                args: args.iter().flat_map(|n| n.to_le_bytes()).collect(),
+                offset,
+            });
+            offset += 4 + args.len() as u32 * 4;
+        }
+        for quit in [false, true] {
+            check_title_rotation_survives_options(script.clone(), Vec::new(), angle, quit);
+        }
+    }
+
+    #[test]
+    #[ignore = "requires original title03.anm at TH06_TITLE03_ANM"]
+    fn original_title03_subtitles_keep_diagonal_after_options_and_new_demo_chain() {
+        let bytes = std::fs::read(std::env::var_os("TH06_TITLE03_ANM").unwrap()).unwrap();
+        let anm = th06_formats::anm0::Anm0::parse(&bytes).unwrap();
+        let entry = &anm.entries[0];
+        for id in [1, 2] {
+            let script = entry
+                .scripts
+                .iter()
+                .find(|(n, _)| *n == id)
+                .unwrap()
+                .1
+                .clone();
+            for quit in [false, true] {
+                check_title_rotation_survives_options(
+                    script.clone(),
+                    entry.sprites.clone(),
+                    -3.0 * std::f32::consts::PI / 8.0,
+                    quit,
+                );
+            }
+        }
+    }
 
     fn ready(quit_enabled: bool, cursor: usize) -> Title {
         let mut title = Title::with_quit(MenuArt::title_test_fixture(), quit_enabled);
