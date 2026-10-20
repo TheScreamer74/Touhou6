@@ -1850,6 +1850,7 @@ impl Game {
         }
         if let Some(elapsed) = self.demo_frames.filter(|&elapsed| elapsed >= 3600) {
             frame.cmds.push(DrawCmd {
+                projected: None,
                 clip: None,
                 tex: stage::TEX_WHITE,
                 dst: [0.0, 0.0, 640.0, 480.0],

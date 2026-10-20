@@ -177,6 +177,7 @@ impl Hud {
         if let Some(([sx, sy, sw, sh], _, scale, alpha)) = self.script_state(id) {
             let ts = self.tex_size;
             cmds.push(DrawCmd {
+                projected: None,
                 clip: None,
                 tex: self.tex_slot,
                 dst: [x, y, sw * scale_x, sh * scale[1]],
@@ -244,6 +245,7 @@ impl Hud {
                 }
             }
             cmds.push(DrawCmd {
+                projected: None,
                 clip: None,
                 tex: self.tex_slot,
                 dst: geometry.dst,

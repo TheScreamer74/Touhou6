@@ -447,6 +447,7 @@ impl LatinFont {
                 continue;
             };
             cmds.push(DrawCmd {
+                projected: None,
                 clip: None,
                 tex: self.tex,
                 dst: [pos[0], pos[1], 24.0 * scale[0], 24.0 * scale[1]],
@@ -594,6 +595,7 @@ mod tests {
             }
         });
         let cmd = |tex| DrawCmd {
+            projected: None,
             tex,
             dst: [0., 0., 2., 3.],
             src: [0., 0., 1., 1.],

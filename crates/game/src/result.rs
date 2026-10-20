@@ -953,6 +953,7 @@ fn bake(engine: &Engine, textures: &mut Vec<Texture>, text: &str) -> TextSprite 
 }
 fn draw_text_sprite(cmds: &mut Vec<DrawCmd>, sprite: &TextSprite, pos: [f32; 2], alpha: f32) {
     cmds.push(DrawCmd {
+        projected: None,
         clip: None,
         tex: sprite.tex,
         dst: [pos[0], pos[1], sprite.w, sprite.h],

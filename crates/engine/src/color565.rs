@@ -258,7 +258,7 @@ impl Renderer {
                 bind_group_layouts: &bind_group_layouts,
                 push_constant_ranges: &[],
             });
-            let sprite_attributes = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32x4, 3 => Uint32];
+            let sprite_attributes = wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x2, 2 => Float32x4, 3 => Uint32];
             let bg_attributes = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32, 3 => Float32x4];
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("R5G6B5 draw"),
@@ -535,15 +535,20 @@ impl Renderer {
             }
         }
         let vertices = Engine::build_vertices(cmds);
-        let bounds: Vec<_> =
-            vertices
-                .chunks(6)
-                .map(|quad| {
-                    rectangle(quad.iter().map(|vertex| {
-                        [(vertex.pos[0] + 1.0) * 320.0, (1.0 - vertex.pos[1]) * 240.0]
-                    }))
-                })
-                .collect();
+        let bounds: Vec<_> = vertices
+            .chunks(6)
+            .map(|quad| {
+                if quad.iter().any(|vertex| vertex.pos[3] <= 0.0) {
+                    return [0.0, 0.0, 640.0, 480.0];
+                }
+                rectangle(quad.iter().map(|vertex| {
+                    [
+                        (vertex.pos[0] / vertex.pos[3] + 1.0) * 320.0,
+                        (1.0 - vertex.pos[1] / vertex.pos[3]) * 240.0,
+                    ]
+                }))
+            })
+            .collect();
         let vbuf = engine.vertex_buffer(cmds);
         for (start, end) in batches(&bounds) {
             self.copy_previous(encoder);
@@ -577,6 +582,14 @@ impl Renderer {
                     continue;
                 };
                 pass.set_scissor_rect(x, y, width, height);
+                pass.set_viewport(
+                    0.0,
+                    0.0,
+                    SCREEN_W as f32,
+                    SCREEN_H as f32,
+                    0.0,
+                    if cmd.projected.is_some() { 0.5 } else { 1.0 },
+                );
                 pass.set_pipeline(&self.sprite[cmd.pipeline_index()]);
                 pass.set_bind_group(0, &textures[cmd.tex].bind_group_16bit, &[]);
                 pass.draw(index as u32 * 6..index as u32 * 6 + 6, 0..1);
@@ -918,6 +931,7 @@ mod tests {
         let engine = Engine::new();
         let texture = engine.create_texture_with_format(&[255, 0, 0, 255], 1, 1, 1);
         let mut cmd = DrawCmd {
+            projected: None,
             tex: 0,
             dst: [0.0, 0.0, 640.0, 480.0],
             src: [0.0, 0.0, 1.0, 1.0],
@@ -953,6 +967,7 @@ mod tests {
         let engine = Engine::new();
         let texture = engine.create_texture_with_format(&[64, 96, 128, 128], 1, 1, 1);
         let cmd = DrawCmd {
+            projected: None,
             tex: 0,
             dst: [0.0, 0.0, 640.0, 480.0],
             src: [0.0, 0.0, 1.0, 1.0],
@@ -979,6 +994,7 @@ mod tests {
         let engine = Engine::new();
         let texture = engine.create_texture(&[255, 255, 255, 255], 1, 1);
         let quad = |dst, tint, clip, z| DrawCmd {
+            projected: None,
             tex: 0,
             dst,
             src: [0.0, 0.0, 1.0, 1.0],
@@ -1037,6 +1053,7 @@ mod tests {
         let engine = Engine::new();
         let texture = engine.create_texture_with_format(&[255, 0, 0, 255], 1, 1, 1);
         let cmd = DrawCmd {
+            projected: None,
             tex: 0,
             dst: [0.0, 0.0, 640.0, 480.0],
             src: [0.0, 0.0, 1.0, 1.0],

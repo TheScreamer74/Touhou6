@@ -51,6 +51,9 @@ pub struct AnmRunner {
     /// Z rotation in radians (opcode 9), integrated by `angle_vel` (opcode 10).
     pub rotation: f32,
     angle_vel: f32,
+    /// Draw3 retains the other two rotation axes, even when an owner replaces Z.
+    pub rotation_xy: [f32; 2],
+    angle_vel_xy: [f32; 2],
     /// opcode 12 Fade snapshots the complete D3DCOLOR, including RGB. An owner
     /// changing VM color afterward does not change those interpolation endpoints.
     fade: Option<([f32; 4], [f32; 4], u16, u16)>,
@@ -110,6 +113,8 @@ impl AnmRunner {
             scale_time: 0,
             rotation: 0.0,
             angle_vel: 0.0,
+            rotation_xy: [0.0; 2],
+            angle_vel_xy: [0.0; 2],
             fade: None,
             corner: false,
             flip_x: false,
@@ -179,6 +184,10 @@ impl AnmRunner {
             return;
         }
         self.rotation = crate::ecl_vm::normalize_angle(self.rotation + self.angle_vel);
+        for axis in 0..2 {
+            self.rotation_xy[axis] =
+                crate::ecl_vm::normalize_angle(self.rotation_xy[axis] + self.angle_vel_xy[axis]);
+        }
         if self.scale_end > 0 {
             self.scale_time = self.scale_time.saturating_add(1);
             let t = self.scale_time;
@@ -330,8 +339,14 @@ impl AnmRunner {
                 }
                 7 => self.flip_x = !self.flip_x,
                 8 => self.flip_y = !self.flip_y,
-                9 => self.rotation = i.arg_f32(2),
-                10 => self.angle_vel = i.arg_f32(2),
+                9 => {
+                    self.rotation_xy = [i.arg_f32(0), i.arg_f32(1)];
+                    self.rotation = i.arg_f32(2);
+                }
+                10 => {
+                    self.angle_vel_xy = [i.arg_f32(0), i.arg_f32(1)];
+                    self.angle_vel = i.arg_f32(2);
+                }
                 12 => {
                     let from = [self.color[0], self.color[1], self.color[2], self.alpha];
                     let mut to = from;
@@ -411,6 +426,23 @@ impl AnmRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rotation_and_speed_keep_xy_when_an_owner_replaces_z() {
+        let mut vm = AnmRunner::new(vec![
+            instr(9, &[0.5f32.to_bits(), (-0.5f32).to_bits(), 0]),
+            instr(
+                10,
+                &[0.125f32.to_bits(), 0.25f32.to_bits(), 0.5f32.to_bits()],
+            ),
+            instr(21, &[]),
+        ]);
+        assert_eq!(vm.rotation_xy, [0.625, -0.25]);
+        vm.rotation = 1.0; // EnemyManager autoRotate replaces only Z.
+        vm.tick();
+        assert_eq!(vm.rotation_xy, [0.75, 0.0]);
+        assert_eq!(vm.rotation, 1.5);
+    }
 
     #[test]
     fn z_write_disable_uses_original_single_bit_and_resets_with_script() {

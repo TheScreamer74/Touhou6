@@ -181,6 +181,7 @@ impl MusicRoom {
     }
     fn text(cmds: &mut Vec<DrawCmd>, text: &Text, pos: [f32; 2], tint: [f32; 4]) {
         cmds.push(DrawCmd {
+            projected: None,
             clip: None,
             tex: text.tex,
             dst: [pos[0], pos[1], text.w, text.h],

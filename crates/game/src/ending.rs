@@ -1090,6 +1090,7 @@ impl EndingPlayer {
         {
             let top = self.vm.background_y as i32 as f32;
             cmds.push(DrawCmd {
+                projected: None,
                 clip: None,
                 tex: background.tex,
                 dst: [0.0, 0.0, 640.0, 480.0],
@@ -1142,6 +1143,7 @@ impl EndingPlayer {
                 src.swap(1, 3);
             }
             cmds.push(DrawCmd {
+                projected: None,
                 clip: None,
                 tex: texture.unwrap_or(sprite.image.tex),
                 dst: geometry.dst,
@@ -1161,6 +1163,7 @@ impl EndingPlayer {
         let tint = self.vm.fade.draw();
         if tint[3] != 0.0 {
             cmds.push(DrawCmd {
+                projected: None,
                 clip: None,
                 tex: self.resources.white,
                 dst: [0.0, 0.0, 640.0, 480.0],

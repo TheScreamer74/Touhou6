@@ -133,9 +133,9 @@ struct VOut {
 };
 
 @vertex
-fn vs(@location(0) pos: vec3f, @location(1) uv: vec2f, @location(2) tint: vec4f, @location(3) color_add: u32) -> VOut {
+fn vs(@location(0) pos: vec4f, @location(1) uv: vec2f, @location(2) tint: vec4f, @location(3) color_add: u32) -> VOut {
     var out: VOut;
-    out.pos = vec4f(pos, 1.0);
+    out.pos = pos;
     out.uv = uv;
     out.tint = tint;
     out.color_add = color_add;
@@ -158,7 +158,7 @@ fn fs(in: VOut) -> @location(0) vec4f {
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Vertex {
-    pos: [f32; 3],
+    pos: [f32; 4],
     uv: [f32; 2],
     tint: [f32; 4],
     color_add: u32,
@@ -298,6 +298,11 @@ impl BgScene {
 /// rotates the quad around its center (radians, clockwise).
 #[derive(Clone, Copy)]
 pub struct DrawCmd {
+    /// Optional Draw3 corners, ordered TL/TR/BR/BL. XY are homogeneous logical
+    /// pixels (pixel * W), Z is full clip depth and W is camera distance.
+    /// These draws use viewport depth0..0.5, preserving clipping and UV/W.
+    /// None retains the existing dst/rot geometry and depth0..1 viewport.
+    pub projected: Option<[[f32; 4]; 4]>,
     pub tex: usize,
     pub dst: [f32; 4],
     pub src: [f32; 4],
@@ -747,7 +752,7 @@ impl Engine {
                 buffers: &[wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<Vertex>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32x4, 3 => Uint32],
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x2, 2 => Float32x4, 3 => Uint32],
                 }],
             },
             fragment: Some(wgpu::FragmentState {
@@ -878,6 +883,30 @@ impl Engine {
         for c in cmds {
             let [x, y, w, h] = c.dst;
             let [u0, v0, u1, v1] = c.src;
+            if let Some(corners) = c.projected {
+                for (index, uv) in [
+                    (0, [u0, v0]),
+                    (1, [u1, v0]),
+                    (2, [u1, v1]),
+                    (0, [u0, v0]),
+                    (2, [u1, v1]),
+                    (3, [u0, v1]),
+                ] {
+                    let [px, py, z, camera_w] = corners[index];
+                    verts.push(Vertex {
+                        pos: [
+                            px / SCREEN_W as f32 * 2.0 - camera_w,
+                            camera_w - py / SCREEN_H as f32 * 2.0,
+                            z,
+                            camera_w,
+                        ],
+                        uv,
+                        tint: c.tint,
+                        color_add: u32::from(c.color_add),
+                    });
+                }
+                continue;
+            }
             // Rotate corners around the quad center in screen space.
             let (cx, cy) = (x + w / 2.0, y + h / 2.0);
             let (sin, cos) = c.rot.sin_cos();
@@ -902,7 +931,7 @@ impl Engine {
             ];
             for ((px, py), uv) in quad {
                 verts.push(Vertex {
-                    pos: [nx(px), ny(py), c.depth.map_or(0.0, |state| state.z)],
+                    pos: [nx(px), ny(py), c.depth.map_or(0.0, |state| state.z), 1.0],
                     uv,
                     tint: c.tint,
                     color_add: u32::from(c.color_add),
@@ -966,16 +995,20 @@ impl Engine {
             let tex = cmds[start].tex;
             let pipeline = cmds[start].pipeline_index();
             let clip = cmds[start].clip;
+            let projected = cmds[start].projected.is_some();
             let mut end = start;
             while end < cmds.len()
                 && cmds[end].tex == tex
                 && cmds[end].pipeline_index() == pipeline
                 && cmds[end].clip == clip
+                && cmds[end].projected.is_some() == projected
             {
                 end += 1;
             }
             if let Some([x, y, width, height]) = sprite_scissor(clip, target_size) {
                 pass.set_scissor_rect(x, y, width, height);
+                let [x, y, width, height] = display_viewport(target_size);
+                pass.set_viewport(x, y, width, height, 0.0, if projected { 0.5 } else { 1.0 });
                 pass.set_pipeline(&pipelines[pipeline]);
                 pass.set_bind_group(0, &textures[tex].bind_group, &[]);
                 pass.draw(start as u32 * 6..end as u32 * 6, 0..1);

@@ -333,6 +333,65 @@ mod tests {
 
     #[test]
     #[ignore = "requires GPU adapter"]
+    fn projected_corners_keep_perspective_uv_depth_and_far_clipping_in_both_modes() {
+        use super::super::{DepthState, DepthTest};
+        let engine = Engine::new();
+        let rgba: Vec<u8> = (0..=255u8).flat_map(|r| [r, 0, 0, 255]).collect();
+        let texture = engine.create_texture(&rgba, 256, 1);
+        let mut cmd = DrawCmd {
+            projected: Some([
+                [100.0, 100.0, 0.5, 1.0],
+                [600.0, 200.0, 1.0, 2.0],
+                [600.0, 600.0, 1.0, 2.0],
+                [100.0, 300.0, 0.5, 1.0],
+            ]),
+            tex: 0,
+            dst: [100.0, 100.0, 200.0, 200.0],
+            src: [0.0, 0.0, 1.0, 1.0],
+            tint: [1.0; 4],
+            rot: 0.0,
+            additive: false,
+            color_add: false,
+            clip: None,
+            depth: Some(DepthState {
+                z: 0.0,
+                test: DepthTest::LessEqual,
+                write: true,
+            }),
+        };
+        let pixel = (150 * SCREEN_W as usize + 200) * 4;
+        for limited in [false, true] {
+            super::super::set_color_16bit(limited);
+            let image = engine.render_to_image(&[cmd], &[&texture], None);
+            // At screen midpoint U is approximately1/3, not affine1/2.
+            assert!(
+                (78..=90).contains(&image[pixel]),
+                "mode={limited} red={}",
+                image[pixel]
+            );
+            let mut overlay = cmd;
+            overlay.projected = None;
+            overlay.tint = [1.0, 0.0, 0.0, 1.0];
+            overlay.depth.as_mut().unwrap().z = 0.3;
+            let occluded = engine.render_to_image(&[cmd, overlay], &[&texture], None);
+            assert_eq!(occluded[pixel], image[pixel], "projected depth must be0.25");
+            let corners = cmd.projected.unwrap();
+            cmd.projected = Some(corners.map(|mut p| {
+                p[2] = p[3] * 1.1;
+                p
+            }));
+            let clipped = engine.render_to_image(&[cmd], &[&texture], None);
+            assert_eq!(
+                clipped[pixel], 0,
+                "far clip must use full clip Z before viewport depth mapping"
+            );
+            cmd.projected = Some(corners);
+        }
+        super::super::set_color_16bit(false);
+    }
+
+    #[test]
+    #[ignore = "requires GPU adapter"]
     fn sprite_depth_test_write_alpha_and_frame_reset_match_in_both_modes() {
         use super::super::{DepthState, DepthTest, Vertex3};
         let engine = Engine::new();
@@ -345,6 +404,7 @@ mod tests {
         {
             let mut quad = |column, tint, z, test, write, additive| {
                 commands.push(DrawCmd {
+                    projected: None,
                     clip: None,
                     tex: 0,
                     dst: [16.0 + column as f32 * 64.0, 32.0, 48.0, 48.0],
@@ -487,6 +547,7 @@ mod tests {
         let engine = Engine::new();
         let texture = engine.create_texture(&[255, 255, 255, 255], 1, 1);
         let mut command = DrawCmd {
+            projected: None,
             clip: None,
             tex: 0,
             dst: [0.0, 0.0, 640.0, 480.0],
@@ -562,6 +623,7 @@ mod tests {
         // readback is permitted in this loop: it used to hide the queue growth.
         let commands = vec![
             DrawCmd {
+                projected: None,
                 clip: None,
                 tex: 0,
                 dst: [0.0, 0.0, 640.0, 480.0],

@@ -78,6 +78,7 @@ impl ScorePopups {
                     dst[0] += origin[0];
                     dst[1] += origin[1];
                     cmds.push(DrawCmd {
+                        projected: None,
                         clip: None,
                         tex,
                         dst,

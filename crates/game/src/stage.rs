@@ -647,6 +647,7 @@ fn screen_asset_cmd(asset: &PortraitAsset, runner: &AnmRunner) -> Option<DrawCmd
         runner.corner,
     );
     Some(DrawCmd {
+        projected: None,
         tex: asset.tex,
         dst: geometry.dst,
         src,
@@ -695,7 +696,25 @@ fn sprite_cmd_from(
         crate::sprite_geometry::world([cx - FIELD_X, cy - FIELD_Y], [w, h], rot, anim.corner, z);
     geometry.dst[0] += FIELD_X;
     geometry.dst[1] += FIELD_Y;
+    let projected = (anim.rotation_xy != [0.0; 2]).then(|| {
+        let anchor = if anim.corner {
+            [w / 2.0, h / 2.0]
+        } else {
+            [0.0; 2]
+        };
+        crate::sprite_geometry::world_tilted(
+            [cx - FIELD_X + anchor[0], cy - FIELD_Y + anchor[1], z],
+            [w * 256.0 / tw, h * 256.0 / th],
+            [anim.rotation_xy[0], anim.rotation_xy[1], rot],
+        )
+        .map(|mut point| {
+            point[0] += FIELD_X * point[3];
+            point[1] += FIELD_Y * point[3];
+            point
+        })
+    });
     Some(DrawCmd {
+        projected,
         tex: script.tex,
         dst: geometry.dst,
         src: [u0, v0, u1, v1],
@@ -1134,6 +1153,7 @@ impl Stage {
             let height = sh * scale[1];
             let ts = self.hud.tex_size();
             cmds.push(DrawCmd {
+                projected: None,
                 tex: self.hud.tex(),
                 dst: [bar_x - width / 2.0, y - height / 2.0, width, height],
                 src: [sx / ts, sy / ts, (sx + sw) / ts, (sy + sh) / ts],
@@ -1148,6 +1168,7 @@ impl Stage {
         let w = 256.0 * runner.scale[0];
         let h = 16.0 * runner.scale[1];
         cmds.push(DrawCmd {
+            projected: None,
             tex,
             dst: [x - w / 2.0, y - h / 2.0, w, h],
             src: [0.0, 0.0, 1.0, 1.0],
@@ -1193,6 +1214,7 @@ impl Stage {
             src.swap(1, 3);
         }
         cmds.push(DrawCmd {
+            projected: None,
             tex: asset.tex,
             dst: crate::sprite_geometry::screen([x, y], [w, h], runner.corner).dst,
             src,
@@ -1247,6 +1269,7 @@ impl Stage {
         };
         if let Some((tex, width, height)) = texture {
             cmds.push(DrawCmd {
+                projected: None,
                 tex,
                 dst: [pos[0], pos[1], width * scale[0], height * scale[1]],
                 src: [0.0, 0.0, 1.0, 1.0],
@@ -4446,6 +4469,23 @@ impl Stage {
         let tangent = (std::f32::consts::PI / 12.0).tan();
         let old_distance = FIELD_H / 2.0 / tangent;
         let distance = camera[3] / 2.0 / tangent;
+        if let Some(points) = &mut cmd.projected {
+            let ratios = [target[2] / camera[2], target[3] / camera[3]];
+            let q = 10000.0 / (10000.0 - 100.0);
+            for point in points {
+                let old_w = point[3];
+                let world_x = (point[0] - (FIELD_X + 192.5) * old_w) / old_distance + 192.0;
+                let world_y = (point[1] - (FIELD_Y + 224.5) * old_w) / old_distance + 224.0;
+                let w = old_w + distance - old_distance;
+                point[0] = (target[0] + 0.5 + target[2] / 2.0) * w
+                    + (world_x - camera[2] / 2.0) * distance * ratios[0];
+                point[1] = (target[1] + 0.5 + target[3] / 2.0) * w
+                    + (world_y - camera[3] / 2.0) * distance * ratios[1];
+                point[2] = w * q - 100.0 * q;
+                point[3] = w;
+            }
+            return cmd;
+        }
         let old_scale = old_distance / (old_distance + z);
         let scale = distance / (distance + z);
         let world_center = [
@@ -4515,6 +4555,7 @@ impl Stage {
             geometry.dst[1] += FIELD_Y;
         }
         let cmd = DrawCmd {
+            projected: None,
             tex: self.player_tex,
             dst: geometry.dst,
             src: [u0, v0, u1, v1],
@@ -4592,6 +4633,7 @@ impl Stage {
             std::mem::swap(&mut u0, &mut u1);
         }
         Some(DrawCmd {
+            projected: None,
             tex: self.player_tex,
             dst: crate::sprite_geometry::screen_rotated(
                 [cx + self.arcade[0] - FIELD_X, cy + self.arcade[1] - FIELD_Y],
@@ -4826,6 +4868,7 @@ impl Stage {
                     && self.invuln > 0
                     && self.invuln % 8 < 2;
                 cmds.push(DrawCmd {
+                    projected: None,
                     tex: self.player_tex,
                     dst: crate::sprite_geometry::screen(
                         [self.arcade[0] + self.pos[0], self.arcade[1] + self.pos[1]],
@@ -4966,6 +5009,7 @@ impl Stage {
                 let hh = ((by[0] - c[0]).powi(2) + (by[1] - c[1]).powi(2)).sqrt();
                 cmds.push(self.project_world_cmd(
                     DrawCmd {
+                        projected: None,
                         tex: self.eff_tex,
                         dst: [
                             FIELD_X + c[0] + 0.5 - hw,
@@ -4994,6 +5038,7 @@ impl Stage {
             let h = sp.height * e.runner.scale[1].abs();
             cmds.push(self.project_world_cmd(
                 DrawCmd {
+                    projected: None,
                     tex: self.eff_tex,
                     dst: [
                         FIELD_X + e.pos[0] + 0.5 - w / 2.0,
@@ -5035,6 +5080,7 @@ impl Stage {
             let base = if laser.script == 9 { 146 } else { 62 };
             if let Some(sprite) = self.bullet_sprites.get(&(base + color)) {
                 cmds.push(DrawCmd {
+                    projected: None,
                     tex: TEX_BULLET,
                     dst: [cx - width / 2.0, cy - length / 2.0, width, length],
                     src: [
@@ -5071,6 +5117,7 @@ impl Stage {
                 }
                 let (width, height) = (sprite.width * scale, sprite.height * scale);
                 cmds.push(DrawCmd {
+                    projected: None,
                     tex: TEX_BULLET,
                     dst: [ox - width / 2.0, oy - height / 2.0, width, height],
                     src: [
@@ -5112,6 +5159,7 @@ impl Stage {
                 None => continue,
             };
             cmds.push(DrawCmd {
+                projected: None,
                 tex: TEX_BULLET,
                 dst: crate::sprite_geometry::screen(
                     [
@@ -5209,6 +5257,7 @@ impl Stage {
                     src.swap(1, 3);
                 }
                 cmds.push(DrawCmd {
+                    projected: None,
                     tex,
                     dst: {
                         let mut dst = crate::sprite_geometry::world(
@@ -5325,6 +5374,7 @@ impl Stage {
             if !self.attract_demo {
                 cmds.push(self.project_world_cmd(
                     DrawCmd {
+                        projected: None,
                         tex: slot,
                         dst,
                         src: [0.0, 0.0, 1.0, 1.0],
@@ -5374,6 +5424,7 @@ impl Stage {
             dst[1] += FIELD_Y;
             cmds.push(self.project_world_cmd(
                 DrawCmd {
+                    projected: None,
                     tex: slot,
                     dst,
                     src: [0.0, 0.0, 1.0, 1.0],
@@ -5571,6 +5622,7 @@ impl Stage {
         // "Enemy" label (script 19), self-placed by its own script.
         if let Some(([sx, sy, sw, sh], pos, scale, alpha)) = self.hud.script_state(19) {
             cmds.push(DrawCmd {
+                projected: None,
                 tex: self.hud.tex(),
                 dst: [
                     pos[0] - sw * scale[0] / 2.0,
@@ -5593,6 +5645,7 @@ impl Stage {
         // own scaleY (0.3 -> ~4px tall) and fade-in alpha.
         if let Some(([sx, sy, sw, sh], _, scale, alpha)) = self.hud.script_state(21) {
             cmds.push(DrawCmd {
+                projected: None,
                 tex: self.hud.tex(),
                 dst: [96.0, 24.0, self.boss_bar * 288.0, sh * scale[1]],
                 src: [sx / ts, sy / ts, (sx + sw) / ts, (sy + sh) / ts],
@@ -5674,6 +5727,7 @@ impl Stage {
         let power = self.world.power.max(0);
         if power > 0 {
             cmds.push(DrawCmd {
+                projected: None,
                 tex: TEX_POWER_GRAD,
                 dst: [vx, 186.0, power as f32, 16.0],
                 src: [0.25, 0.5, 0.75, 0.5],
@@ -5900,6 +5954,7 @@ impl Stage {
                 }
                 let (tw, th) = (asset.tex_size.0 as f32, asset.tex_size.1 as f32);
                 cmds.push(DrawCmd {
+                    projected: None,
                     tex: asset.tex,
                     dst: [x - w / 2.0, y - h / 2.0, w, h],
                     src: [
@@ -5987,6 +6042,7 @@ fn draw_num_scaled(cmds: &mut Vec<DrawCmd>, pos: [f32; 2], scale: f32, tint: [f3
             let idx = c - 0x20;
             let (col, row) = ((idx % 16) as f32, (idx / 16 + 2) as f32);
             cmds.push(DrawCmd {
+                projected: None,
                 tex: TEX_ASCII,
                 dst: [
                     x.round_ties_even(),
@@ -6026,6 +6082,7 @@ pub fn draw_text(cmds: &mut Vec<DrawCmd>, pos: [f32; 2], size: f32, tint: [f32; 
             // starts at row 2 (space at 0x20).
             let (col, row) = ((idx % 16) as f32, (idx / 16 + 2) as f32);
             cmds.push(DrawCmd {
+                projected: None,
                 tex: TEX_ASCII,
                 dst: [x.round_ties_even(), pos[1].round_ties_even(), size, size],
                 src: [
@@ -6048,6 +6105,7 @@ pub fn draw_text(cmds: &mut Vec<DrawCmd>, pos: [f32; 2], size: f32, tint: [f32; 
 
 fn rect(dst: [f32; 4], tint: [f32; 4]) -> DrawCmd {
     DrawCmd {
+        projected: None,
         tex: TEX_WHITE,
         dst,
         src: [0.25, 0.25, 0.75, 0.75],
@@ -6227,6 +6285,38 @@ mod tests {
         );
         assert_eq!(world.dst, [143.0, 227.0, 16.0, 16.0]);
         assert_eq!(world.clip, Some([51, 35, 364, 428]));
+        // A tilted Draw3 plane has a different camera distance at each corner.
+        // Rebase each one, preserving its own W and full near/far clip depth.
+        let mut tilted = rect([124.0, 208.0, 16.0, 16.0], [1.0; 4]);
+        tilted.projected = Some(
+            crate::sprite_geometry::world_tilted(
+                [192.0, 224.0, 0.495],
+                [80.0, 80.0],
+                [1.0, 0.0, 0.2],
+            )
+            .map(|mut p| {
+                p[0] += FIELD_X * p[3];
+                p[1] += FIELD_Y * p[3];
+                p
+            }),
+        );
+        let original = tilted.projected.unwrap();
+        let rebased = s
+            .project_world_cmd(tilted, 0.495, s.draw_arcade)
+            .projected
+            .unwrap();
+        let old_d = FIELD_H / 2.0 / (std::f32::consts::PI / 12.0).tan();
+        let new_d = s.draw_arcade[3] / 2.0 / (std::f32::consts::PI / 12.0).tan();
+        for (old, new) in original.into_iter().zip(rebased) {
+            let wx = (old[0] / old[3] - FIELD_X - 192.5) * old[3] / old_d + 192.0;
+            let wy = (old[1] / old[3] - FIELD_Y - 224.5) * old[3] / old_d + 224.0;
+            let w = old[3] - old_d + new_d;
+            let expected_x = 51.5 + 364.0 / 2.0 + (wx - 364.0 / 2.0) * new_d / w;
+            let expected_y = 35.5 + 428.0 / 2.0 + (wy - 428.0 / 2.0) * new_d / w;
+            assert!((new[0] / new[3] - expected_x).abs() < 0.001);
+            assert!((new[1] / new[3] - expected_y).abs() < 0.001);
+            assert!((new[3] - w).abs() < 0.001);
+        }
         let commands = s.draw();
         let player = commands
             .iter()

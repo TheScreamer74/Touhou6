@@ -6,6 +6,28 @@ pub struct Quad {
     pub rotation: f32,
 }
 
+/// Draw3's X/Y/Z rotations, before the neutral camera. Retain homogeneous W
+/// for GPU clipping and perspective-correct texture interpolation. Positions
+/// are playfield-local homogeneous pixels; clip Z uses the full0..1 range,
+/// mapped into the original foreground depth0..0.5 by the draw viewport.
+pub fn world_tilted(pos: [f32; 3], size: [f32; 2], rotation: [f32; 3]) -> [[f32; 4]; 4] {
+    let transform = glam::Mat3::from_rotation_z(rotation[2])
+        * glam::Mat3::from_rotation_y(rotation[1])
+        * glam::Mat3::from_rotation_x(rotation[0]);
+    let distance = 224.0 / (std::f32::consts::PI / 12.0).tan();
+    let q = 10000.0 / (10000.0 - 100.0);
+    [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)].map(|(x, y)| {
+        let offset = transform * glam::Vec3::new(x * size[0] / 2.0, -y * size[1] / 2.0, 0.0);
+        let w = distance + pos[2] + offset.z;
+        [
+            192.5 * w + (pos[0] + offset.x - 192.0) * distance,
+            224.5 * w + (pos[1] - offset.y - 224.0) * distance,
+            w * q - 100.0 * q,
+            w,
+        ]
+    })
+}
+
 /// The stage's foreground viewport maps D3D normalized depth into0..0.5.
 /// Wine11 keeps that range for XYZRHW vertices as well as projected XYZ.
 pub fn screen_depth(z: f32) -> f32 {
@@ -104,6 +126,26 @@ pub fn world(pos: [f32; 2], size: [f32; 2], angle: f32, corner: bool, z: f32) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn draw3_tilt_changes_corner_depth_and_applies_x_y_then_z() {
+        let q = world_tilted(
+            [192.0, 224.0, 0.0],
+            [100.0, 50.0],
+            [std::f32::consts::FRAC_PI_2; 3],
+        );
+        let distance = 224.0 / (std::f32::consts::PI / 12.0).tan();
+        // TL (-50,+25,0) -> X (-50,0,+25) -> Y (+25,0,+50)
+        // -> Z (0,+25,+50), then perspective. This differs from Z/Y/X.
+        assert!((q[0][3] - (distance + 50.0)).abs() < 0.001);
+        assert!((q[0][0] / q[0][3] - 192.5).abs() < 0.001);
+        assert!((q[0][1] / q[0][3] - (224.5 - 25.0 * distance / (distance + 50.0))).abs() < 0.001);
+        assert_ne!(q[0][3], q[1][3]);
+        let flat = world_tilted([192.0, 224.0, 0.0], [100.0, 50.0], [0.0; 3]);
+        assert_eq!(
+            [flat[0][0] / flat[0][3], flat[0][1] / flat[0][3]],
+            [142.5, 199.5]
+        );
+    }
     #[test]
     fn player_rhw_occludes_later_world_effects_in_original_viewport() {
         assert_eq!(screen_depth(0.49), 0.245);

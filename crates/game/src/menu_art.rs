@@ -134,6 +134,7 @@ impl MenuFont {
                 if let Some(sp) = sheet.sprites.get(&idx) {
                     let [w, h] = sheet.size;
                     cmds.push(DrawCmd {
+                        projected: None,
                         clip: None,
                         tex: sheet.tex,
                         dst: [pos[0], pos[1], sp.width * scale[0], sp.height * scale[1]],
@@ -442,6 +443,7 @@ impl MenuArt {
         ];
         let geometry = crate::sprite_geometry::screen_rotated(pos, [w, h], r.rotation, r.corner);
         Some(DrawCmd {
+            projected: None,
             clip: None,
             tex: vm.tex,
             dst: geometry.dst,
@@ -463,6 +465,7 @@ impl MenuArt {
         mut style: impl FnMut(usize) -> Option<([f32; 2], [f32; 4])>,
     ) -> Vec<DrawCmd> {
         let mut cmds = vec![DrawCmd {
+            projected: None,
             clip: None,
             tex: self.background,
             dst: [0.0, 0.0, 640.0, 480.0],
@@ -545,6 +548,7 @@ impl MenuArt {
                 (sp.y / th, (sp.y + sp.height) / th)
             };
             cmds.push(DrawCmd {
+                projected: None,
                 clip: None,
                 tex: if vm.highlighted {
                     vm.highlight_tex.unwrap_or(vm.tex)
