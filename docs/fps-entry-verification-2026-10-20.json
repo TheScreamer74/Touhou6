@@ -1,0 +1,142 @@
+{
+  "ticket": "Touhou6 #11",
+  "binary_sha256": "2848dd163b74f0a9fcb53ef1bdd17db9f7d851dc6040edb28f3335dab0e10c02",
+  "scope": "Fresh silent native entry captures against existing local historical original images; two cases, frames 1-3. No fresh original execution or 96-case campaign.",
+  "region": {
+    "x": 512,
+    "y": 464,
+    "width": 128,
+    "height": 16
+  },
+  "checkpoints": [
+    {
+      "case": "replay-c0-d1-s3",
+      "frame": 1,
+      "original_sha256": "c22a088bf067448b31a91f28b06cfc565af3e264395af2d4ae6b866ac45d120a",
+      "baseline_sha256": "2c09978ea968e241a336500ed99a88021dcbc870d389d52b8a4dba3400fd2ded",
+      "candidate_sha256": "8b0a9d169cb095d36c8c0b8280e6f1282152994b8cf364fb9ff3858bce8a8930",
+      "baseline_fps": {
+        "mae": 0.69921875,
+        "max_channel_error": 17,
+        "pixels_over_tolerance_2": 179
+      },
+      "candidate_fps": {
+        "mae": 0.02587890625,
+        "max_channel_error": 1,
+        "pixels_over_tolerance_2": 0
+      }
+    },
+    {
+      "case": "replay-c0-d1-s3",
+      "frame": 2,
+      "original_sha256": "3bf2b0fdc6f9d7304a7fb91b7fe08944585ff113b1ffebcfb20d7713ce6beab3",
+      "baseline_sha256": "2d4a6f07119183e1a2a33e56515f108b1ed9a3ca5a229acb8f5a5c01ed219aac",
+      "candidate_sha256": "2d4a6f07119183e1a2a33e56515f108b1ed9a3ca5a229acb8f5a5c01ed219aac",
+      "baseline_fps": {
+        "mae": 0.018391927083333332,
+        "max_channel_error": 1,
+        "pixels_over_tolerance_2": 0
+      },
+      "candidate_fps": {
+        "mae": 0.018391927083333332,
+        "max_channel_error": 1,
+        "pixels_over_tolerance_2": 0
+      }
+    },
+    {
+      "case": "replay-c0-d1-s3",
+      "frame": 3,
+      "original_sha256": "1659f808cd87670d84783e7c081b47adbb5b9095116f46d52acbe572adc83026",
+      "baseline_sha256": "0b925708f0e84088ef57984cc35376adbb8816d4e4487cf3cb93d66e98e5eb81",
+      "candidate_sha256": "0b925708f0e84088ef57984cc35376adbb8816d4e4487cf3cb93d66e98e5eb81",
+      "baseline_fps": {
+        "mae": 0.018391927083333332,
+        "max_channel_error": 1,
+        "pixels_over_tolerance_2": 0
+      },
+      "candidate_fps": {
+        "mae": 0.018391927083333332,
+        "max_channel_error": 1,
+        "pixels_over_tolerance_2": 0
+      }
+    },
+    {
+      "case": "replay-c0-d1-s5",
+      "frame": 1,
+      "original_sha256": "c10ee25609ded61f075854999ece4d362f6d7e9c13faada39b94eb229777eb29",
+      "baseline_sha256": "4a703149b254d61e859f0e6536ed460a60992975017a7646c039199c2fac9e13",
+      "candidate_sha256": "08b0891e5fabd411a60724f40368d521800a9a79aea1930006c23c2aa35ba326",
+      "baseline_fps": {
+        "mae": 0.69921875,
+        "max_channel_error": 17,
+        "pixels_over_tolerance_2": 179
+      },
+      "candidate_fps": {
+        "mae": 0.02587890625,
+        "max_channel_error": 1,
+        "pixels_over_tolerance_2": 0
+      }
+    },
+    {
+      "case": "replay-c0-d1-s5",
+      "frame": 2,
+      "original_sha256": "2ea6223df431f9b5f071320d5df73735236dc08b23b85d97abd3964c87dfe49c",
+      "baseline_sha256": "e5ac44242dd4b372359bfb71166bea49dc359d8faa47771094874b78317ccb93",
+      "candidate_sha256": "e5ac44242dd4b372359bfb71166bea49dc359d8faa47771094874b78317ccb93",
+      "baseline_fps": {
+        "mae": 0.018391927083333332,
+        "max_channel_error": 1,
+        "pixels_over_tolerance_2": 0
+      },
+      "candidate_fps": {
+        "mae": 0.018391927083333332,
+        "max_channel_error": 1,
+        "pixels_over_tolerance_2": 0
+      }
+    },
+    {
+      "case": "replay-c0-d1-s5",
+      "frame": 3,
+      "original_sha256": "de7d9ccd5aef089ae38649e940f592c8d35eb9e0b0d626a882a8eb15d0bdc09b",
+      "baseline_sha256": "924fddae4d070ed447c7b83e2ec61688fe2185b678924a78f32e14e9908c3e68",
+      "candidate_sha256": "924fddae4d070ed447c7b83e2ec61688fe2185b678924a78f32e14e9908c3e68",
+      "baseline_fps": {
+        "mae": 0.018391927083333332,
+        "max_channel_error": 1,
+        "pixels_over_tolerance_2": 0
+      },
+      "candidate_fps": {
+        "mae": 0.018391927083333332,
+        "max_channel_error": 1,
+        "pixels_over_tolerance_2": 0
+      }
+    }
+  ],
+  "passed": true,
+  "checkpoint_rows_match_baseline": true,
+  "base_commit": "bb2489e76c9763fdb1f7537d5a0358ecdb0709ee",
+  "fix": {
+    "file": "crates/game/src/lib.rs",
+    "behavior": "When pending_replay_start is set, retain the preceding menu framebuffer and draw only the global FPS overlay until Supervisor registers the stage. The earlier path repainted the Replay background, erasing the first glyph blend.",
+    "source_evidence": [
+      "th06-decomp/src/main.cpp:234-263 (conditional color clear, draw before calculation)",
+      "th06-decomp/src/MainMenu.cpp:1453-1511 (confirm sets Supervisor state and returns removal)",
+      "th06-decomp/src/ChainPriorities.hpp:34-35 (Supervisor draw14, Ascii strings15)",
+      "th06-decomp/src/AsciiManager.cpp:50-53 (draw queued strings and reset)"
+    ]
+  },
+  "validation": {
+    "cargo_build_release": "passed",
+    "cargo_fmt_check": "passed",
+    "cargo_test_th06_release": {
+      "passed": 130,
+      "failed": 0,
+      "ignored": 17
+    },
+    "fresh_native_cases": 2,
+    "fresh_native_checkpoints": 6,
+    "later_frames_2_and_3_byte_identical_to_baseline": true,
+    "public_deployment": "not performed"
+  },
+  "git_diff_sha256": "f10a92b4dd363dd770ea78132d118a4d5733d00ebcde80a05750194afd25f2d7"
+}

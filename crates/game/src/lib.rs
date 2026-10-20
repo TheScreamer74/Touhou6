@@ -1792,7 +1792,13 @@ impl Game {
                 quit: false,
             };
         }
-        let (cmds, bg) = if matches!(self.scene, Scene::Selection) {
+        let (cmds, bg) = if self.pending_replay_start.is_some() {
+            // MainMenu removes its draw callback when Play is confirmed.
+            // Supervisor registers the stage in the following calculation,
+            // so this draw preserves the menu buffer and only adds the global
+            // FPS text below. Redrawing Replay here erased its previous glyphs.
+            (Vec::new(), None)
+        } else if matches!(self.scene, Scene::Selection) {
             let character = self.selection.character * 2 + self.selection.shot;
             let difficulty = self.selection.difficulty.min(3);
             let count = self.practice_stages(character, difficulty);
