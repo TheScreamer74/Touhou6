@@ -8,6 +8,8 @@ use crate::ecl_vm::{Bullet, Laser, normalize_angle, player_angle_from, sincos_mu
 use th06_formats::anm0::Entry;
 
 pub const SPAWN_COLORS_16: [u32; 16] = [0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 4, 4, 4, 0];
+/// BulletManager.hpp BulletColor: gray is0, white is15.
+pub const BULLET_WHITE: i32 = 15;
 const SPAWN_COLORS_8: [u32; 8] = [0, 1, 1, 2, 2, 3, 4, 0];
 
 #[derive(Clone)]

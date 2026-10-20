@@ -1973,7 +1973,7 @@ impl Enemy {
                     if b.despawn_timer > 0 {
                         continue;
                     }
-                    b.set_normal_color(0);
+                    b.set_normal_color(crate::projectiles::BULLET_WHITE);
                     match param {
                         0 => {
                             b.speed = 0.0;
@@ -3925,8 +3925,8 @@ mod tests {
         let rng = world.rng;
         let mut enemy = Enemy::default();
         enemy.exec_ex(0, 0, &mut world);
-        assert_eq!(world.bullets[0].sprite_offset, 0);
-        assert_eq!(world.bullets[0].sprite, world.bullets[0].base_sprite);
+        assert_eq!(world.bullets[0].sprite_offset, 15);
+        assert_eq!(world.bullets[0].sprite, world.bullets[0].base_sprite + 15);
         assert_eq!(world.bullets[0].velocity, [0.0; 2]);
         assert_eq!(
             (world.bullets[1].speed, world.bullets[1].sprite),
