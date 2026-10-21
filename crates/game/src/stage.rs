@@ -4711,8 +4711,16 @@ impl Stage {
             }
             if let Some(asset) = &self.spell_background
                 && let Some(runner) = &self.spell_background_runner
-                && let Some(command) = screen_asset_cmd(asset, runner)
+                && let Some(mut command) = screen_asset_cmd(asset, runner)
             {
+                // Every eff0*.anm script0 places this RHW VM at Z=.5.
+                // Stage_OnDrawLowPrio still has the background viewport's
+                // .5..1 depth range here; Wine maps RHW Z into that range too.
+                command.depth = Some(DepthState {
+                    z: 0.75,
+                    test: DepthTest::LessEqual,
+                    write: !runner.z_write_disable,
+                });
                 cmds.push(command);
             }
         }
