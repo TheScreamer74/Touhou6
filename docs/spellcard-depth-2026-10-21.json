@@ -1,0 +1,1643 @@
+{
+  "ticket": {
+    "number": 14,
+    "id": "95fc51c4af8a3fb8124a754eebb93f16"
+  },
+  "code_commit": "d4489f3abd524a0f53aebd9ae7c5e4414112643b",
+  "branch": "codex/marisab-spell-depth-20261021",
+  "source_parent_commit": "fa62f5b614934214482bb1919df75754c8c14fdb",
+  "baseline_binary_sha256": "eda900feb00204f2b83242ee40d9b85945594d2bd8e2508e291b2596855f9444",
+  "candidate_binary_sha256": "710c085b34d40c98c0fb84a984cb491bfd877c52296da29beadf86c9e7fd7b9a",
+  "runtime_source_sha256": "33db0ab06e845fb1e7c39aa2962e5d84dbe34d3f541a2166a1815faab3205f12",
+  "diagnosis": {
+    "cause": "Spellcard RHW background discarded its depth state. On the Wine11 reference its Z=.5 is mapped through the still-active background viewport range [.5,1] to effective depth .75. Ignoring the test paints over nearer stage geometry in the bottom band.",
+    "fix": "Set only the spellcard background DrawCmd to depth .75, LessEqual, write=!runner.z_write_disable. Loading/other screen_asset_cmd users retain their prior state.",
+    "original_executable_sha256": "7f38496b31b8625196900a69cd1bfed243cab1f9612073e7881dc354b876fd39",
+    "original_readonly_v4_proxy_sha256": "2e3cdc6e77d91cd5143cb79a75ae7fdc1ced07d68e1f19e104f54408b80c4aa0",
+    "original_readonly_v4_proxy_source_sha256": "506fb3043a9c87d4fd1627d44ce1a9105c3c924f23f28644185d576ae80556b6",
+    "original_readonly_v4_trace_sha256": "f98bfc7dacff4ddc91c546403a881b8066755c66dce7d52fb4954a87deec6dab",
+    "original_readonly_v4_exit_code": 0,
+    "original_readonly_v4_captures_match_prior": true,
+    "background_depth_states": {
+      "([32, 16, 384, 448, 0.5, 1], 4, 1, 1, 80)": 16
+    },
+    "clear_observations": [
+      {
+        "event": "clear",
+        "frame": 8998,
+        "caller": 4307062,
+        "flags": 2,
+        "count": 0,
+        "z": 1,
+        "viewport": [
+          32,
+          16,
+          384,
+          448,
+          0.5,
+          1
+        ],
+        "rects": []
+      },
+      {
+        "event": "clear",
+        "frame": 8999,
+        "caller": 4307062,
+        "flags": 2,
+        "count": 0,
+        "z": 1,
+        "viewport": [
+          32,
+          16,
+          384,
+          448,
+          0.5,
+          1
+        ],
+        "rects": []
+      },
+      {
+        "event": "clear",
+        "frame": 9000,
+        "caller": 4307062,
+        "flags": 2,
+        "count": 0,
+        "z": 1,
+        "viewport": [
+          32,
+          16,
+          384,
+          448,
+          0.5,
+          1
+        ],
+        "rects": []
+      },
+      {
+        "event": "clear",
+        "frame": 9001,
+        "caller": 4307062,
+        "flags": 2,
+        "count": 0,
+        "z": 1,
+        "viewport": [
+          32,
+          16,
+          384,
+          448,
+          0.5,
+          1
+        ],
+        "rects": []
+      },
+      {
+        "event": "clear",
+        "frame": 9002,
+        "caller": 4307062,
+        "flags": 2,
+        "count": 0,
+        "z": 1,
+        "viewport": [
+          32,
+          16,
+          384,
+          448,
+          0.5,
+          1
+        ],
+        "rects": []
+      },
+      {
+        "event": "clear",
+        "frame": 9003,
+        "caller": 4307062,
+        "flags": 2,
+        "count": 0,
+        "z": 1,
+        "viewport": [
+          32,
+          16,
+          384,
+          448,
+          0.5,
+          1
+        ],
+        "rects": []
+      }
+    ],
+    "spell_asset_script0_positions": [
+      {
+        "name": "eff03.anm",
+        "positions": [
+          {
+            "op": 17,
+            "time": 0,
+            "z": 0.5
+          }
+        ]
+      },
+      {
+        "name": "eff07.anm",
+        "positions": [
+          {
+            "op": 17,
+            "time": 0,
+            "z": 0.5
+          }
+        ]
+      },
+      {
+        "name": "eff06.anm",
+        "positions": [
+          {
+            "op": 17,
+            "time": 0,
+            "z": 0.5
+          }
+        ]
+      },
+      {
+        "name": "eff05.anm",
+        "positions": [
+          {
+            "op": 17,
+            "time": 0,
+            "z": 0.5
+          }
+        ]
+      },
+      {
+        "name": "eff01.anm",
+        "positions": [
+          {
+            "op": 17,
+            "time": 0,
+            "z": 0.5
+          }
+        ]
+      },
+      {
+        "name": "eff02.anm",
+        "positions": [
+          {
+            "op": 17,
+            "time": 0,
+            "z": 0.5
+          }
+        ]
+      },
+      {
+        "name": "eff04.anm",
+        "positions": [
+          {
+            "op": 17,
+            "time": 0,
+            "z": 0.5
+          }
+        ]
+      }
+    ],
+    "negative_experiment": "Native depth=.5 with LEQUAL preserved all3 target PNGs byte-for-byte; reverted, never pushed or deployed.",
+    "controlled_original_intervention": "One spellcard draw with ZFUNC=ALWAYS removes the original band:18048 changed pixels only in[32,417,384,47]. This intervention is not an equivalence reference.",
+    "earlier_partial_receipt_sha256": "9cecd84c1c10445084f8408da20d05563257bc07f51f942f827264a5ceee38e3"
+  },
+  "target_band_metrics": [
+    {
+      "frame": 9000,
+      "band_mae_before": 19.05374710648148,
+      "band_mae_after": 0.1481300636574074,
+      "changed_pixels": 18048,
+      "changed_bbox_xywh": [
+        32,
+        417,
+        384,
+        47
+      ],
+      "outside_band_changed": 0
+    },
+    {
+      "frame": 9001,
+      "band_mae_before": 18.35550491898148,
+      "band_mae_after": 0.1376048900462963,
+      "changed_pixels": 18048,
+      "changed_bbox_xywh": [
+        32,
+        417,
+        384,
+        47
+      ],
+      "outside_band_changed": 0
+    },
+    {
+      "frame": 9002,
+      "band_mae_before": 17.752079716435187,
+      "band_mae_after": 0.1336082175925926,
+      "changed_pixels": 18047,
+      "changed_bbox_xywh": [
+        32,
+        417,
+        384,
+        47
+      ],
+      "outside_band_changed": 0
+    }
+  ],
+  "cases": [
+    {
+      "case": "replay-c3-d1-s2",
+      "target": true,
+      "binary_sha256": "710c085b34d40c98c0fb84a984cb491bfd877c52296da29beadf86c9e7fd7b9a",
+      "scalar_differences": [],
+      "checkpoints": [
+        {
+          "frame": 9000,
+          "image": "replay_stage02_frame009000.png",
+          "baseline_sha256": "bcdb777ba70d7ce5b6ea29763688d324a1a78870b12a52442e2a40a837e391f0",
+          "candidate_sha256": "b33bb2693d4e6564d525ba0556dc1bf4678ad9a425ba67b2fecbf1d7d4240201",
+          "byte_identical": false,
+          "regions": {
+            "full_frame": {
+              "rectangle_xywh": [
+                0,
+                0,
+                640,
+                480
+              ],
+              "pixels": 307200,
+              "mean_absolute_channel_error": 0.7316796875,
+              "root_mean_square_channel_error": 7.810240228735321,
+              "maximum_channel_error": 239,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 1.0,
+                "p99": 2.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.36810872395833333,
+                "2": 0.0096484375,
+                "8": 0.008583984375,
+                "16": 0.007838541666666667,
+                "32": 0.006617838541666666
+              },
+              "within_explicit_tolerance": true
+            },
+            "playfield": {
+              "rectangle_xywh": [
+                32,
+                16,
+                384,
+                448
+              ],
+              "pixels": 172032,
+              "mean_absolute_channel_error": 1.2728407118055556,
+              "root_mean_square_channel_error": 10.435235495663257,
+              "maximum_channel_error": 239,
+              "pixel_max_error_percentiles": {
+                "p50": 1.0,
+                "p95": 1.0,
+                "p99": 46.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.5924014136904762,
+                "2": 0.01722353980654762,
+                "8": 0.015328543526785714,
+                "16": 0.013997395833333334,
+                "32": 0.011817568824404762
+              },
+              "within_explicit_tolerance": false
+            },
+            "hud": {
+              "rectangle_xywh": [
+                416,
+                0,
+                224,
+                480
+              ],
+              "pixels": 107520,
+              "mean_absolute_channel_error": 0.05396825396825397,
+              "root_mean_square_channel_error": 0.23381381227276504,
+              "maximum_channel_error": 3,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.1038969494047619,
+                "2": 9.300595238095239e-06,
+                "8": 0.0,
+                "16": 0.0,
+                "32": 0.0
+              },
+              "within_explicit_tolerance": true
+            },
+            "fps": {
+              "rectangle_xywh": [
+                512,
+                464,
+                128,
+                16
+              ],
+              "pixels": 2048,
+              "mean_absolute_channel_error": 0.018391927083333332,
+              "root_mean_square_channel_error": 0.1356168392322035,
+              "maximum_channel_error": 1,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 0.0,
+                "p99": 1.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.03369140625,
+                "2": 0.0,
+                "8": 0.0,
+                "16": 0.0,
+                "32": 0.0
+              },
+              "within_explicit_tolerance": true
+            }
+          },
+          "original_sha256": "8f6bfd54c52ff56dd2acc9a81f3e1d8af57a2dc8a5b3cf89eee77d7744e501af"
+        },
+        {
+          "frame": 9001,
+          "image": "replay_stage02_frame009001.png",
+          "baseline_sha256": "2184a529e572e5cc1874a584439e1d22343ae90549a2f0697a7cf6de40f5c8ad",
+          "candidate_sha256": "11042f6a9e6abb5bdfebfb1a89860948af63c82b2b4e327a6def686425ab6bd7",
+          "byte_identical": false,
+          "regions": {
+            "full_frame": {
+              "rectangle_xywh": [
+                0,
+                0,
+                640,
+                480
+              ],
+              "pixels": 307200,
+              "mean_absolute_channel_error": 0.7328765190972222,
+              "root_mean_square_channel_error": 7.779391999838598,
+              "maximum_channel_error": 239,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 1.0,
+                "p99": 2.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.3774283854166667,
+                "2": 0.009694010416666666,
+                "8": 0.008522135416666667,
+                "16": 0.007760416666666666,
+                "32": 0.006546223958333333
+              },
+              "within_explicit_tolerance": true
+            },
+            "playfield": {
+              "rectangle_xywh": [
+                32,
+                16,
+                384,
+                448
+              ],
+              "pixels": 172032,
+              "mean_absolute_channel_error": 1.2749740358382937,
+              "root_mean_square_channel_error": 10.394006136989185,
+              "maximum_channel_error": 239,
+              "pixel_max_error_percentiles": {
+                "p50": 1.0,
+                "p95": 1.0,
+                "p99": 45.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.6089971633184523,
+                "2": 0.017304920014880952,
+                "8": 0.015218098958333334,
+                "16": 0.013857886904761904,
+                "32": 0.011689685639880952
+              },
+              "within_explicit_tolerance": false
+            },
+            "hud": {
+              "rectangle_xywh": [
+                416,
+                0,
+                224,
+                480
+              ],
+              "pixels": 107520,
+              "mean_absolute_channel_error": 0.05397445436507937,
+              "root_mean_square_channel_error": 0.2338270711580445,
+              "maximum_channel_error": 3,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.10397135416666667,
+                "2": 9.300595238095239e-06,
+                "8": 0.0,
+                "16": 0.0,
+                "32": 0.0
+              },
+              "within_explicit_tolerance": true
+            },
+            "fps": {
+              "rectangle_xywh": [
+                512,
+                464,
+                128,
+                16
+              ],
+              "pixels": 2048,
+              "mean_absolute_channel_error": 0.018391927083333332,
+              "root_mean_square_channel_error": 0.1356168392322035,
+              "maximum_channel_error": 1,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 0.0,
+                "p99": 1.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.03369140625,
+                "2": 0.0,
+                "8": 0.0,
+                "16": 0.0,
+                "32": 0.0
+              },
+              "within_explicit_tolerance": true
+            }
+          },
+          "original_sha256": "824146385391d30ceec1b69e45b1406000817f54f896757ee2cfa801891f07ef"
+        },
+        {
+          "frame": 9002,
+          "image": "replay_stage02_frame009002.png",
+          "baseline_sha256": "dc32bc3af5681a6ff779968369eeec723bc6818ca2bb1d5ee497bed1ed840933",
+          "candidate_sha256": "d7ec63788acb47322bc0b4af65936e8c4b08af7161ca2584214a3fcf4cdb56d6",
+          "byte_identical": false,
+          "regions": {
+            "full_frame": {
+              "rectangle_xywh": [
+                0,
+                0,
+                640,
+                480
+              ],
+              "pixels": 307200,
+              "mean_absolute_channel_error": 0.7334798177083334,
+              "root_mean_square_channel_error": 7.82825058116169,
+              "maximum_channel_error": 239,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 1.0,
+                "p99": 2.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.36617838541666664,
+                "2": 0.009798177083333333,
+                "8": 0.008626302083333334,
+                "16": 0.007828776041666667,
+                "32": 0.006634114583333333
+              },
+              "within_explicit_tolerance": true
+            },
+            "playfield": {
+              "rectangle_xywh": [
+                32,
+                16,
+                384,
+                448
+              ],
+              "pixels": 172032,
+              "mean_absolute_channel_error": 1.2760203528025793,
+              "root_mean_square_channel_error": 10.459304941024062,
+              "maximum_channel_error": 239,
+              "pixel_max_error_percentiles": {
+                "p50": 1.0,
+                "p95": 1.0,
+                "p99": 46.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.5888846261160714,
+                "2": 0.017490931919642856,
+                "8": 0.015404110863095238,
+                "16": 0.013979957217261904,
+                "32": 0.01184663318452381
+              },
+              "within_explicit_tolerance": false
+            },
+            "hud": {
+              "rectangle_xywh": [
+                416,
+                0,
+                224,
+                480
+              ],
+              "pixels": 107520,
+              "mean_absolute_channel_error": 0.05402405753968254,
+              "root_mean_square_channel_error": 0.23393311518669685,
+              "maximum_channel_error": 3,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.10400855654761905,
+                "2": 9.300595238095239e-06,
+                "8": 0.0,
+                "16": 0.0,
+                "32": 0.0
+              },
+              "within_explicit_tolerance": true
+            },
+            "fps": {
+              "rectangle_xywh": [
+                512,
+                464,
+                128,
+                16
+              ],
+              "pixels": 2048,
+              "mean_absolute_channel_error": 0.018391927083333332,
+              "root_mean_square_channel_error": 0.1356168392322035,
+              "maximum_channel_error": 1,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 0.0,
+                "p99": 1.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.03369140625,
+                "2": 0.0,
+                "8": 0.0,
+                "16": 0.0,
+                "32": 0.0
+              },
+              "within_explicit_tolerance": true
+            }
+          },
+          "original_sha256": "70eb20c7ddc887f353642ca8facf4569e9505d5a52a3884afe501cb3420f671f"
+        }
+      ],
+      "pools_byte_identical": true,
+      "audio_requests_byte_identical": true,
+      "audio_requests_rows": 7777,
+      "audio_requests_sha256": "12b56e0a369e6f9380d361e0a72b8e42fb0e36865c1fc31ea4454f006d21b65b",
+      "pools_sha256": "990e271f22de1e679f913570486c722e687e72f08ef82685a586746eb1df039b"
+    },
+    {
+      "case": "replay-c0-d1-s2",
+      "target": false,
+      "binary_sha256": "710c085b34d40c98c0fb84a984cb491bfd877c52296da29beadf86c9e7fd7b9a",
+      "scalar_differences": [],
+      "checkpoints": [
+        {
+          "frame": 9000,
+          "image": "replay_stage02_frame009000.png",
+          "baseline_sha256": "9dc23b4b261ccc410aea9785cf50d22fed3fd0867a0dab21489bb3a05a0a33d6",
+          "candidate_sha256": "9dc23b4b261ccc410aea9785cf50d22fed3fd0867a0dab21489bb3a05a0a33d6",
+          "byte_identical": true,
+          "regions": {
+            "full_frame": {
+              "rectangle_xywh": [
+                0,
+                0,
+                640,
+                480
+              ],
+              "pixels": 307200,
+              "mean_absolute_channel_error": 0.7767838541666666,
+              "root_mean_square_channel_error": 8.334024580705625,
+              "maximum_channel_error": 232,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 1.0,
+                "p99": 8.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.30626302083333334,
+                "2": 0.011048177083333333,
+                "8": 0.009967447916666667,
+                "16": 0.008938802083333334,
+                "32": 0.007486979166666667
+              },
+              "within_explicit_tolerance": false
+            },
+            "playfield": {
+              "rectangle_xywh": [
+                32,
+                16,
+                384,
+                448
+              ],
+              "pixels": 172032,
+              "mean_absolute_channel_error": 1.3533993675595237,
+              "root_mean_square_channel_error": 11.135275025269598,
+              "maximum_channel_error": 232,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 1.0,
+                "p99": 55.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.48193359375,
+                "2": 0.019723074776785716,
+                "8": 0.01779901413690476,
+                "16": 0.015962146577380952,
+                "32": 0.013369605654761904
+              },
+              "within_explicit_tolerance": false
+            },
+            "hud": {
+              "rectangle_xywh": [
+                416,
+                0,
+                224,
+                480
+              ],
+              "pixels": 107520,
+              "mean_absolute_channel_error": 0.053943452380952384,
+              "root_mean_square_channel_error": 0.2337872922463345,
+              "maximum_channel_error": 3,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.10394345238095239,
+                "2": 9.300595238095239e-06,
+                "8": 0.0,
+                "16": 0.0,
+                "32": 0.0
+              },
+              "within_explicit_tolerance": true
+            },
+            "fps": {
+              "rectangle_xywh": [
+                512,
+                464,
+                128,
+                16
+              ],
+              "pixels": 2048,
+              "mean_absolute_channel_error": 0.018391927083333332,
+              "root_mean_square_channel_error": 0.1356168392322035,
+              "maximum_channel_error": 1,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 0.0,
+                "p99": 1.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.03369140625,
+                "2": 0.0,
+                "8": 0.0,
+                "16": 0.0,
+                "32": 0.0
+              },
+              "within_explicit_tolerance": true
+            }
+          },
+          "original_sha256": "5e12441274fba86c9917340e343750f0279c954463f74e4380fd7123c9639323"
+        },
+        {
+          "frame": 9001,
+          "image": "replay_stage02_frame009001.png",
+          "baseline_sha256": "5c8d4c8c6855e2a2cc7933cb827f86b1caa92528380e58b4a363b3a957a92b08",
+          "candidate_sha256": "5c8d4c8c6855e2a2cc7933cb827f86b1caa92528380e58b4a363b3a957a92b08",
+          "byte_identical": true,
+          "regions": {
+            "full_frame": {
+              "rectangle_xywh": [
+                0,
+                0,
+                640,
+                480
+              ],
+              "pixels": 307200,
+              "mean_absolute_channel_error": 0.7737261284722222,
+              "root_mean_square_channel_error": 8.318341853874283,
+              "maximum_channel_error": 233,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 1.0,
+                "p99": 9.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.310087890625,
+                "2": 0.011236979166666666,
+                "8": 0.010065104166666667,
+                "16": 0.009069010416666667,
+                "32": 0.007571614583333333
+              },
+              "within_explicit_tolerance": false
+            },
+            "playfield": {
+              "rectangle_xywh": [
+                32,
+                16,
+                384,
+                448
+              ],
+              "pixels": 172032,
+              "mean_absolute_channel_error": 1.3473849826388888,
+              "root_mean_square_channel_error": 11.114290277912325,
+              "maximum_channel_error": 233,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 1.0,
+                "p99": 54.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.4882289341517857,
+                "2": 0.020060221354166668,
+                "8": 0.017973400297619048,
+                "16": 0.016194661458333332,
+                "32": 0.013520740327380952
+              },
+              "within_explicit_tolerance": false
+            },
+            "hud": {
+              "rectangle_xywh": [
+                416,
+                0,
+                224,
+                480
+              ],
+              "pixels": 107520,
+              "mean_absolute_channel_error": 0.054830109126984126,
+              "root_mean_square_channel_error": 0.2356759528715324,
+              "maximum_channel_error": 3,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.10479910714285715,
+                "2": 9.300595238095239e-06,
+                "8": 0.0,
+                "16": 0.0,
+                "32": 0.0
+              },
+              "within_explicit_tolerance": true
+            },
+            "fps": {
+              "rectangle_xywh": [
+                512,
+                464,
+                128,
+                16
+              ],
+              "pixels": 2048,
+              "mean_absolute_channel_error": 0.018391927083333332,
+              "root_mean_square_channel_error": 0.1356168392322035,
+              "maximum_channel_error": 1,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 0.0,
+                "p99": 1.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.03369140625,
+                "2": 0.0,
+                "8": 0.0,
+                "16": 0.0,
+                "32": 0.0
+              },
+              "within_explicit_tolerance": true
+            }
+          },
+          "original_sha256": "bc72c03c43b4d545e8e3855ba8a75d1b5c438fabb60c8ec0250518a836925470"
+        },
+        {
+          "frame": 9002,
+          "image": "replay_stage02_frame009002.png",
+          "baseline_sha256": "152435f2ec6407feb001d90776f1a88b3bdede85ebe3871c2e5f74de715c0b29",
+          "candidate_sha256": "152435f2ec6407feb001d90776f1a88b3bdede85ebe3871c2e5f74de715c0b29",
+          "byte_identical": true,
+          "regions": {
+            "full_frame": {
+              "rectangle_xywh": [
+                0,
+                0,
+                640,
+                480
+              ],
+              "pixels": 307200,
+              "mean_absolute_channel_error": 0.7797688802083333,
+              "root_mean_square_channel_error": 8.320988577774779,
+              "maximum_channel_error": 238,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 1.0,
+                "p99": 11.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.3056770833333333,
+                "2": 0.011852213541666667,
+                "8": 0.010218098958333333,
+                "16": 0.009248046875,
+                "32": 0.007698567708333334
+              },
+              "within_explicit_tolerance": false
+            },
+            "playfield": {
+              "rectangle_xywh": [
+                32,
+                16,
+                384,
+                448
+              ],
+              "pixels": 172032,
+              "mean_absolute_channel_error": 1.3587413969494047,
+              "root_mean_square_channel_error": 11.117853053243547,
+              "maximum_channel_error": 238,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 1.0,
+                "p99": 56.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.4808989025297619,
+                "2": 0.021158854166666668,
+                "8": 0.018246605282738096,
+                "16": 0.016514369419642856,
+                "32": 0.013747442336309524
+              },
+              "within_explicit_tolerance": false
+            },
+            "hud": {
+              "rectangle_xywh": [
+                416,
+                0,
+                224,
+                480
+              ],
+              "pixels": 107520,
+              "mean_absolute_channel_error": 0.05392485119047619,
+              "root_mean_square_channel_error": 0.23374750656509008,
+              "maximum_channel_error": 3,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.10392485119047619,
+                "2": 9.300595238095239e-06,
+                "8": 0.0,
+                "16": 0.0,
+                "32": 0.0
+              },
+              "within_explicit_tolerance": true
+            },
+            "fps": {
+              "rectangle_xywh": [
+                512,
+                464,
+                128,
+                16
+              ],
+              "pixels": 2048,
+              "mean_absolute_channel_error": 0.018391927083333332,
+              "root_mean_square_channel_error": 0.1356168392322035,
+              "maximum_channel_error": 1,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 0.0,
+                "p99": 1.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.03369140625,
+                "2": 0.0,
+                "8": 0.0,
+                "16": 0.0,
+                "32": 0.0
+              },
+              "within_explicit_tolerance": true
+            }
+          },
+          "original_sha256": "b46cd6f5686f29efcff6152997395210283114a553ab8a3fa4bcc15f0a1578f5"
+        }
+      ],
+      "pools_byte_identical": true,
+      "audio_requests_byte_identical": true,
+      "audio_requests_rows": 8626,
+      "audio_requests_sha256": "d65d913a246cf62cf28c944e80773e6b1b0a5c28fdd8d06c3722d2762759872b",
+      "pools_sha256": "3e02483aa91d36d86d6018e9a62c92725c99f10323549ac751141c5c4fb0c797"
+    },
+    {
+      "case": "replay-c0-d2-s3",
+      "target": false,
+      "binary_sha256": "710c085b34d40c98c0fb84a984cb491bfd877c52296da29beadf86c9e7fd7b9a",
+      "scalar_differences": [],
+      "checkpoints": [
+        {
+          "frame": 14400,
+          "image": "replay_stage03_frame014400.png",
+          "baseline_sha256": "4ea5b2f6f4dd8365787df21e271a42a6429a92b6f5fc60510974c9860a099fe2",
+          "candidate_sha256": "4ea5b2f6f4dd8365787df21e271a42a6429a92b6f5fc60510974c9860a099fe2",
+          "byte_identical": true,
+          "regions": {
+            "full_frame": {
+              "rectangle_xywh": [
+                0,
+                0,
+                640,
+                480
+              ],
+              "pixels": 307200,
+              "mean_absolute_channel_error": 0.6683474392361111,
+              "root_mean_square_channel_error": 6.8611600752442,
+              "maximum_channel_error": 237,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 1.0,
+                "p99": 2.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.465556640625,
+                "2": 0.008522135416666667,
+                "8": 0.0067708333333333336,
+                "16": 0.005989583333333334,
+                "32": 0.004873046875
+              },
+              "within_explicit_tolerance": true
+            },
+            "playfield": {
+              "rectangle_xywh": [
+                32,
+                16,
+                384,
+                448
+              ],
+              "pixels": 172032,
+              "mean_absolute_channel_error": 1.1597125341021826,
+              "root_mean_square_channel_error": 9.166745404322283,
+              "maximum_channel_error": 237,
+              "pixel_max_error_percentiles": {
+                "p50": 1.0,
+                "p95": 2.0,
+                "p99": 21.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.7662469773065477,
+                "2": 0.015212286086309524,
+                "8": 0.01209077380952381,
+                "16": 0.010695684523809524,
+                "32": 0.008701869419642858
+              },
+              "within_explicit_tolerance": false
+            },
+            "hud": {
+              "rectangle_xywh": [
+                416,
+                0,
+                224,
+                480
+              ],
+              "pixels": 107520,
+              "mean_absolute_channel_error": 0.05402405753968254,
+              "root_mean_square_channel_error": 0.23393311518669685,
+              "maximum_channel_error": 3,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.10416666666666667,
+                "2": 9.300595238095239e-06,
+                "8": 0.0,
+                "16": 0.0,
+                "32": 0.0
+              },
+              "within_explicit_tolerance": true
+            },
+            "fps": {
+              "rectangle_xywh": [
+                512,
+                464,
+                128,
+                16
+              ],
+              "pixels": 2048,
+              "mean_absolute_channel_error": 0.018391927083333332,
+              "root_mean_square_channel_error": 0.1356168392322035,
+              "maximum_channel_error": 1,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 0.0,
+                "p99": 1.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.03369140625,
+                "2": 0.0,
+                "8": 0.0,
+                "16": 0.0,
+                "32": 0.0
+              },
+              "within_explicit_tolerance": true
+            }
+          },
+          "original_sha256": "df911fdb6983514129926e7b4b18ff35331ffe8feb19cf48ac1d4d95f4c71e8f"
+        },
+        {
+          "frame": 14401,
+          "image": "replay_stage03_frame014401.png",
+          "baseline_sha256": "b3c22504150d33972d35a44936f5f95318b597ada64dd3e9a4f693a2411d0889",
+          "candidate_sha256": "b3c22504150d33972d35a44936f5f95318b597ada64dd3e9a4f693a2411d0889",
+          "byte_identical": true,
+          "regions": {
+            "full_frame": {
+              "rectangle_xywh": [
+                0,
+                0,
+                640,
+                480
+              ],
+              "pixels": 307200,
+              "mean_absolute_channel_error": 0.6638259548611111,
+              "root_mean_square_channel_error": 6.839877138577369,
+              "maximum_channel_error": 237,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 1.0,
+                "p99": 2.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.46489908854166667,
+                "2": 0.008011067708333333,
+                "8": 0.0064095052083333335,
+                "16": 0.0057161458333333335,
+                "32": 0.004674479166666667
+              },
+              "within_explicit_tolerance": true
+            },
+            "playfield": {
+              "rectangle_xywh": [
+                32,
+                16,
+                384,
+                448
+              ],
+              "pixels": 172032,
+              "mean_absolute_channel_error": 1.151549324156746,
+              "root_mean_square_channel_error": 9.138294201542129,
+              "maximum_channel_error": 237,
+              "pixel_max_error_percentiles": {
+                "p50": 1.0,
+                "p95": 2.0,
+                "p99": 17.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.7650262741815477,
+                "2": 0.014299665178571428,
+                "8": 0.011445545014880952,
+                "16": 0.010207403273809524,
+                "32": 0.008347284226190476
+              },
+              "within_explicit_tolerance": false
+            },
+            "hud": {
+              "rectangle_xywh": [
+                416,
+                0,
+                224,
+                480
+              ],
+              "pixels": 107520,
+              "mean_absolute_channel_error": 0.05416666666666667,
+              "root_mean_square_channel_error": 0.2342377243484416,
+              "maximum_channel_error": 3,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.10424107142857143,
+                "2": 9.300595238095239e-06,
+                "8": 0.0,
+                "16": 0.0,
+                "32": 0.0
+              },
+              "within_explicit_tolerance": true
+            },
+            "fps": {
+              "rectangle_xywh": [
+                512,
+                464,
+                128,
+                16
+              ],
+              "pixels": 2048,
+              "mean_absolute_channel_error": 0.018391927083333332,
+              "root_mean_square_channel_error": 0.1356168392322035,
+              "maximum_channel_error": 1,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 0.0,
+                "p99": 1.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.03369140625,
+                "2": 0.0,
+                "8": 0.0,
+                "16": 0.0,
+                "32": 0.0
+              },
+              "within_explicit_tolerance": true
+            }
+          },
+          "original_sha256": "147b9fc8744e187902d4545d7f8569182f074c79f9470beab80e6d65cc9b0d32"
+        },
+        {
+          "frame": 14402,
+          "image": "replay_stage03_frame014402.png",
+          "baseline_sha256": "dcf7262c3ba9ddf76fdecf61c213f40b730aeb2b8c2c38673931da2d9e6bf3ff",
+          "candidate_sha256": "dcf7262c3ba9ddf76fdecf61c213f40b730aeb2b8c2c38673931da2d9e6bf3ff",
+          "byte_identical": true,
+          "regions": {
+            "full_frame": {
+              "rectangle_xywh": [
+                0,
+                0,
+                640,
+                480
+              ],
+              "pixels": 307200,
+              "mean_absolute_channel_error": 0.6522276475694444,
+              "root_mean_square_channel_error": 6.741035794673505,
+              "maximum_channel_error": 237,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 1.0,
+                "p99": 2.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.4659928385416667,
+                "2": 0.007864583333333333,
+                "8": 0.0062109375,
+                "16": 0.0055078125,
+                "32": 0.0044954427083333335
+              },
+              "within_explicit_tolerance": true
+            },
+            "playfield": {
+              "rectangle_xywh": [
+                32,
+                16,
+                384,
+                448
+              ],
+              "pixels": 172032,
+              "mean_absolute_channel_error": 1.1305280412946428,
+              "root_mean_square_channel_error": 9.006167174193408,
+              "maximum_channel_error": 237,
+              "pixel_max_error_percentiles": {
+                "p50": 1.0,
+                "p95": 2.0,
+                "p99": 16.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.7666538783482143,
+                "2": 0.0140380859375,
+                "8": 0.011090959821428572,
+                "16": 0.009835379464285714,
+                "32": 0.008027576264880952
+              },
+              "within_explicit_tolerance": false
+            },
+            "hud": {
+              "rectangle_xywh": [
+                416,
+                0,
+                224,
+                480
+              ],
+              "pixels": 107520,
+              "mean_absolute_channel_error": 0.05466269841269841,
+              "root_mean_square_channel_error": 0.23529416323820754,
+              "maximum_channel_error": 3,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.10476190476190476,
+                "2": 9.300595238095239e-06,
+                "8": 0.0,
+                "16": 0.0,
+                "32": 0.0
+              },
+              "within_explicit_tolerance": true
+            },
+            "fps": {
+              "rectangle_xywh": [
+                512,
+                464,
+                128,
+                16
+              ],
+              "pixels": 2048,
+              "mean_absolute_channel_error": 0.018391927083333332,
+              "root_mean_square_channel_error": 0.1356168392322035,
+              "maximum_channel_error": 1,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 0.0,
+                "p99": 1.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.03369140625,
+                "2": 0.0,
+                "8": 0.0,
+                "16": 0.0,
+                "32": 0.0
+              },
+              "within_explicit_tolerance": true
+            }
+          },
+          "original_sha256": "0e5eace18c5f5b26a8bd50f18feefc13ba32584e13c147717cf68d658aa87089"
+        }
+      ],
+      "pools_byte_identical": true,
+      "audio_requests_byte_identical": true,
+      "audio_requests_rows": 17826,
+      "audio_requests_sha256": "4e0767c0c3f6712074ad16d8ca16bf6c08bc534971fccdd42f913c195c01b3e1",
+      "pools_sha256": "e3b5fcb345832bd66ce41e207e0316f2c00b74cec1090c49876c9eb5fcf89a7c"
+    },
+    {
+      "case": "replay-c1-d2-s5",
+      "target": false,
+      "binary_sha256": "710c085b34d40c98c0fb84a984cb491bfd877c52296da29beadf86c9e7fd7b9a",
+      "scalar_differences": [],
+      "checkpoints": [
+        {
+          "frame": 14400,
+          "image": "replay_stage05_frame014400.png",
+          "baseline_sha256": "8e2dd42975497008c7537b54353bd0de1e3af002de6138f61faf48702b3c5cb2",
+          "candidate_sha256": "8e2dd42975497008c7537b54353bd0de1e3af002de6138f61faf48702b3c5cb2",
+          "byte_identical": true,
+          "regions": {
+            "full_frame": {
+              "rectangle_xywh": [
+                0,
+                0,
+                640,
+                480
+              ],
+              "pixels": 307200,
+              "mean_absolute_channel_error": 0.5384103732638889,
+              "root_mean_square_channel_error": 5.540996297955661,
+              "maximum_channel_error": 244,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 2.0,
+                "p99": 3.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.44490234375,
+                "2": 0.013824869791666666,
+                "8": 0.004632161458333333,
+                "16": 0.004016927083333333,
+                "32": 0.0032747395833333335
+              },
+              "within_explicit_tolerance": false
+            },
+            "playfield": {
+              "rectangle_xywh": [
+                32,
+                16,
+                384,
+                448
+              ],
+              "pixels": 172032,
+              "mean_absolute_channel_error": 0.927796378968254,
+              "root_mean_square_channel_error": 7.402165506895145,
+              "maximum_channel_error": 244,
+              "pixel_max_error_percentiles": {
+                "p50": 1.0,
+                "p95": 2.0,
+                "p99": 4.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.7295619419642857,
+                "2": 0.02468145461309524,
+                "8": 0.008271716889880952,
+                "16": 0.007173084077380952,
+                "32": 0.005847749255952381
+              },
+              "within_explicit_tolerance": false
+            },
+            "hud": {
+              "rectangle_xywh": [
+                416,
+                0,
+                224,
+                480
+              ],
+              "pixels": 107520,
+              "mean_absolute_channel_error": 0.05384114583333333,
+              "root_mean_square_channel_error": 0.23354183923786156,
+              "maximum_channel_error": 3,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.10385044642857143,
+                "2": 9.300595238095239e-06,
+                "8": 0.0,
+                "16": 0.0,
+                "32": 0.0
+              },
+              "within_explicit_tolerance": true
+            },
+            "fps": {
+              "rectangle_xywh": [
+                512,
+                464,
+                128,
+                16
+              ],
+              "pixels": 2048,
+              "mean_absolute_channel_error": 0.018391927083333332,
+              "root_mean_square_channel_error": 0.1356168392322035,
+              "maximum_channel_error": 1,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 0.0,
+                "p99": 1.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.03369140625,
+                "2": 0.0,
+                "8": 0.0,
+                "16": 0.0,
+                "32": 0.0
+              },
+              "within_explicit_tolerance": true
+            }
+          },
+          "original_sha256": "383ce343db13a172675e0c686560587db3937f0eceff95b464f15ced956cf2c7"
+        },
+        {
+          "frame": 14401,
+          "image": "replay_stage05_frame014401.png",
+          "baseline_sha256": "4e5bcfc72b5c726aadc5fa0a0f1d7b3192fe73e2292fb507b63479d6d70bca55",
+          "candidate_sha256": "4e5bcfc72b5c726aadc5fa0a0f1d7b3192fe73e2292fb507b63479d6d70bca55",
+          "byte_identical": true,
+          "regions": {
+            "full_frame": {
+              "rectangle_xywh": [
+                0,
+                0,
+                640,
+                480
+              ],
+              "pixels": 307200,
+              "mean_absolute_channel_error": 0.5361273871527777,
+              "root_mean_square_channel_error": 5.558663334313035,
+              "maximum_channel_error": 247,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 2.0,
+                "p99": 3.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.4430013020833333,
+                "2": 0.013154296875,
+                "8": 0.004440104166666667,
+                "16": 0.003912760416666667,
+                "32": 0.0032975260416666665
+              },
+              "within_explicit_tolerance": false
+            },
+            "playfield": {
+              "rectangle_xywh": [
+                32,
+                16,
+                384,
+                448
+              ],
+              "pixels": 172032,
+              "mean_absolute_channel_error": 0.9237196180555556,
+              "root_mean_square_channel_error": 7.425781396774252,
+              "maximum_channel_error": 247,
+              "pixel_max_error_percentiles": {
+                "p50": 1.0,
+                "p95": 2.0,
+                "p99": 4.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.7261672247023809,
+                "2": 0.023484002976190476,
+                "8": 0.00792875744047619,
+                "16": 0.006987072172619048,
+                "32": 0.005888439360119048
+              },
+              "within_explicit_tolerance": false
+            },
+            "hud": {
+              "rectangle_xywh": [
+                416,
+                0,
+                224,
+                480
+              ],
+              "pixels": 107520,
+              "mean_absolute_channel_error": 0.05384114583333333,
+              "root_mean_square_channel_error": 0.23354183923786156,
+              "maximum_channel_error": 3,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.10385044642857143,
+                "2": 9.300595238095239e-06,
+                "8": 0.0,
+                "16": 0.0,
+                "32": 0.0
+              },
+              "within_explicit_tolerance": true
+            },
+            "fps": {
+              "rectangle_xywh": [
+                512,
+                464,
+                128,
+                16
+              ],
+              "pixels": 2048,
+              "mean_absolute_channel_error": 0.018391927083333332,
+              "root_mean_square_channel_error": 0.1356168392322035,
+              "maximum_channel_error": 1,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 0.0,
+                "p99": 1.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.03369140625,
+                "2": 0.0,
+                "8": 0.0,
+                "16": 0.0,
+                "32": 0.0
+              },
+              "within_explicit_tolerance": true
+            }
+          },
+          "original_sha256": "a55b3dce42138b16e688d553f5fd2bca0ee90476c4293470fa822c9c2b5b8254"
+        },
+        {
+          "frame": 14402,
+          "image": "replay_stage05_frame014402.png",
+          "baseline_sha256": "348a1ab2e186f5d81845b5a2dff95c219d522636b436a609823e0a52e5c1e1b7",
+          "candidate_sha256": "348a1ab2e186f5d81845b5a2dff95c219d522636b436a609823e0a52e5c1e1b7",
+          "byte_identical": true,
+          "regions": {
+            "full_frame": {
+              "rectangle_xywh": [
+                0,
+                0,
+                640,
+                480
+              ],
+              "pixels": 307200,
+              "mean_absolute_channel_error": 0.5374131944444445,
+              "root_mean_square_channel_error": 5.625146603027832,
+              "maximum_channel_error": 247,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 2.0,
+                "p99": 3.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.441689453125,
+                "2": 0.012822265625,
+                "8": 0.004358723958333333,
+                "16": 0.003932291666666666,
+                "32": 0.0033138020833333335
+              },
+              "within_explicit_tolerance": false
+            },
+            "playfield": {
+              "rectangle_xywh": [
+                32,
+                16,
+                384,
+                448
+              ],
+              "pixels": 172032,
+              "mean_absolute_channel_error": 0.9260157025049603,
+              "root_mean_square_channel_error": 7.514650533507796,
+              "maximum_channel_error": 247,
+              "pixel_max_error_percentiles": {
+                "p50": 1.0,
+                "p95": 2.0,
+                "p99": 4.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.7238246372767857,
+                "2": 0.022891090029761904,
+                "8": 0.007783435639880952,
+                "16": 0.007021949404761905,
+                "32": 0.005917503720238095
+              },
+              "within_explicit_tolerance": false
+            },
+            "hud": {
+              "rectangle_xywh": [
+                416,
+                0,
+                224,
+                480
+              ],
+              "pixels": 107520,
+              "mean_absolute_channel_error": 0.05384114583333333,
+              "root_mean_square_channel_error": 0.23354183923786156,
+              "maximum_channel_error": 3,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.10385044642857143,
+                "2": 9.300595238095239e-06,
+                "8": 0.0,
+                "16": 0.0,
+                "32": 0.0
+              },
+              "within_explicit_tolerance": true
+            },
+            "fps": {
+              "rectangle_xywh": [
+                512,
+                464,
+                128,
+                16
+              ],
+              "pixels": 2048,
+              "mean_absolute_channel_error": 0.018391927083333332,
+              "root_mean_square_channel_error": 0.1356168392322035,
+              "maximum_channel_error": 1,
+              "pixel_max_error_percentiles": {
+                "p50": 0.0,
+                "p95": 0.0,
+                "p99": 1.0
+              },
+              "fraction_above_channel_error": {
+                "0": 0.03369140625,
+                "2": 0.0,
+                "8": 0.0,
+                "16": 0.0,
+                "32": 0.0
+              },
+              "within_explicit_tolerance": true
+            }
+          },
+          "original_sha256": "b4cfa6d752aceadbe0ce477ba02d9d92b2f5ae8d1e6cbfb26ab9a5a13b404415"
+        }
+      ],
+      "pools_byte_identical": true,
+      "audio_requests_byte_identical": true,
+      "audio_requests_rows": 24309,
+      "audio_requests_sha256": "e2f64eb76641695a2e967ba251c88dc1a5899876eb8b3277879d33e8cb14c04e",
+      "pools_sha256": "70e562a893d013f09e44639b2f3a5976adf3acd32bd50421760205a787c59e38"
+    }
+  ],
+  "verification": {
+    "target_pairs": 3,
+    "control_pairs": 9,
+    "control_pngs_byte_identical": 9,
+    "scalar_checkpoint_differences": 0,
+    "pool_prefixes_byte_identical": 4,
+    "audio_request_prefixes_byte_identical": 4,
+    "audio_request_rows_compared": 58538,
+    "strict_all_region_image_passes": 0,
+    "strict_image_pairs": 12,
+    "rust_release_library_tests": {
+      "passed": 134,
+      "failed": 0,
+      "ignored": 18
+    },
+    "cargo_build_release": "passed",
+    "cargo_fmt_all_check": "passed",
+    "git_diff_check": "passed"
+  },
+  "scope": [
+    "Target band fixed with exact unchanged pixels outside it on all3 target frames. Nine existing controls unchanged byte-for-byte. Other image differences remain;0/12 pairs satisfy every strict regional threshold.",
+    "Three fresh read-only original executions V1/V2/V4 reproduce historical BMPs; private original pixels and proprietary resources remain outside Git/Board.",
+    "Native source/build/target validation only. No new96-case campaign, WASM rebuild, staging or deployment is attributed to this candidate. The published0565c3a release remains immutable. Physical WindowsGPU and audible physical output were not tested."
+  ]
+}
