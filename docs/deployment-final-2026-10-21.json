@@ -1,0 +1,291 @@
+{
+  "published_at_utc": "2026-10-21T07:34:29.825471+00:00",
+  "previous": "/home/ubuntu/touhou6-web/releases/community-20261019-render-86f8db761353",
+  "target": "/home/ubuntu/touhou6-web/releases/community-20261020-fidelity-060d03875f92",
+  "idempotent_already_published": false,
+  "verified_sha256": {
+    "index.html": "0560bd846c232d2f9e6b0ee6d56091ee7e4e560bfa236b983a44a66a26d0e619",
+    "midi-worklet.js": "5e77d3d3f65a0b1efb2af6fa1eb5203fafca92cee8157c4e14cfa094598bd39b",
+    "assets.json": "fc984c13068f28eb52f8ac51e3e0d1517b6dcc5a691eb2ecbcb7e850120b9ca9",
+    "build.json": "f6a5bb82adaf9e719f3920f4cb5e97cec6fe9227109145ca59fa87166572703c",
+    "pkg/th06.js": "9a4592541d4d91928ca392bac7ca55900b1809d8bd7ea3c7d06bfa7635fbc437",
+    "pkg/th06_bg.wasm": "060d03875f9269b5d9e7f53c7cfbaded2c9644b7c1d03d2235ee060a9d2e25f9"
+  },
+  "rollback": "/home/ubuntu/touhou6-web/releases/community-20261019-render-86f8db761353",
+  "status": "published_and_verified",
+  "verified_at_utc": "2026-10-21T07:39:15.967123+00:00",
+  "build": {
+    "version": "community-20261020-fidelity-060d03875f92",
+    "code_commit": "0565c3ae373c57ec34ba1ec624d3a448d6980ac3",
+    "runtime_source_sha256": "d7b222ef68e1dc66144311231d574ed957713b6c33b193ee3cf1db86d0c5ee70",
+    "native_binary_sha256": "eda900feb00204f2b83242ee40d9b85945594d2bd8e2508e291b2596855f9444",
+    "wasm_sha256": "060d03875f9269b5d9e7f53c7cfbaded2c9644b7c1d03d2235ee060a9d2e25f9",
+    "js_sha256": "9a4592541d4d91928ca392bac7ca55900b1809d8bd7ea3c7d06bfa7635fbc437"
+  },
+  "https": {
+    "observed_at_utc": "2026-10-21T07:36:36.344546+00:00",
+    "files": [
+      {
+        "file": "index.html",
+        "status": 200,
+        "sha256": "0560bd846c232d2f9e6b0ee6d56091ee7e4e560bfa236b983a44a66a26d0e619",
+        "bytes": 16781,
+        "matches": true
+      },
+      {
+        "file": "midi-worklet.js",
+        "status": 200,
+        "sha256": "5e77d3d3f65a0b1efb2af6fa1eb5203fafca92cee8157c4e14cfa094598bd39b",
+        "bytes": 4873,
+        "matches": true
+      },
+      {
+        "file": "assets.json",
+        "status": 200,
+        "sha256": "fc984c13068f28eb52f8ac51e3e0d1517b6dcc5a691eb2ecbcb7e850120b9ca9",
+        "bytes": 977,
+        "matches": true
+      },
+      {
+        "file": "build.json",
+        "status": 200,
+        "sha256": "f6a5bb82adaf9e719f3920f4cb5e97cec6fe9227109145ca59fa87166572703c",
+        "bytes": 478,
+        "matches": true
+      },
+      {
+        "file": "pkg/th06.js",
+        "status": 200,
+        "sha256": "9a4592541d4d91928ca392bac7ca55900b1809d8bd7ea3c7d06bfa7635fbc437",
+        "bytes": 144405,
+        "matches": true
+      },
+      {
+        "file": "pkg/th06_bg.wasm",
+        "status": 200,
+        "sha256": "060d03875f9269b5d9e7f53c7cfbaded2c9644b7c1d03d2235ee060a9d2e25f9",
+        "bytes": 10185001,
+        "matches": true
+      },
+      {
+        "file": "assets/TL.DAT",
+        "status": 200,
+        "sha256": "c05f4fa755602f9369d7cebd5689cf3655ec81bb746f5b269ee0faf3d5f0a020",
+        "bytes": 1040706,
+        "matches": true
+      },
+      {
+        "file": "assets/CM.DAT",
+        "status": 200,
+        "sha256": "a899853d04e214ae4df8090bad7fd42698527027aa9dfccb4650fbb1d7828a0a",
+        "bytes": 935275,
+        "matches": true
+      },
+      {
+        "file": "assets/ST.DAT",
+        "status": 200,
+        "sha256": "0f834a35aef2d73b05cffecc830c017dacbcc6f11b9a0611a9da2f3970a112e7",
+        "bytes": 2964458,
+        "matches": true
+      },
+      {
+        "file": "assets/IN.DAT",
+        "status": 200,
+        "sha256": "65d7ee9c4303bcb39f5f08a0ceaf7004e47fccc8242fd73db54b31a911f41af0",
+        "bytes": 760223,
+        "matches": true
+      },
+      {
+        "file": "assets/ED.DAT",
+        "status": 200,
+        "sha256": "3fbb51f00785c98d6b4141a7a5a303f5955df3d181d2f220c2c6e81d717e9fee",
+        "bytes": 2017777,
+        "matches": true
+      },
+      {
+        "file": "assets/MD.DAT",
+        "status": 200,
+        "sha256": "8f8db1918842857a63eb7c76e7f971fb931203a6239c26828304fa3ce12da911",
+        "bytes": 306003,
+        "matches": true
+      },
+      {
+        "file": "assets/th06e_ST.DAT",
+        "status": 200,
+        "sha256": "4496855889b21bb71b762e9df063b88de48896e88b8ad43bd7f04be72464c1f8",
+        "bytes": 2966623,
+        "matches": true
+      },
+      {
+        "file": "assets/th06_01.ogg",
+        "status": 200,
+        "sha256": "1e99ee8b14481b27858973bf316ec997f467057fd4df98039696259af2e6f498",
+        "bytes": 1426998,
+        "matches": true
+      },
+      {
+        "file": "assets/th06_02.ogg",
+        "status": 200,
+        "sha256": "81a837c60311cc9bd85e541c2ca805b08fd7c62626241ad7fee3d1e46f51be00",
+        "bytes": 1894069,
+        "matches": true
+      },
+      {
+        "file": "assets/th06_03.ogg",
+        "status": 200,
+        "sha256": "cb95b8bab537fe7b9763870a3fc00460f55f3b74627c93cdb52929187b7d4b25",
+        "bytes": 1241998,
+        "matches": true
+      },
+      {
+        "file": "assets/th06_04.ogg",
+        "status": 200,
+        "sha256": "d67497419751bfc0b5a7b4ac8c0228bd4da6dd1e4e37e36a794fe0712f3bf2c8",
+        "bytes": 1837627,
+        "matches": true
+      },
+      {
+        "file": "assets/th06_05.ogg",
+        "status": 200,
+        "sha256": "21f2e5be040a18edc3c26de1c423fe9b1b621c97e8d0c5975d2d4d503b6a7b01",
+        "bytes": 1895712,
+        "matches": true
+      },
+      {
+        "file": "assets/th06_06.ogg",
+        "status": 200,
+        "sha256": "21a1232c230f4cd9deb4bd76c5bb47430680ebd7a4a867110a9dad582c38cf01",
+        "bytes": 2997905,
+        "matches": true
+      },
+      {
+        "file": "assets/th06_07.ogg",
+        "status": 200,
+        "sha256": "d3df04dadeda2330ad8a786ceb910189ec2c52f8f7fca06b30143e51306aec76",
+        "bytes": 2276786,
+        "matches": true
+      },
+      {
+        "file": "assets/th06_08.ogg",
+        "status": 200,
+        "sha256": "128d5ba204abea0417c8b2424b7c44aa6db657c86c800f0e50a957762cb3c162",
+        "bytes": 2558014,
+        "matches": true
+      },
+      {
+        "file": "assets/th06_09.ogg",
+        "status": 200,
+        "sha256": "f80b029583c5e7f226c568454741b5703eea14d6aed7a46ef602e06ff189e28d",
+        "bytes": 2960106,
+        "matches": true
+      },
+      {
+        "file": "assets/th06_10.ogg",
+        "status": 200,
+        "sha256": "ab3343a49e8708e4417ddeef42605baf8062b5289cf9ab5037ba2f88f0765dc6",
+        "bytes": 3815498,
+        "matches": true
+      },
+      {
+        "file": "assets/th06_11.ogg",
+        "status": 200,
+        "sha256": "26a3b4eaf9b0cc5d72cb0bb147d752979ee2a3c19abecdfba4f7e9caf577a655",
+        "bytes": 1872080,
+        "matches": true
+      },
+      {
+        "file": "assets/th06_12.ogg",
+        "status": 200,
+        "sha256": "668e91c21260884fae0ec618285b6d7592db5d37b53127a31640ad2ed07574ff",
+        "bytes": 1221653,
+        "matches": true
+      },
+      {
+        "file": "assets/th06_13.ogg",
+        "status": 200,
+        "sha256": "ee363590e98710fbb6da0f22fcf5353de310f53359c28e35487b91ab0aa044fa",
+        "bytes": 3586160,
+        "matches": true
+      },
+      {
+        "file": "assets/th06_14.ogg",
+        "status": 200,
+        "sha256": "6c9c7da99a8fe68209519531b06875bfb082e416d92345b9154e0e73447463ae",
+        "bytes": 3533892,
+        "matches": true
+      },
+      {
+        "file": "assets/th06_15.ogg",
+        "status": 200,
+        "sha256": "7c97d4bab7c0eda0e976e4f7002ff2de4cc0e408d80d9d7fa1874e7a05f6a62c",
+        "bytes": 2918100,
+        "matches": true
+      },
+      {
+        "file": "assets/th06_16.ogg",
+        "status": 200,
+        "sha256": "de4d43c225a896f8d00bed84ecc870cd076cce16300c772ab71cf11d927e0bfd",
+        "bytes": 1124706,
+        "matches": true
+      },
+      {
+        "file": "assets/th06_17.ogg",
+        "status": 200,
+        "sha256": "d69af1b6323bb538a11b4bf12f0d03b9fbd842cef20d4ab1a90f679377f32577",
+        "bytes": 2390664,
+        "matches": true
+      },
+      {
+        "file": "assets/gm.sf2",
+        "status": 200,
+        "sha256": "c5378b62028c920cb11e4803327983fee2f2cdff5dc89c708e39da417e51c854",
+        "bytes": 5969788,
+        "matches": true
+      }
+    ],
+    "other_games": [
+      {
+        "url": "https://games.blackoutburst.com/",
+        "status": 200
+      },
+      {
+        "url": "https://games.blackoutburst.com/th04/",
+        "status": 200
+      }
+    ],
+    "passed": true
+  },
+  "browser": {
+    "browser": "153.0",
+    "silent": true,
+    "realSavesUsed": false,
+    "sourceUrl": "https://games.blackoutburst.com/th06/",
+    "cases": [
+      {
+        "scenario": "options-return",
+        "errors": [],
+        "build": "community-20261020-fidelity-060d03875f92",
+        "language": "ja",
+        "canvas": {
+          "width": 640,
+          "height": 480
+        },
+        "savedKeys": [
+          "th06:th06-options.bin"
+        ],
+        "screenshots": [
+          "options-return-gameplay.png",
+          "options-return-options.png",
+          "options-return-title-after.png",
+          "options-return-title-before.png"
+        ]
+      }
+    ]
+  },
+  "browser_visual_confirmation": {
+    "stage1_gameplay": true,
+    "title_diagonal_after_options": true,
+    "screenshots_private": true
+  },
+  "physical_audio_output": false
+}

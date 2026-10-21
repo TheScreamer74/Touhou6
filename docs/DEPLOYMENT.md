@@ -1,4 +1,43 @@
-# Deployed build — 2026-10-19
+# Deployed build — 2026-10-21
+
+- Public URL: https://games.blackoutburst.com/th06/
+- Release: `community-20261020-fidelity-060d03875f92`, published 2026-10-21 at 07:34 UTC.
+- Runtime code: `0565c3ae373c57ec34ba1ec624d3a448d6980ac3` on `codex/title-options-state-20261020`.
+- Runtime fingerprint: `d7b222ef68e1dc66144311231d574ed957713b6c33b193ee3cf1db86d0c5ee70`.
+- Published WASM: `060d03875f9269b5d9e7f53c7cfbaded2c9644b7c1d03d2235ee060a9d2e25f9`.
+- Published JS: `9a4592541d4d91928ca392bac7ca55900b1809d8bd7ea3c7d06bfa7635fbc437`.
+- Native pin from the same source: `eda900feb00204f2b83242ee40d9b85945594d2bd8e2508e291b2596855f9444`.
+
+This release includes FPS rounding/entry, bullet recoloring/Perfect Freeze, ANM
+X/Y perspective and title Options/demo state fixes. The final native campaign
+completed all 96 legal cases on October 20: 1,822,403 scalar observations, 43,147
+pool checkpoints and 881,883 ordered audio requests match. All 6,209 image pairs
+were measured serially; **4,094 pass every strict image threshold**, so complete
+visual equivalence remains unestablished. The largest residual playfield MAE is
+3.298 for Marisa B Normal stage 2; Board #14 tracks that measured difference.
+
+Six natural transition/request probes pass. Save/replay comparison retains its
+literal creation-date difference (October 14 versus October 21), with all other
+replay fields and ordered highscores matching. Three bounded menu probes pass;
+two retain the expected behavior differences from the extended Options menu.
+Two additional handoffs pass every recorded supervisor state and the live
+MainMenu interval; their source trace does not expose later unlock/gameplay
+state. The separate boundary probe passes 15,970 scalar and 2,992 slot
+observations within its declared fields.
+
+The previous release was retained, the six staged runtime hashes were checked
+before the atomic symlink switch, and all **31 runtime/resource files fetched
+over HTTPS matched** after publication. Firefox 153 in a fresh silent context
+showed the corrected title after Options and reached Stage 1 without page
+errors. The portal and TH04 still returned HTTP 200. No audible physical test
+was run. See the [campaign receipt](campaign-final-2026-10-21.json) and
+[publication receipt](deployment-final-2026-10-21.json) for exact limits.
+
+Rollback target: `/home/ubuntu/touhou6-web/releases/community-20261019-render-86f8db761353`.
+Use the atomic symlink procedure below with this target. Earlier receipts
+remain historical; their results are not attributed to this binary.
+
+# Previous deployment — 2026-10-19
 
 - Public URL: https://games.blackoutburst.com/th06/
 - Build: `community-20261019-render-86f8db761353`
@@ -80,7 +119,7 @@ public symlink. No release data needs to be removed:
 import os
 from pathlib import Path
 root = Path('/home/ubuntu/Touhou6-Mac/web')
-previous = Path('/home/ubuntu/touhou6-web/releases/community-20261016-language-c6e5010cce48')
+previous = Path('/home/ubuntu/touhou6-web/releases/community-20261019-render-86f8db761353')
 temporary = root / '.th06-rollback'
 assert previous.is_dir()
 assert not temporary.exists() and not temporary.is_symlink()
